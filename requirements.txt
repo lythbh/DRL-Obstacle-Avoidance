@@ -1,0 +1,3 @@
+deepbots
+pytorch
+numpy
