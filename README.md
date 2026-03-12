@@ -40,6 +40,7 @@ Controller for ALTINO (the robot). Uses PPO (through PyTorch).
 5. Click on `altino` → set **DEF** to `ALTINO`.
 6. Go down to **controller**.
 7. Select the controller file (downloaded DRL controller, etc.).
+8. Right clock and change altino to base node.
 
 ---
 
