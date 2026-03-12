@@ -1,27 +1,19 @@
 from controller import Supervisor
 
 sup = Supervisor()
-timestep = int(robot.getBasicTimeStep())
+
+TIMESTEP = 64
 
 # Altino node
 altino_node = sup.getFromDef('ALTINO')
+# Position of Altino
 translation_field = altino_node.getField('translation')
-rotation_field = altino_node.getField('rotation')
-customData_field = altino_node.getField('customdata')
 
-start_position = [-2.5, 2.5, 0]
-start_rotation = 0.0
-
-while timestep != -1:
-    customdata = customData_field.getSFString()
-
-    # Reset position and pose 
-    if customdata == 'reset':
-        translation_field.setSFVec3f(start_position)
-        rotation_field.setSFRotation(start_rotation)
-        sup.simulationResetPhysics()
-
-    elif customdata == 'end simulation':
-        sup.worldReload()
-
-
+# Moving Altino loop
+new_value = [0, 0, 0]
+counter = 0
+while sup.step(TIMESTEP) != -1:
+    if counter % 100 == 0:
+        translation_field.setSFVec3f(new_value)
+    
+    counter += 1 
