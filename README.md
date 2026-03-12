@@ -27,7 +27,7 @@ Controller for ALTINO (the robot). Uses PPO (through PyTorch).
 # Arena setup
 1. Select `rectangle-arena`.
 2. Go down to **floorSize** and change to `5 5`.
-3. Mark it and press `+`.
+3. Mark  `rectangle-arena` and press `+`.
 
 ---
 
