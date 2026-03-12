@@ -5,10 +5,12 @@
    ```bash
    pip install -r requirements.txt
 
+---
    
 # Webots setup
 In Webots, click on the **Webots logo** → **Preferences** (shortcut: `Command + ,` on macOS) → **Python command** → point it to the Python executable in your environment (e.g. your virtualenv).
 
+---
 
 # Supervisor
 Only job is to restart the simulation, needed to set ALTINO in position and run the simulation when training is complete, to make it autonomous.
