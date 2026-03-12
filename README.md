@@ -1,6 +1,6 @@
 # Environment setup
-1. Create an environment with Python `3.10.19`.
-2. Activate the environment.
+1. Create an environment with Python `3.10.19`. `python -m venv .venv`
+2. Activate the environment `. .venv/bin/activate`
 3. Run:
    ```bash
    pip install -r requirements.txt
