@@ -48,12 +48,15 @@ Controller for ALTINO (the robot). Uses PPO (through PyTorch).
 1. Expand **children** of `ALTINO`.
 2. Click `+`:
    - **Base nodes** → add `Lidar`.
-   - **Base nodes** → add `GPS`.
-3. Expand `GPS`:
+3. Expand `Lidar`:
    - `translation` → set `x` to `0.03` (position on the car).
-4. Add camera:
+4. Click `+`:
+   - **Base nodes** → add `GPS`.
+5. Expand `GPS`:
+   - `translation` → set `x` to `0.03` (position on the car).
+6. Click `+`:
    - **Base nodes** → add `Camera`.
-   - Expand `Camera`.
+7. Expand `Camera`.
    - `translation` → set `x` to `0.012` and `z` to `0.06`.
 
 ---
