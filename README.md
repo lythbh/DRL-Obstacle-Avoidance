@@ -74,3 +74,14 @@ Controller for ALTINO (the robot). Uses PPO (through PyTorch).
 # Run
 - Click **Run** to start the simulation.
 
+# Add controller
+In order to add a controller you need to locate the controller directory and create a sub-directory within it with the same name as your file.
+Then you can add it through controller -> select -> file
+
+
+
+
+
+
+
+
