@@ -27,11 +27,11 @@ Controller for ALTINO (the robot). Uses PPO (through PyTorch).
 # Arena setup
 1. Select `rectangle-arena`.
 2. Go down to **floorSize** and change to `5 5`.
-3. Mark  `rectangle-arena` and press `+`.
 
 ---
 
 # ALTINO setup
+0. Mark  `rectangle-arena` and press `+`.
 1. Go to **PROTO nodes**:  
    `webots projects -> robots -> saeon -> altino`
 2. Click **Add**.
