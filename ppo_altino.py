@@ -4,8 +4,6 @@ import matplotlib.pyplot as plt
 import torch
 from torch import multiprocessing
 
-from collections import defaultdict
-
 from tensordict.nn import TensorDictModule
 from tensordict.nn.distributions import NormalParamExtractor
 from torch import nn
@@ -21,8 +19,55 @@ from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value import GAE
 from tqdm import tqdm
 
-from vehicle import Driver
-from controller import Camera, Lidar, GPS
+from controller import Robot, Lidar, GPS, Camera
+
+is_fork = multiprocessing.get_start_method(allow_none=True) == 'fork'
+
+class AltinoDriver(Robot):
+    def __init__(self):
+        super().__init__()
+        self.timestep = int(self.getBasicTimeStep())
+
+        # Steering motors
+        self.left_steer = self.getDevice('left_steer')
+        self.right_steer = self.getDevice('right_steer')
+        self.left_steer.setPosition(0.0)
+        self.right_steer.setPosition(0.0)
+        self.left_steer.setVelocity(1.0)
+        self.right_steer.setVelocity(1.0)
+
+        # Wheel motors
+        self.left_front_wheel = self.getDevice('left_front_wheel')
+        self.right_front_wheel = self.getDevice('right_front_wheel')
+        self.left_rear_wheel = self.getDevice('left_rear_wheel')
+        self.right_rear_wheel = self.getDevice('right_rear_wheel')
+        for motor in [
+            self.left_front_wheel,
+            self.right_front_wheel,
+            self.left_rear_wheel,
+            self.right_rear_wheel,
+        ]:
+            motor.setPosition(float('inf'))
+            motor.setVelocity(0.0)
+
+    def setSteeringAngle(self, angle: float):
+        self.left_steer.setPosition(angle)
+        self.right_steer.setPosition(angle)
+
+    def setCruisingSpeed(self, speed: float):
+        for motor in [
+            self.left_front_wheel,
+            self.right_front_wheel,
+            self.left_rear_wheel,
+            self.right_rear_wheel,
+        ]:
+            motor.setVelocity(speed)
+
+    def setCustomData(self, value: str):
+        # Altino Robot controllers do not always have Supervisor customData access.
+        # If you need episode reset, use a separate Supervisor controller or
+        # a communication channel between robot and supervisor.
+        return
 
 EPISODES = 10
 UPDATE_EVERY = 20 # episodes
@@ -35,12 +80,12 @@ class WebotsEnv:
     def __init__(self):
 
         # Setting up Altino robot
-        self.altino = Driver()
-        self.timestep = int(self.altino.getBasicTimeStep())
+        self.altino = AltinoDriver()
+        self.timestep = self.altino.timestep
         self.headlights = self.altino.getDevice("headlights")
         self.backlights = self.altino.getDevice("backlights")
 
-         # Constants for Altino
+        # Constants for Altino
         self.maxSpeed = 1.8
         self.maxLeft = -3.14
         self.maxRight = 3.14
@@ -76,6 +121,10 @@ class WebotsEnv:
         self.current_pos = None
         self.collision = False
         self.collision_threshold = 0.15 # 0.11 is approx distance along x axis from Lidar placement to front of Altino
+    
+    def check_collision(self):
+        return self.collision
+
 
     def reset(self):
         # reset robot position using supervisor
@@ -83,6 +132,8 @@ class WebotsEnv:
         self.current_step = 0
         self.prev_distance = None
 
+        # step once so sensors have valid data before first observation
+        self.altino.step(self.timestep)
         observation = self.get_observation()
         return observation, {}
 
@@ -238,7 +289,8 @@ class PPOAgent:
 
 def train():
     env = WebotsEnv()
-    obs_size = env.lidar.getHorizontalResolution() + 2  # Lidar points + GPS x,y
+    obs, _ = env.reset()
+    obs_size = len(obs)
     n_actions = len(env.actions)
     agent = PPOAgent(obs_size, n_actions)
 
@@ -292,11 +344,3 @@ train()
 # image_array = np.frombuffer(image, np.uint8).reshape((height, width, 4))
 # rgb = image_array[:, :, :3]
 # camera.saveImage("image.png", 1000)
-
-
-"""
-NEXT TIME
-
-- Either change Altino to Robot(), controlling its independent motors
-- Or use a vehicle from the vehicle list
-"""
