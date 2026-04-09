@@ -18,7 +18,7 @@ class Config:
     """Training and environment hyperparameters."""
     
     # Training
-    episodes: int = 10
+    episodes: int = 50
     update_every: int = 5  # PPO update frequency (episodes)
     epochs: int = 4  # Optimization epochs per update
     batch_size: int = 64
