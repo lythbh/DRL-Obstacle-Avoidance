@@ -19,7 +19,7 @@ from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value import GAE
 from tqdm import tqdm
 
-from controller import Robot, Lidar, GPS, Camera
+from controller import Robot, Lidar, GPS, Camera  # pyright: ignore[reportMissingImports]
 
 is_fork = multiprocessing.get_start_method(allow_none=True) == 'fork'
 
@@ -118,19 +118,26 @@ class WebotsEnv:
         self.best_time = np.inf
         self.current_step = 0
         self.prev_distance = None
+        self.episode_reward = 0.0
         self.current_pos = None
         self.collision = False
         self.collision_threshold = 0.15 # 0.11 is approx distance along x axis from Lidar placement to front of Altino
+        self.low_score_threshold = -100.0
     
     def check_collision(self):
         return self.collision
+
+    def _reset_episode_state(self):
+        self.current_step = 0
+        self.prev_distance = None
+        self.episode_reward = 0.0
+        self.collision = False
 
 
     def reset(self):
         # reset robot position using supervisor
         self.altino.setCustomData('reset')
-        self.current_step = 0
-        self.prev_distance = None
+        self._reset_episode_state()
 
         # step once so sensors have valid data before first observation
         self.altino.step(self.timestep)
@@ -141,14 +148,25 @@ class WebotsEnv:
 
         self.apply_action(action)
         self.altino.step(self.timestep)
+        self.current_step += 1
 
         observation = self.get_observation()
         reward = self.compute_reward()
+        self.episode_reward += reward
 
         terminated = self.check_collision()
         truncated = self.current_step >= self.max_steps
+        info = {}
 
-        return observation, reward, terminated, truncated, {}
+        if self.episode_reward <= self.low_score_threshold:
+            terminated = True
+            info["reset_reason"] = "low_score"
+            self.altino.setCustomData('reset')
+            self._reset_episode_state()
+        elif terminated:
+            info["reset_reason"] = "collision"
+
+        return observation, reward, terminated, truncated, info
     
     def get_observation(self):
         # Lidar data
@@ -187,7 +205,6 @@ class WebotsEnv:
             progress_reward = self.prev_distance - distance_to_end
 
         self.prev_distance = distance_to_end
-        self.current_step += 1
         return progress_reward
     
 
@@ -195,7 +212,7 @@ class PPOAgent:
     def __init__(self, obs_size, n_actions):
         # Device setup
         self.device = (
-            torch.device(0)
+            torch.device("cuda:0")
             if torch.cuda.is_available() and not is_fork
             else torch.device("cpu")
         )
@@ -213,7 +230,7 @@ class PPOAgent:
             nn.ReLU(),
             nn.Linear(128, n_actions),
             nn.Softmax(dim=-1)
-        )
+        ).to(self.device)
 
         self.critic = nn.Sequential(
             nn.Linear(obs_size, 128),
@@ -221,7 +238,7 @@ class PPOAgent:
             nn.Linear(128, 128),
             nn.ReLU(),
             nn.Linear(128, 1)
-        )
+        ).to(self.device)
 
         self.optimizer = torch.optim.Adam(list(self.actor.parameters()) + list(self.critic.parameters()), lr=self.lr)
 
@@ -235,20 +252,21 @@ class PPOAgent:
         return returns
     
     def select_action(self, obs):
-        obs_tensor = torch.FloatTensor(obs).unsqueeze(0)
-        probs = self.actor(obs_tensor)
-        dist = torch.distributions.Categorical(probs)
-        action = dist.sample()
-        log_prob = dist.log_prob(action)
+        obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+        with torch.no_grad():
+            probs = self.actor(obs_tensor)
+            dist = torch.distributions.Categorical(probs)
+            action = dist.sample()
+            log_prob = dist.log_prob(action)
         return action.item(), log_prob
     
     def update(self, observations, actions, log_probs_old, returns, advantages, batch_size=64):
         # Converting to tensors
-        observations = torch.FloatTensor(np.array(observations))
-        actions = torch.LongTensor(actions)
-        log_probs_old = torch.stack(log_probs_old).detach()
-        returns = torch.FloatTensor(returns)
-        advantages = torch.FloatTensor(advantages)
+        observations = torch.as_tensor(np.array(observations), dtype=torch.float32, device=self.device)
+        actions = torch.as_tensor(actions, dtype=torch.long, device=self.device)
+        log_probs_old = torch.stack(log_probs_old).detach().to(self.device)
+        returns = torch.as_tensor(returns, dtype=torch.float32, device=self.device)
+        advantages = torch.as_tensor(advantages, dtype=torch.float32, device=self.device)
 
         dataset_size = len(observations)
 
@@ -321,8 +339,8 @@ def train():
             returns = agent.calculate_returns(all_rewards)
 
             # Advantage = returns - critic baseline
-            obs_tensor = torch.FloatTensor(np.array(all_observations))
-            values = agent.critic(obs_tensor).squeeze().detach().numpy()
+            obs_tensor = torch.as_tensor(np.array(all_observations), dtype=torch.float32, device=agent.device)
+            values = agent.critic(obs_tensor).squeeze().detach().cpu().numpy()
             advantages = returns - values
 
             # Normalize advantages
@@ -335,7 +353,8 @@ def train():
 
         print(f"Episode {episode + 1}, Reward: {sum(episode_rewards):.2f}")
 
-train()
+if __name__ == "__main__":
+    train()
 
 # SENSOR PROCESSING
 # image = camera.getImage()

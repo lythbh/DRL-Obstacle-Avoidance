@@ -10,6 +10,7 @@ venv/
 .venv/
 env/
 .env/
+5429/
 
 # Python packaging
 build/
@@ -55,5 +56,6 @@ runs/
 .LSOverride
 
 # Windows
-Thum
+Thumbs.db
+Desktop.ini
 
