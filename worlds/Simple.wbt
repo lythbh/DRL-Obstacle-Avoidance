@@ -4,12 +4,15 @@ EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/project
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/drinks/protos/Can.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/chairs/protos/WoodenChair.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/bathroom/protos/WashingMachine.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/plants/protos/PottedTree.proto"
 
 WorldInfo {
 }
 Viewpoint {
-  orientation -0.23857695055723838 0.9357490979547202 0.259720357961667 1.118401480692408
-  position -0.7582391186467808 -0.24438348192506046 2.258181775471477
+  orientation -0.009233672913148553 0.9864518426268668 -0.16379102985997768 1.4357015767368948
+  position -1.4027551150291844 1.2567868151860344 15.21715975478762
 }
 TexturedBackground {
 }
@@ -19,8 +22,44 @@ RectangleArena {
   rotation 0 0 1 3.14159
   floorSize 5 5
 }
+PottedTree {
+  translation 1.11 -0.92 0
+}
+PottedTree {
+  translation -1.04 -1.06 0
+  name "potted tree(3)"
+}
+PottedTree {
+  translation 1.65 1.3 0
+  name "potted tree(1)"
+}
+PottedTree {
+  translation 0.33 1.66 0
+  name "potted tree(2)"
+}
+WashingMachine {
+  translation -0.585 1.07042 0.53
+  rotation 0 0 1 -2.094395307179586
+}
+WashingMachine {
+  translation 0.101047 -1.0404 0.53
+  rotation 0 0 1 -2.094395307179586
+  name "whashing machine(1)"
+}
+WoodenChair {
+  translation 0.65 0.93 0
+}
+WoodenChair {
+  translation 1.22 0.93 0
+  rotation 0 0 1 3.14159
+  name "wooden chair(2)"
+}
+WoodenChair {
+  translation 1.93 -1.26 0
+  name "wooden chair(1)"
+}
 Can {
-  translation 1.48 0.24 0.06
+  translation 1.74 0.24 0.06
   name "can(2)"
 }
 Can {

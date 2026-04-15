@@ -4,6 +4,7 @@
 3. Run:
    ```bash
    pip install -r requirements.txt
+   ```
 
 ---
    
@@ -21,6 +22,20 @@ Only job is to restart the simulation, needed to set ALTINO in position and run 
 Controller for ALTINO (the robot). Uses PPO (through PyTorch).
 
 - Controller is selected in Webots.
+
+### PPO module map
+
+The PPO controller has been split into focused modules under `controllers/PPO`:
+
+- `PPO.py`: training entrypoint, supervisor initialization, high-level loop orchestration.
+- `config.py`: central `Config` dataclass for training, reward, environment, and control parameters.
+- `environment/webots_env.py`: environment reset/step flow, termination logic, and observation/reward wiring.
+- `environment/robot_driver.py`: ALTINO hardware abstraction (motors, sensors, supervisor access).
+- `environment/observation_builder.py`: pure geometry/observation helpers (`goal_geometry`, `build_observation`).
+- `learning/agent.py`: PPO actor-critic network, device selection, action sampling, and update step.
+- `learning/training_utils.py`: rollout buffers, diagnostics windows, end-reason normalization.
+- `rewards/base.py`: core reward computation logic.
+- `rewards/penalties.py`: auxiliary safety/clearance penalty helpers.
 
 ---
 
