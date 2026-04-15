@@ -19,54 +19,68 @@ class Config:
     
     # Training
     episodes: int = 500
-    update_every: int = 5  # PPO update frequency (episodes)
-    epochs: int = 4  # Optimization epochs per update
-    batch_size: int = 64
+    update_every: int = 20  # PPO update frequency (episodes)
+    epochs: int = 2  # Optimization epochs per update
+    batch_size: int = 512
     
     # PPO Agent
     gamma: float = 0.99  # Discount factor
-    epsilon: float = 0.1  # PPO clip parameter
-    learning_rate: float = 3e-4
-    entropy_coef: float = 0.02  # Entropy regularization
-    hidden_size: int = 128  # Network hidden layer size
+    epsilon: float = 0.2  # PPO clip parameter
+    learning_rate: float = 2e-4
+    entropy_coef: float = 0.006  # Entropy regularization (initial)
+    entropy_final_coef: float = 0.001  # Entropy regularization (final)
+    max_grad_norm: float = 0.5  # Gradient clipping for stabler PPO updates
+    hidden_size: int = 64  # Network hidden layer size
     
     # Environment
-    max_steps: int = 2000  # Max steps per episode
+    max_steps: int = 800  # Max steps per episode
     collision_threshold: float = 0.1  # LiDAR distance threshold for collision
-    low_score_threshold: float = -400.0  # Episode reset threshold
-    collision_penalty: float = -20.0  # Penalty when collision happens
-    progress_reward_scale: float = 3.0  # Scale for distance-progress reward
-    distance_reward_scale: float = 2.0  # Dense reward for being closer to the goal than the start state
-    heading_reward_scale: float = 0.08  # Bonus when facing toward the goal
-    safety_reward_scale: float = 0.2  # Encourages keeping distance from obstacles
-    motion_reward_scale: float = 0.05  # Bonus for moving forward to avoid stop-policy collapse
-    new_best_distance_bonus: float = 1.0  # Bonus when reaching a new closest distance to goal
+    low_score_threshold: float = -300.0  # Episode reset threshold
+    collision_penalty: float = -80.0  # Penalty when collision happens
+    goal_reward: float = 200.0  # Reward when reaching goal
+    progress_reward_scale: float = 5.0  # Scale for distance-progress reward
+    progress_away_multiplier: float = 1.7  # Extra penalty factor when moving away from the goal
+    distance_penalty_scale: float = 0.08  # Per-step penalty proportional to normalized goal distance
+    orbit_distance_threshold: float = 1.2  # Detect circling when within this distance to goal
+    orbit_progress_tolerance: float = 0.01  # Treat tiny distance changes as no progress
+    orbit_penalty: float = 0.25  # Per-step penalty for near-goal circling
+    clearance_target_norm: float = 0.22  # Target minimum normalized LiDAR clearance
+    clearance_penalty_scale: float = 0.9  # Penalty scale when driving too close to obstacles
+    near_collision_norm: float = 0.10  # Early termination threshold before hard collision
+    near_collision_penalty: float = -25.0  # Penalty for near-collision early termination
+    heading_reward_scale: float = 0.15  # Bonus for facing toward the goal
     step_penalty: float = -0.01  # Small per-step penalty to encourage efficiency
-    endpoint: Tuple[float, float] = (-2, 0)  # Goal location
+    heading_frame_offset: float = float(np.pi)  # ALTINO forward axis is flipped vs world yaw
+    endpoint: Tuple[float, float] = (2, 0)  # Goal location (adjust to match world)
+    goal_radius: float = 0.3  # Distance threshold for successful goal reach
+    stagnation_patience_steps: int = 90  # End episode if best distance is not improved for too long
+    stagnation_progress_delta: float = 0.01  # Minimum distance improvement to reset stagnation counter
+    stagnation_penalty: float = -55.0  # Penalty applied when stagnation ends an episode
+    visualize_goal: bool = True  # Spawn/move a visible marker at the goal
+    goal_marker_height: float = 0.05  # Marker height above floor
     reference_distance: Optional[float] = None  # Start-to-goal distance, filled in at init
     
     # Robot Control
     actions: Optional[List[Tuple[float, float]]] = None  # (steering, speed) pairs
     start_position: Optional[List[float]] = None  # [x, y, z]
     start_rotation: Optional[List[float]] = None  # [x, y, z, w]
-    start_position_noise: float = 0.03  # Random position jitter at reset
-    start_yaw_noise: float = 0.4  # Random yaw jitter at reset
+    start_position_noise: float = 0.0  # Random position jitter at reset
+    start_yaw_noise: float = 0.1  # Random yaw jitter at reset
     
     # Motor/Sensor Config
-    max_speed: float = 10.0
-    reset_settle_steps: int = 10  # Steps to wait for physics to settle after reset
+    max_speed: float = 8.0
+    lidar_bins: int = 64  # Number of pooled lidar bins used in the observation vector
+    reset_settle_steps: int = 5  # Steps to wait for physics to settle after reset
     
     def __post_init__(self) -> None:
         """Initialize defaults for mutable fields."""
         if self.actions is None:
             self.actions = [
-                (-0.9, 0.8 * self.max_speed),   # hard left
-                (-0.5, 0.5 * self.max_speed),   # medium left
-                (0.0, self.max_speed),    # straight
-                (0.5, 0.5 * self.max_speed),    # medium right
-                (0.9, 0.8 * self.max_speed),    # hard right
-                (0.0, 0.5 * self.max_speed),    # slow straight
-                (0.0, 0.0)     # stop
+                (-0.85, 0.35 * self.max_speed),  # hard left, slow
+                (-0.45, 0.45 * self.max_speed),  # left
+                (0.0, 0.65 * self.max_speed),  # straight
+                (0.45, 0.45 * self.max_speed),  # right
+                (0.85, 0.35 * self.max_speed),  # hard right, slow
             ]
         if self.start_position is None:
             self.start_position = [0.05, -0.1, 0.02]
@@ -144,11 +158,12 @@ class MotorController:
 class SensorReader:
     """Manages LiDAR and GPS sensors."""
     
-    def __init__(self, supervisor: Supervisor, timestep: int, collision_threshold: float):
+    def __init__(self, supervisor: Supervisor, timestep: int, collision_threshold: float, lidar_bins: int):
         """Initialize sensors."""
         self.supervisor = supervisor
         self.timestep = timestep
         self.collision_threshold = collision_threshold
+        self.lidar_bins = max(8, int(lidar_bins))
         
         # LiDAR
         self.lidar = supervisor.getDevice("lidar")
@@ -169,7 +184,13 @@ class SensorReader:
         """
         # Read and normalize LiDAR
         range_array = np.array(self.lidar.getRangeImage(), dtype=np.float32)
-        lidar_data = np.clip(range_array, 0, self.lidar_max_range)
+        if range_array.size > self.lidar_bins:
+            chunks = np.array_split(range_array, self.lidar_bins)
+            pooled_ranges = np.array([float(np.min(chunk)) for chunk in chunks], dtype=np.float32)
+        else:
+            pooled_ranges = range_array
+
+        lidar_data = np.clip(pooled_ranges, 0, self.lidar_max_range)
         lidar_data = lidar_data / self.lidar_max_range
         
         # Read GPS
@@ -198,7 +219,8 @@ class AltinoDriver:
         self.sensors = SensorReader(
             self.supervisor,
             self.timestep,
-            config.collision_threshold
+            config.collision_threshold,
+            config.lidar_bins,
         )  # type: ignore[arg-type]
         
         # Position reset
@@ -301,12 +323,15 @@ class RewardComputer:
         endpoint: np.ndarray,
         reference_distance: float,
         collision_reward: float = -40.0,
-        progress_scale: float = 3.0,
-        distance_reward_scale: float = 2.0,
-        heading_reward_scale: float = 0.08,
-        safety_reward_scale: float = 0.2,
-        motion_reward_scale: float = 0.05,
-        new_best_distance_bonus: float = 1.0,
+        goal_reward: float = 200.0,
+        progress_scale: float = 5.0,
+        progress_away_multiplier: float = 1.7,
+        distance_penalty_scale: float = 0.08,
+        orbit_distance_threshold: float = 1.2,
+        orbit_progress_tolerance: float = 0.01,
+        orbit_penalty: float = 0.25,
+        heading_reward_scale: float = 0.15,
+        goal_radius: float = 0.3,
         step_penalty: float = -0.01,
     ):
         """Initialize reward computer.
@@ -318,12 +343,15 @@ class RewardComputer:
         self.endpoint = np.array(endpoint, dtype=np.float32)
         self.reference_distance = float(reference_distance)
         self.collision_reward = collision_reward
+        self.goal_reward = goal_reward
         self.progress_scale = progress_scale
-        self.distance_reward_scale = distance_reward_scale
+        self.progress_away_multiplier = progress_away_multiplier
+        self.distance_penalty_scale = distance_penalty_scale
+        self.orbit_distance_threshold = orbit_distance_threshold
+        self.orbit_progress_tolerance = orbit_progress_tolerance
+        self.orbit_penalty = orbit_penalty
         self.heading_reward_scale = heading_reward_scale
-        self.safety_reward_scale = safety_reward_scale
-        self.motion_reward_scale = motion_reward_scale
-        self.new_best_distance_bonus = new_best_distance_bonus
+        self.goal_radius = goal_radius
         self.step_penalty = step_penalty
         self.best_time = np.inf
     
@@ -334,9 +362,6 @@ class RewardComputer:
         current_step: int,
         prev_distance: Optional[float],
         goal_error: float,
-        min_lidar_norm: float,
-        speed_norm: float,
-        reached_new_best_distance: bool,
     ) -> Tuple[float, Optional[float]]:
         """Compute reward for current state.
         
@@ -356,34 +381,44 @@ class RewardComputer:
         distance_to_end = float(np.linalg.norm(current_pos - self.endpoint))
         
         # Goal reached
-        if distance_to_end < 0.5:
+        if distance_to_end < self.goal_radius:
             if current_step < self.best_time:
                 self.best_time = current_step
-                return 200.0, distance_to_end
-            return 100.0, distance_to_end
+                return self.goal_reward, distance_to_end
+            return 0.5 * self.goal_reward, distance_to_end
         
-        # Progress reward
-        progress = 0.0
+        # Encourage moving closer to goal each step.
+        progress_reward = 0.0
+        delta = 0.0
         if prev_distance is not None:
             delta = float(prev_distance - distance_to_end)
-            progress = delta * self.progress_scale if delta >= 0.0 else delta * (0.25 * self.progress_scale)
+            if delta >= 0.0:
+                progress_reward = delta * self.progress_scale
+            else:
+                progress_reward = delta * self.progress_scale * self.progress_away_multiplier
 
-        # Dense goal-proximity reward, normalized against the start distance.
-        proximity = max(0.0, (self.reference_distance - distance_to_end) / max(self.reference_distance, 1e-6))
-        proximity_reward = proximity * self.distance_reward_scale
-        heading_alignment = max(0.0, float(np.cos(goal_error)))
-        heading_reward = heading_alignment * self.heading_reward_scale
-        safety_reward = float(np.clip(min_lidar_norm, 0.0, 1.0)) * self.safety_reward_scale
-        motion_reward = float(np.clip(speed_norm, 0.0, 1.0)) * self.motion_reward_scale
-        new_best_bonus = self.new_best_distance_bonus if reached_new_best_distance else 0.0
+        heading_reward = float(np.cos(goal_error)) * self.heading_reward_scale
+        # Do not reward heading-only behavior when the robot is not actually closing in.
+        if prev_distance is not None and delta < self.orbit_progress_tolerance:
+            heading_reward *= 0.2
+
+        distance_penalty = -self.distance_penalty_scale * (
+            distance_to_end / max(self.reference_distance, 1e-6)
+        )
+
+        orbit_penalty = 0.0
+        if (
+            prev_distance is not None
+            and distance_to_end < self.orbit_distance_threshold
+            and abs(delta) < self.orbit_progress_tolerance
+        ):
+            orbit_penalty = -self.orbit_penalty
 
         return (
-            progress
-            + proximity_reward
+            progress_reward
             + heading_reward
-            + safety_reward
-            + motion_reward
-            + new_best_bonus
+            + distance_penalty
+            + orbit_penalty
             + self.step_penalty
         ), distance_to_end
 
@@ -410,14 +445,21 @@ class WebotsEnv:
             np.array(config.endpoint, dtype=np.float32),
             reference_distance=float(config.reference_distance if config.reference_distance is not None else 1.0),
             collision_reward=config.collision_penalty,
+            goal_reward=config.goal_reward,
             progress_scale=config.progress_reward_scale,
-            distance_reward_scale=config.distance_reward_scale,
+            progress_away_multiplier=config.progress_away_multiplier,
+            distance_penalty_scale=config.distance_penalty_scale,
+            orbit_distance_threshold=config.orbit_distance_threshold,
+            orbit_progress_tolerance=config.orbit_progress_tolerance,
+            orbit_penalty=config.orbit_penalty,
             heading_reward_scale=config.heading_reward_scale,
-            safety_reward_scale=config.safety_reward_scale,
-            motion_reward_scale=config.motion_reward_scale,
-            new_best_distance_bonus=config.new_best_distance_bonus,
+            goal_radius=config.goal_radius,
             step_penalty=config.step_penalty,
         )
+
+        # Optional visual marker for easier goal debugging in Webots.
+        self.goal_marker_node = None
+        self._ensure_goal_marker()
         
         # Episode state
         self.current_step = 0
@@ -426,8 +468,66 @@ class WebotsEnv:
         self.current_heading = 0.0
         self.current_distance = float("inf")
         self.min_episode_distance = float("inf")
+        self.best_distance = float("inf")
+        self.steps_without_progress = 0
         self.collision = False
         self.prev_distance: Optional[float] = None
+
+    def _ensure_goal_marker(self) -> None:
+        """Create (if needed) and place a visible marker at the configured goal."""
+        if not self.config.visualize_goal:
+            return
+
+        try:
+            supervisor = self.robot.supervisor
+            marker = supervisor.getFromDef("PPO_GOAL_MARKER")
+
+            if marker is None:
+                root = supervisor.getRoot()
+                if root is None:
+                    return
+                children = root.getField("children")
+                if children is None:
+                    return
+
+                marker_node = (
+                    "DEF PPO_GOAL_MARKER Transform { "
+                    "translation 0 0 0 "
+                    "children [ "
+                    "Shape { "
+                    "appearance PBRAppearance { baseColor 0 1 0 roughness 0.2 metalness 0 } "
+                    "geometry Sphere { radius 0.12 } "
+                    "} "
+                    "] "
+                    "}"
+                )
+                children.importMFNodeFromString(-1, marker_node)
+                marker = supervisor.getFromDef("PPO_GOAL_MARKER")
+
+            self.goal_marker_node = marker
+            self._place_goal_marker()
+            print(
+                f"[PPO] Goal marker at ({self.reward_computer.endpoint[0]:.2f}, "
+                f"{self.reward_computer.endpoint[1]:.2f})"
+            )
+        except Exception as e:
+            print(f"[PPO] WARNING: Could not create goal marker: {e}")
+
+    def _place_goal_marker(self) -> None:
+        """Move goal marker to current endpoint coordinates."""
+        if self.goal_marker_node is None:
+            return
+
+        try:
+            translation_field = self.goal_marker_node.getField("translation")
+            if translation_field is None:
+                return
+            x = float(self.reward_computer.endpoint[0])
+            y = float(self.reward_computer.endpoint[1])
+            z = float(self.config.goal_marker_height)
+            translation_field.setSFVec3f([x, y, z])
+        except Exception as e:
+            print(f"[PPO] WARNING: Could not place goal marker: {e}")
     
     def _reset_episode_state(self) -> None:
         """Reset internal episode state."""
@@ -437,30 +537,33 @@ class WebotsEnv:
         self.current_heading = 0.0
         self.current_distance = float("inf")
         self.min_episode_distance = float("inf")
+        self.best_distance = float("inf")
+        self.steps_without_progress = 0
         self.collision = False
 
     def _goal_geometry(self, pos: np.ndarray, heading: float) -> Tuple[float, float]:
         """Compute goal distance and heading error."""
-        goal_vec = np.array(self.config.endpoint, dtype=np.float32) - pos
+        goal_vec = self.reward_computer.endpoint - pos
         goal_distance = float(np.linalg.norm(goal_vec))
         goal_direction = float(np.arctan2(goal_vec[1], goal_vec[0]))
-        goal_error = float(np.arctan2(np.sin(goal_direction - heading), np.cos(goal_direction - heading)))
+        # Align heading with ALTINO forward direction in this world.
+        aligned_heading = heading + self.config.heading_frame_offset
+        aligned_heading = float(np.arctan2(np.sin(aligned_heading), np.cos(aligned_heading)))
+        goal_error = float(np.arctan2(np.sin(goal_direction - aligned_heading), np.cos(goal_direction - aligned_heading)))
         return goal_distance, goal_error
 
     def _build_observation(self, lidar: np.ndarray, pos: np.ndarray, heading: float) -> np.ndarray:
-        """Build observation vector with heading and goal-direction context."""
+        """Build compact observation vector with goal-direction context."""
         goal_distance, goal_error = self._goal_geometry(pos, heading)
         ref_dist = float(self.config.reference_distance if self.config.reference_distance is not None else 1.0)
 
         direction_features = np.array([
-            np.sin(heading),
-            np.cos(heading),
             np.sin(goal_error),
             np.cos(goal_error),
             goal_distance / max(ref_dist, 1e-6),
         ], dtype=np.float32)
 
-        return np.concatenate([lidar, pos, direction_features])
+        return np.concatenate([lidar, direction_features])
     
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Reset environment and return initial observation.
@@ -471,6 +574,9 @@ class WebotsEnv:
         """
         # Stop motors before reset
         self.robot.motors.stop()
+
+        # Keep marker synced if endpoint is changed between runs.
+        self._place_goal_marker()
         
         # Reset position
         self.robot.reset_position()
@@ -487,6 +593,9 @@ class WebotsEnv:
         self.collision = collision
         self.current_distance, _ = self._goal_geometry(pos, heading)
         self.min_episode_distance = self.current_distance
+        self.best_distance = self.current_distance
+        self.steps_without_progress = 0
+        self.reward_computer.reference_distance = max(self.current_distance, 1e-6)
         
         observation = self._build_observation(lidar, pos, heading)
         return observation, {}
@@ -517,12 +626,15 @@ class WebotsEnv:
         self.current_pos = pos
         self.current_heading = heading
         self.collision = collision
+        min_lidar_norm = float(np.min(lidar)) if lidar.size > 0 else 1.0
         self.current_distance, goal_error = self._goal_geometry(pos, heading)
-        reached_new_best_distance = self.current_distance + 1e-6 < self.min_episode_distance
-        if reached_new_best_distance:
+        if self.current_distance + 1e-6 < self.min_episode_distance:
             self.min_episode_distance = self.current_distance
-        min_lidar_norm = float(np.min(lidar))
-        speed_norm = float(speed / max(self.config.max_speed, 1e-6))
+        if self.current_distance < (self.best_distance - self.config.stagnation_progress_delta):
+            self.best_distance = self.current_distance
+            self.steps_without_progress = 0
+        else:
+            self.steps_without_progress += 1
         
         # Compute reward
         reward, new_distance = self.reward_computer.compute(
@@ -531,10 +643,16 @@ class WebotsEnv:
             self.current_step,
             self.prev_distance,
             goal_error,
-            min_lidar_norm,
-            speed_norm,
-            reached_new_best_distance,
         )
+
+        # Penalize low obstacle clearance continuously to discourage risky trajectories.
+        if min_lidar_norm < self.config.clearance_target_norm:
+            clearance_ratio = (
+                (self.config.clearance_target_norm - min_lidar_norm)
+                / max(self.config.clearance_target_norm, 1e-6)
+            )
+            reward -= self.config.clearance_penalty_scale * clearance_ratio
+
         self.prev_distance = new_distance
         self.episode_reward += reward
         
@@ -546,9 +664,19 @@ class WebotsEnv:
         # Collision should take precedence over low-score bookkeeping.
         if collision:
             info["reset_reason"] = "collision"
-        elif self.current_distance < 0.5:
+        elif min_lidar_norm < self.config.near_collision_norm:
+            terminated = True
+            info["reset_reason"] = "near_collision"
+            reward += self.config.near_collision_penalty
+            self.episode_reward += self.config.near_collision_penalty
+        elif self.current_distance < self.config.goal_radius:
             terminated = True
             info["reset_reason"] = "goal_reached"
+        elif self.steps_without_progress >= self.config.stagnation_patience_steps:
+            terminated = True
+            info["reset_reason"] = "stagnation"
+            reward += self.config.stagnation_penalty
+            self.episode_reward += self.config.stagnation_penalty
         elif self.episode_reward <= self.config.low_score_threshold:
             terminated = True
             info["reset_reason"] = "low_score"
@@ -632,17 +760,10 @@ class PPOAgent:
             dist = torch.distributions.Categorical(probs)
             action = dist.sample()
             log_prob = dist.log_prob(action)
-        return int(action.item()), log_prob
-    
+        return int(action.item()), log_prob.squeeze(0)
+
     def calculate_returns(self, rewards: np.ndarray) -> np.ndarray:
-        """Calculate cumulative discounted returns.
-        
-        Args:
-            rewards: Reward array
-        
-        Returns:
-            returns: Cumulative returns
-        """
+        """Calculate cumulative discounted returns."""
         returns = np.zeros(len(rewards), dtype=np.float32)
         G = 0.0
         for t in reversed(range(len(rewards))):
@@ -656,7 +777,8 @@ class PPOAgent:
         actions: np.ndarray,
         log_probs_old: List[torch.Tensor],
         returns: np.ndarray,
-        advantages: np.ndarray
+        advantages: np.ndarray,
+        entropy_coef: Optional[float] = None,
     ) -> None:
         """Update policy using collected rollout.
         
@@ -673,6 +795,7 @@ class PPOAgent:
         logp_old_tensor = torch.stack(log_probs_old).detach().to(self.device)
         ret_tensor = torch.as_tensor(returns, dtype=torch.float32, device=self.device)
         adv_tensor = torch.as_tensor(advantages, dtype=torch.float32, device=self.device)
+        entropy_weight = self.config.entropy_coef if entropy_coef is None else float(entropy_coef)
         
         dataset_size = len(observations)
         
@@ -702,15 +825,19 @@ class PPOAgent:
                 policy_loss = -torch.min(surrogate1, surrogate2).mean()
                 
                 # Value loss
-                values = self.critic(obs_batch).squeeze()
+                values = self.critic(obs_batch).squeeze(-1)
                 value_loss = nn.MSELoss()(values, ret_batch)
                 
                 # Combined loss
-                loss = policy_loss + 0.5 * value_loss - self.config.entropy_coef * entropy
+                loss = policy_loss + 0.5 * value_loss - entropy_weight * entropy
                 
                 # Backward pass
                 self.optimizer.zero_grad()
                 loss.backward()
+                nn.utils.clip_grad_norm_(
+                    list(self.actor.parameters()) + list(self.critic.parameters()),
+                    self.config.max_grad_norm,
+                )
                 self.optimizer.step()
 
 
@@ -742,6 +869,10 @@ def train(config: Optional[Config] = None) -> None:
     print(f"[TRAIN] Starting training: {config.episodes} episodes, "
           f"update every {config.update_every} episodes")
     print(f"[TRAIN] Observation size: {obs_size}, Action space: {n_actions}")
+    print(
+        f"[TRAIN] Goal endpoint: ({env.reward_computer.endpoint[0]:.2f}, {env.reward_computer.endpoint[1]:.2f}), "
+        f"radius: {config.goal_radius:.2f}"
+    )
     
     # Training buffers
     all_observations: List[np.ndarray] = []
@@ -749,6 +880,12 @@ def train(config: Optional[Config] = None) -> None:
     all_log_probs: List[torch.Tensor] = []
     all_returns: List[float] = []
     all_advantages: List[float] = []
+
+    # Rolling diagnostics to spot whether policy quality is improving.
+    diagnostics_window = 25
+    recent_end_reasons: List[str] = []
+    recent_rewards: List[float] = []
+    recent_min_dists: List[float] = []
     
     # Training loop
     for episode in range(config.episodes):
@@ -775,15 +912,19 @@ def train(config: Optional[Config] = None) -> None:
                     episode_end_reason = "low_score"
                 elif info.get("reset_reason") == "collision":
                     episode_end_reason = "collision"
+                elif info.get("reset_reason") == "near_collision":
+                    episode_end_reason = "collision"
                 elif info.get("reset_reason") == "goal_reached":
                     episode_end_reason = "goal_reached"
+                elif info.get("reset_reason") == "stagnation":
+                    episode_end_reason = "stagnation"
                 elif truncated:
                     episode_end_reason = "max_steps"
             
             # Accumulate
             episode_observations.append(obs)
             episode_actions.append(action)
-            episode_log_probs.append(log_prob)
+            episode_log_probs.append(log_prob.detach().cpu())
             episode_rewards.append(reward)
             
             obs = obs_next
@@ -798,15 +939,15 @@ def train(config: Optional[Config] = None) -> None:
                 dtype=torch.float32,
                 device=agent.device,
             )
-            episode_values = agent.critic(episode_obs_tensor).squeeze().detach().cpu().numpy()
+            episode_values = agent.critic(episode_obs_tensor).squeeze(-1).detach().cpu().numpy()
 
         episode_advantages = episode_returns - episode_values
 
         all_observations.extend(episode_obs_array)
         all_actions.extend(episode_actions)
         all_log_probs.extend(episode_log_probs)
-        all_returns.extend(episode_returns.tolist())
-        all_advantages.extend(episode_advantages.tolist())
+        all_returns.extend(np.asarray(episode_returns, dtype=np.float32).reshape(-1).tolist())
+        all_advantages.extend(np.asarray(episode_advantages, dtype=np.float32).reshape(-1).tolist())
         
         # PPO update every N episodes
         if (episode + 1) % config.update_every == 0:
@@ -814,6 +955,11 @@ def train(config: Optional[Config] = None) -> None:
             returns = np.array(all_returns, dtype=np.float32)
             advantages = np.array(all_advantages, dtype=np.float32)
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            training_progress = (episode + 1) / max(config.episodes, 1)
+            current_entropy_coef = (
+                config.entropy_coef
+                + (config.entropy_final_coef - config.entropy_coef) * training_progress
+            )
             
             # Update policy
             agent.update(
@@ -821,7 +967,8 @@ def train(config: Optional[Config] = None) -> None:
                 np.array(all_actions, dtype=np.int64),
                 all_log_probs,
                 returns,
-                advantages
+                advantages,
+                entropy_coef=current_entropy_coef,
             )
             
             # Clear buffers
@@ -831,16 +978,29 @@ def train(config: Optional[Config] = None) -> None:
             all_returns.clear()
             all_advantages.clear()
         
-        # Logging
         episode_reward_sum = sum(episode_rewards)
-        print(
-            f"Episode {episode + 1:2d} | "
-            f"Reward: {episode_reward_sum:8.2f} | "
-            f"Steps: {env.current_step:4d} | "
-            f"MinDist: {env.min_episode_distance:6.2f} | "
-            f"LastDist: {env.current_distance:6.2f} | "
-            f"End: {episode_end_reason}"
-        )
+        recent_end_reasons.append(episode_end_reason)
+        recent_rewards.append(episode_reward_sum)
+        recent_min_dists.append(env.min_episode_distance)
+        if len(recent_end_reasons) > diagnostics_window:
+            recent_end_reasons.pop(0)
+            recent_rewards.pop(0)
+            recent_min_dists.pop(0)
+
+        if (episode + 1) % diagnostics_window == 0:
+            collision_rate = sum(reason == "collision" for reason in recent_end_reasons) / diagnostics_window
+            goal_rate = sum(reason == "goal_reached" for reason in recent_end_reasons) / diagnostics_window
+            stagnation_rate = sum(reason == "stagnation" for reason in recent_end_reasons) / diagnostics_window
+            avg_recent_reward = float(np.mean(recent_rewards))
+            avg_recent_min_dist = float(np.mean(recent_min_dists))
+            print(
+                f"[DIAG] Last {diagnostics_window} eps | "
+                f"AvgReward: {avg_recent_reward:7.2f} | "
+                f"AvgMinDist: {avg_recent_min_dist:5.2f} | "
+                f"GoalRate: {goal_rate * 100:5.1f}% | "
+                f"CollisionRate: {collision_rate * 100:5.1f}% | "
+                f"StagnationRate: {stagnation_rate * 100:5.1f}%"
+            )
     
     # Cleanup
     env.robot.motors.stop()
