@@ -18,7 +18,7 @@ class Config:
     """Training and environment hyperparameters."""
     
     # Training
-    episodes: int = 50
+    episodes: int = 500
     update_every: int = 5  # PPO update frequency (episodes)
     epochs: int = 4  # Optimization epochs per update
     batch_size: int = 64
@@ -26,39 +26,56 @@ class Config:
     # PPO Agent
     gamma: float = 0.99  # Discount factor
     epsilon: float = 0.1  # PPO clip parameter
-    learning_rate: float = 1e-4
-    entropy_coef: float = 0.01  # Entropy regularization
+    learning_rate: float = 3e-4
+    entropy_coef: float = 0.02  # Entropy regularization
     hidden_size: int = 128  # Network hidden layer size
     
     # Environment
-    max_steps: int = 1000  # Max steps per episode
-    collision_threshold: float = 0.15  # LiDAR distance threshold for collision
-    low_score_threshold: float = -100.0  # Episode reset threshold
-    endpoint: Tuple[float, float] = (-1.5, 1.5)  # Goal location
+    max_steps: int = 2000  # Max steps per episode
+    collision_threshold: float = 0.1  # LiDAR distance threshold for collision
+    low_score_threshold: float = -400.0  # Episode reset threshold
+    collision_penalty: float = -20.0  # Penalty when collision happens
+    progress_reward_scale: float = 3.0  # Scale for distance-progress reward
+    distance_reward_scale: float = 2.0  # Dense reward for being closer to the goal than the start state
+    heading_reward_scale: float = 0.08  # Bonus when facing toward the goal
+    safety_reward_scale: float = 0.2  # Encourages keeping distance from obstacles
+    motion_reward_scale: float = 0.05  # Bonus for moving forward to avoid stop-policy collapse
+    new_best_distance_bonus: float = 1.0  # Bonus when reaching a new closest distance to goal
+    step_penalty: float = -0.01  # Small per-step penalty to encourage efficiency
+    endpoint: Tuple[float, float] = (-2, 0)  # Goal location
+    reference_distance: Optional[float] = None  # Start-to-goal distance, filled in at init
     
     # Robot Control
     actions: Optional[List[Tuple[float, float]]] = None  # (steering, speed) pairs
     start_position: Optional[List[float]] = None  # [x, y, z]
     start_rotation: Optional[List[float]] = None  # [x, y, z, w]
+    start_position_noise: float = 0.03  # Random position jitter at reset
+    start_yaw_noise: float = 0.4  # Random yaw jitter at reset
     
     # Motor/Sensor Config
-    max_speed: float = 1.8
+    max_speed: float = 10.0
     reset_settle_steps: int = 10  # Steps to wait for physics to settle after reset
     
     def __post_init__(self) -> None:
         """Initialize defaults for mutable fields."""
         if self.actions is None:
             self.actions = [
-                (-0.5, 1.2),   # left
-                (0.0, 1.2),    # straight
-                (0.5, 1.2),    # right
-                (0.0, 0.6),    # slow
+                (-0.9, 0.8 * self.max_speed),   # hard left
+                (-0.5, 0.5 * self.max_speed),   # medium left
+                (0.0, self.max_speed),    # straight
+                (0.5, 0.5 * self.max_speed),    # medium right
+                (0.9, 0.8 * self.max_speed),    # hard right
+                (0.0, 0.5 * self.max_speed),    # slow straight
                 (0.0, 0.0)     # stop
             ]
         if self.start_position is None:
             self.start_position = [0.05, -0.1, 0.02]
         if self.start_rotation is None:
             self.start_rotation = [0.0, 0.0, 1.0, 0.0]
+        if self.reference_distance is None:
+            start_xy = np.array(self.start_position[:2], dtype=np.float32)
+            endpoint_xy = np.array(self.endpoint, dtype=np.float32)
+            self.reference_distance = float(np.linalg.norm(start_xy - endpoint_xy))
 
 
 # Global supervisor instance
@@ -68,7 +85,6 @@ def _init_supervisor() -> None:
     """Initialize global Supervisor instance for field access."""
     global _supervisor
     _supervisor = Supervisor()
-    print("[PPO] Supervisor instance initialized")
 
 
 
@@ -128,10 +144,11 @@ class MotorController:
 class SensorReader:
     """Manages LiDAR and GPS sensors."""
     
-    def __init__(self, supervisor: Supervisor, timestep: int):
+    def __init__(self, supervisor: Supervisor, timestep: int, collision_threshold: float):
         """Initialize sensors."""
         self.supervisor = supervisor
         self.timestep = timestep
+        self.collision_threshold = collision_threshold
         
         # LiDAR
         self.lidar = supervisor.getDevice("lidar")
@@ -160,7 +177,7 @@ class SensorReader:
         position = np.array([gps_values[0], gps_values[1]], dtype=np.float32)
         
         # Collision detection
-        collision = bool(np.any(range_array < 0.15))  # Will be parameterized
+        collision = bool(np.any(range_array < self.collision_threshold))
         
         return lidar_data, position, collision
 
@@ -178,14 +195,17 @@ class AltinoDriver:
         
         # Hardware components
         self.motors = MotorController(self.supervisor)  # type: ignore[arg-type]
-        self.sensors = SensorReader(self.supervisor, self.timestep)  # type: ignore[arg-type]
+        self.sensors = SensorReader(
+            self.supervisor,
+            self.timestep,
+            config.collision_threshold
+        )  # type: ignore[arg-type]
         
         # Position reset
         try:
             self.altino_node = self.supervisor.getFromDef('ALTINO')  # type: ignore[union-attr]
             self.translation_field = self.altino_node.getField('translation')
             self.rotation_field = self.altino_node.getField('rotation')
-            print("[PPO] ALTINO node accessed for direct position reset")
         except Exception as e:
             print(f"[PPO] ERROR: Failed to get ALTINO node: {e}")
             self.altino_node = None
@@ -208,17 +228,62 @@ class AltinoDriver:
         """Step simulation."""
         return self.supervisor.step(timestep)  # type: ignore[union-attr]
     
-    def read_sensors(self) -> Tuple[np.ndarray, np.ndarray, bool]:
-        """Read all sensors."""
-        return self.sensors.read_observation()
+    def _get_heading(self) -> float:
+        """Estimate robot yaw in world frame from rotation field."""
+        if self.rotation_field is None:
+            return 0.0
+
+        rotation = self.rotation_field.getSFRotation()
+        if rotation is None or len(rotation) < 4:
+            return 0.0
+
+        x, y, z, angle = map(float, rotation)
+        axis_norm = np.sqrt(x * x + y * y + z * z)
+        if axis_norm < 1e-8:
+            return 0.0
+        x /= axis_norm
+        y /= axis_norm
+        z /= axis_norm
+
+        # Convert axis-angle to rotation matrix and extract yaw.
+        c = float(np.cos(angle))
+        s = float(np.sin(angle))
+        one_c = 1.0 - c
+        r00 = c + x * x * one_c
+        r10 = z * s + y * x * one_c
+        yaw = float(np.arctan2(r10, r00))
+        return float(np.arctan2(np.sin(yaw), np.cos(yaw)))
+
+    def read_sensors(self) -> Tuple[np.ndarray, np.ndarray, float, bool]:
+        """Read LiDAR, GPS, heading and collision status."""
+        lidar, pos, collision = self.sensors.read_observation()
+        heading = self._get_heading()
+        return lidar, pos, heading, collision
     
     def reset_position(self) -> None:
         """Reset robot to start position and orientation."""
         if self.translation_field is not None and self.rotation_field is not None:
-            self.translation_field.setSFVec3f(self.config.start_position)  # type: ignore[arg-type]
-            self.rotation_field.setSFRotation(self.config.start_rotation)  # type: ignore[arg-type]
+            start_position_values = self.config.start_position or [0.05, -0.1, 0.02]
+            start_rotation_values = self.config.start_rotation or [0.0, 0.0, 1.0, 0.0]
+
+            start_position = np.array(start_position_values, dtype=np.float32)
+            if self.config.start_position_noise > 0.0:
+                start_position[:2] += np.random.uniform(
+                    -self.config.start_position_noise,
+                    self.config.start_position_noise,
+                    size=2,
+                ).astype(np.float32)
+
+            start_rotation = list(start_rotation_values)
+            if self.config.start_yaw_noise > 0.0:
+                start_rotation[3] = float(
+                    start_rotation[3]
+                    + np.random.uniform(-self.config.start_yaw_noise, self.config.start_yaw_noise)
+                )
+
+            self.translation_field.setSFVec3f(start_position.tolist())  # type: ignore[arg-type]
+            self.rotation_field.setSFRotation(start_rotation)  # type: ignore[arg-type]
             self.supervisor.simulationResetPhysics()  # type: ignore[union-attr]
-            print(f"[PPO] Robot reset to position {self.config.start_position}")
         else:
             print("[PPO] WARNING: Cannot reset - ALTINO node not accessible!")
 
@@ -231,7 +296,19 @@ class AltinoDriver:
 class RewardComputer:
     """Computes rewards for the obstacle avoidance task."""
     
-    def __init__(self, endpoint: np.ndarray, collision_reward: float = -100.0):
+    def __init__(
+        self,
+        endpoint: np.ndarray,
+        reference_distance: float,
+        collision_reward: float = -40.0,
+        progress_scale: float = 3.0,
+        distance_reward_scale: float = 2.0,
+        heading_reward_scale: float = 0.08,
+        safety_reward_scale: float = 0.2,
+        motion_reward_scale: float = 0.05,
+        new_best_distance_bonus: float = 1.0,
+        step_penalty: float = -0.01,
+    ):
         """Initialize reward computer.
         
         Args:
@@ -239,7 +316,15 @@ class RewardComputer:
             collision_reward: Penalty for collision
         """
         self.endpoint = np.array(endpoint, dtype=np.float32)
+        self.reference_distance = float(reference_distance)
         self.collision_reward = collision_reward
+        self.progress_scale = progress_scale
+        self.distance_reward_scale = distance_reward_scale
+        self.heading_reward_scale = heading_reward_scale
+        self.safety_reward_scale = safety_reward_scale
+        self.motion_reward_scale = motion_reward_scale
+        self.new_best_distance_bonus = new_best_distance_bonus
+        self.step_penalty = step_penalty
         self.best_time = np.inf
     
     def compute(
@@ -247,7 +332,11 @@ class RewardComputer:
         collision: bool,
         current_pos: np.ndarray,
         current_step: int,
-        prev_distance: Optional[float]
+        prev_distance: Optional[float],
+        goal_error: float,
+        min_lidar_norm: float,
+        speed_norm: float,
+        reached_new_best_distance: bool,
     ) -> Tuple[float, Optional[float]]:
         """Compute reward for current state.
         
@@ -276,9 +365,27 @@ class RewardComputer:
         # Progress reward
         progress = 0.0
         if prev_distance is not None:
-            progress = float(prev_distance - distance_to_end)
-        
-        return progress, distance_to_end
+            delta = float(prev_distance - distance_to_end)
+            progress = delta * self.progress_scale if delta >= 0.0 else delta * (0.25 * self.progress_scale)
+
+        # Dense goal-proximity reward, normalized against the start distance.
+        proximity = max(0.0, (self.reference_distance - distance_to_end) / max(self.reference_distance, 1e-6))
+        proximity_reward = proximity * self.distance_reward_scale
+        heading_alignment = max(0.0, float(np.cos(goal_error)))
+        heading_reward = heading_alignment * self.heading_reward_scale
+        safety_reward = float(np.clip(min_lidar_norm, 0.0, 1.0)) * self.safety_reward_scale
+        motion_reward = float(np.clip(speed_norm, 0.0, 1.0)) * self.motion_reward_scale
+        new_best_bonus = self.new_best_distance_bonus if reached_new_best_distance else 0.0
+
+        return (
+            progress
+            + proximity_reward
+            + heading_reward
+            + safety_reward
+            + motion_reward
+            + new_best_bonus
+            + self.step_penalty
+        ), distance_to_end
 
 
 class WebotsEnv:
@@ -299,12 +406,26 @@ class WebotsEnv:
         self.backlights = self.robot.get_device("backlights")
         
         # Reward computation
-        self.reward_computer = RewardComputer(np.array(config.endpoint, dtype=np.float32))
+        self.reward_computer = RewardComputer(
+            np.array(config.endpoint, dtype=np.float32),
+            reference_distance=float(config.reference_distance if config.reference_distance is not None else 1.0),
+            collision_reward=config.collision_penalty,
+            progress_scale=config.progress_reward_scale,
+            distance_reward_scale=config.distance_reward_scale,
+            heading_reward_scale=config.heading_reward_scale,
+            safety_reward_scale=config.safety_reward_scale,
+            motion_reward_scale=config.motion_reward_scale,
+            new_best_distance_bonus=config.new_best_distance_bonus,
+            step_penalty=config.step_penalty,
+        )
         
         # Episode state
         self.current_step = 0
         self.episode_reward = 0.0
         self.current_pos = np.array([0.0, 0.0], dtype=np.float32)
+        self.current_heading = 0.0
+        self.current_distance = float("inf")
+        self.min_episode_distance = float("inf")
         self.collision = False
         self.prev_distance: Optional[float] = None
     
@@ -313,7 +434,33 @@ class WebotsEnv:
         self.current_step = 0
         self.prev_distance = None
         self.episode_reward = 0.0
+        self.current_heading = 0.0
+        self.current_distance = float("inf")
+        self.min_episode_distance = float("inf")
         self.collision = False
+
+    def _goal_geometry(self, pos: np.ndarray, heading: float) -> Tuple[float, float]:
+        """Compute goal distance and heading error."""
+        goal_vec = np.array(self.config.endpoint, dtype=np.float32) - pos
+        goal_distance = float(np.linalg.norm(goal_vec))
+        goal_direction = float(np.arctan2(goal_vec[1], goal_vec[0]))
+        goal_error = float(np.arctan2(np.sin(goal_direction - heading), np.cos(goal_direction - heading)))
+        return goal_distance, goal_error
+
+    def _build_observation(self, lidar: np.ndarray, pos: np.ndarray, heading: float) -> np.ndarray:
+        """Build observation vector with heading and goal-direction context."""
+        goal_distance, goal_error = self._goal_geometry(pos, heading)
+        ref_dist = float(self.config.reference_distance if self.config.reference_distance is not None else 1.0)
+
+        direction_features = np.array([
+            np.sin(heading),
+            np.cos(heading),
+            np.sin(goal_error),
+            np.cos(goal_error),
+            goal_distance / max(ref_dist, 1e-6),
+        ], dtype=np.float32)
+
+        return np.concatenate([lidar, pos, direction_features])
     
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Reset environment and return initial observation.
@@ -326,7 +473,6 @@ class WebotsEnv:
         self.robot.motors.stop()
         
         # Reset position
-        print("[ENV] Resetting episode state")
         self.robot.reset_position()
         self._reset_episode_state()
         
@@ -335,12 +481,14 @@ class WebotsEnv:
             self.robot.step(self.timestep)
         
         # Get observation
-        lidar, pos, collision = self.robot.read_sensors()
+        lidar, pos, heading, collision = self.robot.read_sensors()
         self.current_pos = pos
+        self.current_heading = heading
         self.collision = collision
+        self.current_distance, _ = self._goal_geometry(pos, heading)
+        self.min_episode_distance = self.current_distance
         
-        observation = np.concatenate([lidar, pos])
-        print(f"[ENV] Reset complete. Collision detected: {collision}")
+        observation = self._build_observation(lidar, pos, heading)
         return observation, {}
     
     def step(self, action_idx: int) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
@@ -365,13 +513,27 @@ class WebotsEnv:
         self.current_step += 1
         
         # Sense
-        lidar, pos, collision = self.robot.read_sensors()
+        lidar, pos, heading, collision = self.robot.read_sensors()
         self.current_pos = pos
+        self.current_heading = heading
         self.collision = collision
+        self.current_distance, goal_error = self._goal_geometry(pos, heading)
+        reached_new_best_distance = self.current_distance + 1e-6 < self.min_episode_distance
+        if reached_new_best_distance:
+            self.min_episode_distance = self.current_distance
+        min_lidar_norm = float(np.min(lidar))
+        speed_norm = float(speed / max(self.config.max_speed, 1e-6))
         
         # Compute reward
         reward, new_distance = self.reward_computer.compute(
-            collision, self.current_pos, self.current_step, self.prev_distance
+            collision,
+            self.current_pos,
+            self.current_step,
+            self.prev_distance,
+            goal_error,
+            min_lidar_norm,
+            speed_norm,
+            reached_new_best_distance,
         )
         self.prev_distance = new_distance
         self.episode_reward += reward
@@ -381,17 +543,21 @@ class WebotsEnv:
         truncated = self.current_step >= self.config.max_steps
         info: Dict[str, Any] = {}
         
-        # Low score reset
-        if self.episode_reward <= self.config.low_score_threshold:
+        # Collision should take precedence over low-score bookkeeping.
+        if collision:
+            info["reset_reason"] = "collision"
+        elif self.current_distance < 0.5:
+            terminated = True
+            info["reset_reason"] = "goal_reached"
+        elif self.episode_reward <= self.config.low_score_threshold:
             terminated = True
             info["reset_reason"] = "low_score"
-            print(f"[ENV] Low score detected: {self.episode_reward:.2f}, requesting reset")
-            self.robot.reset_position()
-        elif terminated:
-            info["reset_reason"] = "collision"
+
+        if terminated or truncated:
+            self.robot.motors.stop()
         
         # Observation
-        observation = np.concatenate([lidar, pos])
+        observation = self._build_observation(lidar, pos, heading)
         
         return observation, reward, terminated, truncated, info
 
@@ -581,17 +747,22 @@ def train(config: Optional[Config] = None) -> None:
     all_observations: List[np.ndarray] = []
     all_actions: List[int] = []
     all_log_probs: List[torch.Tensor] = []
-    all_rewards: List[float] = []
+    all_returns: List[float] = []
+    all_advantages: List[float] = []
     
     # Training loop
     for episode in range(config.episodes):
         obs, _ = env.reset()
         done = False
+        episode_observations: List[np.ndarray] = []
+        episode_actions: List[int] = []
+        episode_log_probs: List[torch.Tensor] = []
         episode_rewards: List[float] = []
         episode_end_reason = "max_steps"
         
         while not done:
-            # Select action
+            # Select action from the current policy for every transition so the
+            # rollout stays on-policy for PPO updates.
             action, log_prob = agent.select_action(obs)
             
             # Step environment
@@ -604,33 +775,44 @@ def train(config: Optional[Config] = None) -> None:
                     episode_end_reason = "low_score"
                 elif info.get("reset_reason") == "collision":
                     episode_end_reason = "collision"
+                elif info.get("reset_reason") == "goal_reached":
+                    episode_end_reason = "goal_reached"
                 elif truncated:
                     episode_end_reason = "max_steps"
             
             # Accumulate
-            all_observations.append(obs)
-            all_actions.append(action)
-            all_log_probs.append(log_prob)
+            episode_observations.append(obs)
+            episode_actions.append(action)
+            episode_log_probs.append(log_prob)
             episode_rewards.append(reward)
             
             obs = obs_next
         
-        all_rewards.extend(episode_rewards)
+        # Build returns and advantages per episode so reward signals do not
+        # leak across episode boundaries.
+        episode_returns = agent.calculate_returns(np.array(episode_rewards, dtype=np.float32))
+        episode_obs_array = np.array(episode_observations, dtype=np.float32)
+        with torch.no_grad():
+            episode_obs_tensor = torch.as_tensor(
+                episode_obs_array,
+                dtype=torch.float32,
+                device=agent.device,
+            )
+            episode_values = agent.critic(episode_obs_tensor).squeeze().detach().cpu().numpy()
+
+        episode_advantages = episode_returns - episode_values
+
+        all_observations.extend(episode_obs_array)
+        all_actions.extend(episode_actions)
+        all_log_probs.extend(episode_log_probs)
+        all_returns.extend(episode_returns.tolist())
+        all_advantages.extend(episode_advantages.tolist())
         
         # PPO update every N episodes
         if (episode + 1) % config.update_every == 0:
-            print(f"[TRAIN] Update at episode {episode + 1}")
-            
-            # Compute returns
-            returns = agent.calculate_returns(np.array(all_rewards, dtype=np.float32))
-            
-            # Compute advantages
             obs_array = np.array(all_observations, dtype=np.float32)
-            with torch.no_grad():
-                obs_tensor = torch.as_tensor(obs_array, dtype=torch.float32, device=agent.device)
-                values = agent.critic(obs_tensor).squeeze().detach().cpu().numpy()
-            
-            advantages = returns - values
+            returns = np.array(all_returns, dtype=np.float32)
+            advantages = np.array(all_advantages, dtype=np.float32)
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
             
             # Update policy
@@ -646,7 +828,8 @@ def train(config: Optional[Config] = None) -> None:
             all_observations.clear()
             all_actions.clear()
             all_log_probs.clear()
-            all_rewards.clear()
+            all_returns.clear()
+            all_advantages.clear()
         
         # Logging
         episode_reward_sum = sum(episode_rewards)
@@ -654,6 +837,8 @@ def train(config: Optional[Config] = None) -> None:
             f"Episode {episode + 1:2d} | "
             f"Reward: {episode_reward_sum:8.2f} | "
             f"Steps: {env.current_step:4d} | "
+            f"MinDist: {env.min_episode_distance:6.2f} | "
+            f"LastDist: {env.current_distance:6.2f} | "
             f"End: {episode_end_reason}"
         )
     
