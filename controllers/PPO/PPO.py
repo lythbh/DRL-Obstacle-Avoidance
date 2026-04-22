@@ -1,6 +1,8 @@
 """PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
+import os
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Tuple, List, Optional, Dict, Any, Union
 import numpy as np
@@ -16,6 +18,7 @@ try:
     from lidar_preprocessing import LiDARPreprocessor, LiDARFeatures  # type: ignore
     from imu_filter import IMUProcessor, IMUState                       # type: ignore
     from iekf_backend import IEKFBackend                                # type: ignore
+    from slam_map import SLAMMap                                        # type: ignore
     _SLAM_AVAILABLE = True
     print("[PPO] SLAM sensor modules loaded OK", flush=True)
 except ImportError as _slam_err:
@@ -228,34 +231,43 @@ class SensorReader:
 
 class SLAMProcessor:
     """
-    IMU filtering + IEKF heading estimation for the PPO controller.
+    IMU filtering + IEKF heading + occupancy map for the PPO controller.
 
-    Per-timestep pipeline:
-      1. IMUProcessor (Madgwick + EKF) – filtered quaternion, accel, gyro.
-      2. IEKF propagate_odom           – heading estimate from wheel odometry + gyro.
-      3. Sector LiDAR (vectorised)     – 16 angular-sector min-ranges, normalised.
+    Per-timestep pipeline (hot path, kept fast):
+      1. Sector LiDAR (vectorised numpy) – 16 sector min-ranges for the obs.
+      2. IMUProcessor (Madgwick + EKF)   – filtered quaternion, accel, gyro.
+      3. IEKF propagate_odom             – heading from wheel odometry + gyro.
+      4. SLAMMap keyframe update         – occupancy grid + point cloud (async,
+         only when the robot has moved enough; ~30 cm or 8.5° threshold).
 
-    The expensive LiDARPreprocessor (Python curvature loop) and IEKF
-    measurement update (O(N_pts × N_map) matching) are intentionally omitted
-    from the hot path to keep each timestep fast.
+    LiDARPreprocessor (Python curvature loop) and IEKF measurement update
+    (O(N_pts × N_map) matching) are omitted from the hot path for speed.
     """
 
     WHEEL_RADIUS: float = 0.033   # metres – ALTINO wheel radius
-    N_SECTORS:    int   = 16      # LiDAR angular sectors for the observation
+    N_SECTORS:    int   = 16      # angular sectors in the observation vector
 
-    def __init__(self, lidar_max_range: float, dt: float) -> None:
+    def __init__(self, lidar_max_range: float, lidar_fov: float, dt: float,
+                 goal: Tuple[float, float] = (0.0, 0.0)) -> None:
         self._dt = dt
         self._lidar_max_range = lidar_max_range
+        self._lidar_fov = lidar_fov
+        self._lidar_angles: Optional[np.ndarray] = None  # built lazily
+        self._goal = goal
 
         if _SLAM_AVAILABLE:
             self.imu_proc = IMUProcessor(dt=dt)
-            self.iekf = IEKFBackend()
+            self.iekf     = IEKFBackend()
+            self.slam_map = SLAMMap(map_resolution=0.05)
         else:
-            self.imu_proc = None   # type: ignore[assignment]
-            self.iekf = None       # type: ignore[assignment]
+            self.imu_proc  = None   # type: ignore[assignment]
+            self.iekf      = None   # type: ignore[assignment]
+            self.slam_map  = None   # type: ignore[assignment]
+
+    # ── Episode management ───────────────────────────────────────────────────
 
     def reset(self, init_pos: np.ndarray, init_heading: float) -> None:
-        """Reset filter states at episode start using known robot pose."""
+        """Reset IMU/IEKF filters at episode start with current ground-truth pose."""
         if not _SLAM_AVAILABLE:
             return
         self.imu_proc.reset()
@@ -264,24 +276,49 @@ class SLAMProcessor:
             init_heading=float(init_heading),
         )
 
+    def reset_map(self) -> None:
+        """Discard the current episode map and start a fresh one."""
+        if _SLAM_AVAILABLE:
+            self.slam_map = SLAMMap(map_resolution=0.05)
+
+    def save_episode(self, run_folder: str, episode: int, reward: float = 0.0) -> None:
+        """Save occupancy map + trajectory plot for one episode."""
+        if not _SLAM_AVAILABLE or self.slam_map is None:
+            return
+        path = os.path.join(run_folder, f"episode_{episode:04d}_reward_{reward:.0f}.png")
+        self.slam_map.save_plot(path, goal=self._goal)
+
+    # ── LiDAR helpers ────────────────────────────────────────────────────────
+
     def sector_lidar(self, raw_ranges: np.ndarray) -> np.ndarray:
-        """Vectorised 16-sector min-range from the raw LiDAR image.
-
-        Invalid/zero returns are treated as max range (no obstacle).
-        Returns a (16,) float32 array normalised to [0, 1].
-        """
-        n = len(raw_ranges)
-        # Replace invalid returns with max range so they don't falsely show as obstacles
-        valid = np.where(raw_ranges > 0.01, raw_ranges, self._lidar_max_range)
-
-        # Pad to nearest multiple of N_SECTORS, then reshape for fast min per sector
-        remainder = n % self.N_SECTORS
+        """16-sector min-range, normalised to [0, 1]. Fully vectorised."""
+        valid = np.where((raw_ranges > 0.01) & np.isfinite(raw_ranges), raw_ranges, self._lidar_max_range)
+        remainder = len(valid) % self.N_SECTORS
         if remainder:
-            pad = self.N_SECTORS - remainder
-            valid = np.concatenate([valid, np.full(pad, self._lidar_max_range, dtype=np.float32)])
-
+            valid = np.concatenate(
+                [valid, np.full(self.N_SECTORS - remainder, self._lidar_max_range, dtype=np.float32)]
+            )
         sectors = valid.reshape(self.N_SECTORS, -1).min(axis=1)
         return np.clip(sectors / self._lidar_max_range, 0.0, 1.0).astype(np.float32)
+
+    def _scan_to_world(self, raw_ranges: np.ndarray, pos: np.ndarray, heading: float) -> np.ndarray:
+        """Project valid LiDAR returns to 2-D world-frame points."""
+        n = len(raw_ranges)
+        if self._lidar_angles is None or len(self._lidar_angles) != n:
+            self._lidar_angles = np.linspace(
+                -self._lidar_fov / 2.0, self._lidar_fov / 2.0, n, dtype=np.float32
+            )
+        mask = (raw_ranges > 0.01) & np.isfinite(raw_ranges)
+        r = raw_ranges[mask]
+        a = self._lidar_angles[mask]
+        c, s = float(np.cos(heading)), float(np.sin(heading))
+        xl = r * np.cos(a)
+        yl = r * np.sin(a)
+        xw = c * xl - s * yl + pos[0]
+        yw = s * xl + c * yl + pos[1]
+        return np.column_stack([xw, yw]).astype(np.float32)
+
+    # ── Main per-step call ───────────────────────────────────────────────────
 
     def process(
         self,
@@ -290,26 +327,31 @@ class SLAMProcessor:
         gyro: np.ndarray,
         cmd_speed_rads: float,
     ) -> Tuple[np.ndarray, Any]:
-        """
-        Run one sensor-processing step.
+        """Run one sensor-processing step.
 
         Returns:
             lidar_sectors: (16,) normalised sector min-ranges
-            imu_state:     IMUState with filtered accel/gyro/quaternion
-                           (or None if SLAM unavailable)
+            imu_state:     filtered IMUState (or None if SLAM unavailable)
         """
         lidar_sectors = self.sector_lidar(raw_ranges)
 
         if not _SLAM_AVAILABLE:
             return lidar_sectors, None
 
-        # ── 1. IMU filtering (Madgwick + EKF) ───────────────────────────────
+        # ── 1. IMU filter ────────────────────────────────────────────────────
         imu_state = self.imu_proc.step(gyro, accel)
 
-        # ── 2. IEKF wheel-odometry propagation (heading estimate) ────────────
+        # ── 2. IEKF odometry propagation (heading) ───────────────────────────
         cmd_speed_ms = cmd_speed_rads * self.WHEEL_RADIUS
         self.iekf.propagate_odom(cmd_speed_ms, float(gyro[2]), self._dt)
-        # Measurement update skipped – avoids O(N_pts × N_map) matching cost.
+
+        # ── 3. Map update (keyframe-gated, cheap when not triggered) ─────────
+        pos     = self.iekf.state.position
+        heading = self.iekf.state.heading
+        pts_2d  = self._scan_to_world(raw_ranges, pos, heading)
+        self.slam_map.try_add_keyframe(
+            float(pos[0]), float(pos[1]), heading, scan_points=pts_2d
+        )
 
         return lidar_sectors, imu_state
 
@@ -337,7 +379,9 @@ class AltinoDriver:
         # SLAM sensor-processing pipeline
         self.slam = SLAMProcessor(
             lidar_max_range=self.sensors.lidar_max_range,
+            lidar_fov=self.sensors.lidar.getFov(),
             dt=self._dt,
+            goal=tuple(config.endpoint),
         )
         # Commanded wheel speed (rad/s) – updated by set_speed(); used for IEKF odometry
         self._cmd_speed_rads: float = 0.0
@@ -617,6 +661,13 @@ class WebotsEnv:
         self.collision = False
         self.prev_distance: Optional[float] = None
         self.was_in_goal: bool = False
+
+        # Per-run output folder for SLAM maps (one folder per training session)
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.run_folder = os.path.join("slam_runs", ts)
+        os.makedirs(self.run_folder, exist_ok=True)
+        self._episode_count = 0
+        print(f"[PPO] SLAM maps will be saved to: {self.run_folder}", flush=True)
     
     def _reset_episode_state(self) -> None:
         """Reset internal episode state."""
@@ -690,6 +741,10 @@ class WebotsEnv:
             observation: Initial SLAM-processed sensor observation
             info:        Empty info dict
         """
+        # Clear the map for the new episode (saving is done in train() on new records only)
+        self.robot.slam.reset_map()
+        self._episode_count += 1
+
         # Stop motors before reset
         self.robot.motors.stop()
 
@@ -1102,6 +1157,7 @@ def train(config: Optional[Config] = None) -> None:
             if episode_reward_sum > best_goal_reward:
                 best_goal_reward = episode_reward_sum
                 best_goal_episode = episode + 1
+                env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward_sum)
                 torch.save({
                     'actor': agent.actor.state_dict(),
                     'critic': agent.critic.state_dict(),
@@ -1115,6 +1171,7 @@ def train(config: Optional[Config] = None) -> None:
                 )
         elif best_goal_episode is None and episode_reward_sum > best_reward:
             best_reward = episode_reward_sum
+            env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward_sum)
             torch.save({
                 'actor': agent.actor.state_dict(),
                 'critic': agent.critic.state_dict(),
@@ -1138,7 +1195,7 @@ def train(config: Optional[Config] = None) -> None:
         'reward': best_reward
     }, 'final_model.pth')
     print("[TRAIN] Final model saved.")
-    
+
     # Cleanup
     env.robot.motors.stop()
     print("[TRAIN] Training complete. Robot stopped.")

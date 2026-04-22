@@ -32,6 +32,7 @@ data/
 datasets/
 logs/
 runs/
+controllers/PPO/slam_runs/
 
 # =========================
 # Jupyter

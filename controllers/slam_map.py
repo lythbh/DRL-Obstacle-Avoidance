@@ -388,9 +388,6 @@ class SLAMMap:
     KEYFRAME_DIST = 0.3    # add keyframe every ~30 cm
     KEYFRAME_ANGLE = 0.15  # or ~8.5° rotation
 
-    # Subsample accumulated 3-D cloud to at most this many points per keyframe
-    _CLOUD_SUBSAMPLE = 400
-
     def __init__(self, map_resolution: float = 0.05) -> None:
         self.nodes: List[PoseNode] = []
         self.edges: List[PoseEdge] = []
@@ -399,7 +396,6 @@ class SLAMMap:
         self.optimizer = PoseGraphOptimizer()
         self._next_id = 0
         self._last_kf: Optional[PoseNode] = None
-        self._cloud_chunks: List[np.ndarray] = []   # accumulated (N,3) world-frame pts
 
     # ── Keyframe management ──────────────────────────────────────────────────
 
@@ -499,27 +495,11 @@ class SLAMMap:
             return np.empty((0, 2))
         return np.array([[n.x, n.y] for n in self.nodes])
 
-    # ── 3-D point cloud accumulation ─────────────────────────────────────────
-
-    def add_scan_points_3d(self, points_3d: np.ndarray) -> None:
-        """
-        Accumulate world-frame 3-D scan points for the map plot.
-
-        Args:
-            points_3d: (N, 3) array of [x, y, z] points in world frame.
-        """
-        if len(points_3d) == 0:
-            return
-        step = max(1, len(points_3d) // self._CLOUD_SUBSAMPLE)
-        self._cloud_chunks.append(points_3d[::step].astype(np.float32))
-
     # ── Visualisation ─────────────────────────────────────────────────────────
 
-    def save_plot(self, output_path: str = "slam_map.png") -> None:
-        """
-        Save a two-panel figure to disk:
-          Left  – 3-D LiDAR point cloud (world frame) coloured by height
-          Right – 2-D occupancy map with trajectory and semantic landmarks
+    def save_plot(self, output_path: str = "slam_map.png",
+                  goal: Optional[Tuple[float, float]] = None) -> None:
+        """Save 2-D occupancy map with trajectory, landmarks, and goal.
 
         Uses the non-interactive Agg backend so it works inside Webots
         without a display.
@@ -528,76 +508,47 @@ class SLAMMap:
             import matplotlib
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
-            import mpl_toolkits.mplot3d as _mpl3d; _mpl3d  # registers "3d" projection
 
-            fig = plt.figure(figsize=(16, 7))
-
-            # ── Left panel: 3-D point cloud ───────────────────────────────
-            ax3 = fig.add_subplot(1, 2, 1, projection="3d")
-
-            if self._cloud_chunks:
-                cloud = np.concatenate(self._cloud_chunks, axis=0)
-                z = cloud[:, 2]
-                sc = ax3.scatter(
-                    cloud[:, 0], cloud[:, 1], z,
-                    c=z, cmap="viridis", s=0.8, alpha=0.5,
-                )
-                fig.colorbar(sc, ax=ax3, label="height (m)",
-                             pad=0.1, shrink=0.6, orientation="vertical")
-
-            if self.nodes:
-                pos = self.all_positions()
-                ax3.plot(pos[:, 0], pos[:, 1],
-                         np.zeros(len(pos), dtype=np.float32),
-                         "r-", linewidth=1.5, label="trajectory")
-                ax3.scatter([pos[0, 0]], [pos[0, 1]], [0],
-                            c="lime", s=60, zorder=5, label="start")
-                ax3.scatter([pos[-1, 0]], [pos[-1, 1]], [0],
-                            c="red", s=60, marker="*", zorder=5, label="end")
-                ax3.legend(loc="upper left", fontsize=8)
-
-            ax3.set_xlabel("x (m)")
-            ax3.set_ylabel("y (m)")
-            ax3.set_zlabel("z (m)")
-            n_pts = sum(len(c) for c in self._cloud_chunks)
-            ax3.set_title(f"3-D LiDAR Point Cloud  ({n_pts:,} pts)")
-
-            # ── Right panel: 2-D occupancy map ────────────────────────────
-            ax2 = fig.add_subplot(1, 2, 2)
+            fig, ax = plt.subplots(figsize=(8, 8))
 
             prob = self.occ_map.probability
             ox, oy = self.occ_map.origin
             res = self.occ_map.resolution
             extent = [ox, ox + self.occ_map.nx * res,
                       oy, oy + self.occ_map.ny * res]
-            ax2.imshow(prob, origin="lower", extent=extent,
-                       cmap="gray_r", vmin=0.0, vmax=1.0,
-                       interpolation="nearest")
+            ax.imshow(prob, origin="lower", extent=extent,
+                      cmap="gray_r", vmin=0.0, vmax=1.0,
+                      interpolation="nearest")
 
             if self.nodes:
                 pos = self.all_positions()
-                ax2.plot(pos[:, 0], pos[:, 1],
-                         "r-", linewidth=1.0, label="trajectory")
-                ax2.scatter([pos[0, 0]], [pos[0, 1]],
-                            c="lime", s=60, zorder=5, label="start")
-                ax2.scatter([pos[-1, 0]], [pos[-1, 1]],
-                            c="red", s=60, marker="*", zorder=5, label="end")
+                ax.plot(pos[:, 0], pos[:, 1], "r-", linewidth=1.0, label="trajectory")
+                ax.scatter([pos[0, 0]], [pos[0, 1]],
+                           c="lime", s=60, zorder=5, label="start")
+                ax.scatter([pos[-1, 0]], [pos[-1, 1]],
+                           c="red", s=60, marker="*", zorder=5, label="end")
+
+            if goal is not None:
+                ax.scatter([goal[0]], [goal[1]],
+                           c="yellow", s=120, marker="*", zorder=6, label="goal")
+                circle = plt.Circle(goal, 0.1, color="yellow", fill=False,
+                                    linewidth=1.5, linestyle="--")
+                ax.add_patch(circle)
 
             for lm in self.landmarks:
                 circle = plt.Circle(lm.pos, max(lm.radius, 0.05),
                                     color="cyan", fill=False, linewidth=1.5)
-                ax2.add_patch(circle)
-                ax2.text(lm.pos[0], lm.pos[1] + lm.radius + 0.05,
-                         f"lm{lm.id}", fontsize=6, ha="center", color="cyan")
+                ax.add_patch(circle)
+                ax.text(lm.pos[0], lm.pos[1] + lm.radius + 0.05,
+                        f"lm{lm.id}", fontsize=6, ha="center", color="cyan")
 
-            ax2.set_xlabel("x (m)")
-            ax2.set_ylabel("y (m)")
-            ax2.set_title(
-                f"Occupancy Map  "
-                f"({len(self.nodes)} keyframes, {len(self.landmarks)} landmarks)"
+            ax.set_xlabel("x (m)")
+            ax.set_ylabel("y (m)")
+            ax.set_title(
+                f"Occupancy Map  ({len(self.nodes)} keyframes, {len(self.landmarks)} landmarks)"
             )
-            ax2.legend(loc="upper right", fontsize=8)
-            ax2.set_aspect("equal")
+            ax.legend(loc="upper right", fontsize=8)
+            ax.set_aspect("equal")
 
             plt.tight_layout()
             plt.savefig(output_path, dpi=150, bbox_inches="tight")
