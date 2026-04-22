@@ -1,9 +1,14 @@
 """PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
 
+import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import List, Optional
 import numpy as np
+
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 import torch
 
 from config import Config
@@ -124,6 +129,12 @@ def train(config: Optional[Config] = None) -> None:
         episode_actions: List[int] = []
         episode_log_probs: List[float] = []
         episode_rewards: List[float] = []
+        episode_slam_cov_trace: List[float] = []
+        episode_slam_step_ms: List[float] = []
+        episode_slam_keyframes: List[float] = []
+        episode_slam_landmarks: List[float] = []
+        episode_slam_cnn_hits = 0
+        episode_slam_samples = 0
         episode_end_reason = "max_steps"
         
         while not done:
@@ -134,6 +145,19 @@ def train(config: Optional[Config] = None) -> None:
             # Step environment
             obs_next, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
+
+            if bool(info.get("slam_enabled", False)):
+                episode_slam_samples += 1
+                if "slam_cov_trace" in info:
+                    episode_slam_cov_trace.append(float(info["slam_cov_trace"]))
+                if "slam_step_ms" in info:
+                    episode_slam_step_ms.append(float(info["slam_step_ms"]))
+                if "slam_keyframes" in info:
+                    episode_slam_keyframes.append(float(info["slam_keyframes"]))
+                if "slam_landmarks" in info:
+                    episode_slam_landmarks.append(float(info["slam_landmarks"]))
+                if bool(info.get("slam_ran_cnn", False)):
+                    episode_slam_cnn_hits += 1
             
             # Track termination reason
             if done:
@@ -187,11 +211,21 @@ def train(config: Optional[Config] = None) -> None:
             _run_ppo_update(episode + 1)
         
         episode_reward_sum = sum(episode_rewards)
+        slam_metrics = None
+        if episode_slam_samples > 0:
+            slam_metrics = {
+                "cov_trace": float(np.mean(episode_slam_cov_trace)) if episode_slam_cov_trace else 0.0,
+                "step_ms": float(np.mean(episode_slam_step_ms)) if episode_slam_step_ms else 0.0,
+                "keyframes": float(np.mean(episode_slam_keyframes)) if episode_slam_keyframes else 0.0,
+                "landmarks": float(np.mean(episode_slam_landmarks)) if episode_slam_landmarks else 0.0,
+                "cnn_ratio": float(episode_slam_cnn_hits / max(episode_slam_samples, 1)),
+            }
         diagnostics.record_episode(
             episode_end_reason,
             episode_reward_sum,
             env.min_episode_distance,
             env.current_step,
+            slam_metrics=slam_metrics,
         )
         if episode_end_reason == "goal_reached":
             ever_reached_goal = True
@@ -214,6 +248,14 @@ def train(config: Optional[Config] = None) -> None:
                 f"CollisionRate: {summary['collision_rate'] * 100:5.1f}% | "
                 f"StagnationRate: {summary['stagnation_rate'] * 100:5.1f}%"
             )
+            if "slam_cov_trace" in summary:
+                print(
+                    f"[DIAG][SLAM] CovTrace: {summary['slam_cov_trace']:.4f} | "
+                    f"StepMs: {summary.get('slam_step_ms', 0.0):6.2f} | "
+                    f"Keyframes: {summary.get('slam_keyframes', 0.0):5.1f} | "
+                    f"Landmarks: {summary.get('slam_landmarks', 0.0):5.1f} | "
+                    f"CNNRate: {summary.get('slam_cnn_ratio', 0.0) * 100:5.1f}%"
+                )
 
             if rollback_cooldown_remaining > 0:
                 rollback_cooldown_remaining -= 1

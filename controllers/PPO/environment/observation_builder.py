@@ -1,6 +1,6 @@
 """Pure geometry and observation construction helpers."""
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -29,6 +29,13 @@ def build_observation(
     endpoint: np.ndarray,
     reference_distance: float,
     heading_frame_offset: float,
+    mode: str = "baseline",
+    slam_pose: Optional[np.ndarray] = None,
+    slam_heading: Optional[float] = None,
+    slam_cov_diag: Optional[np.ndarray] = None,
+    slam_cov_trace: Optional[float] = None,
+    slam_keyframe_count: int = 0,
+    slam_landmark_count: int = 0,
 ) -> np.ndarray:
     """Build compact observation vector with goal-direction context."""
     goal_distance, goal_error = goal_geometry(pos, heading, endpoint, heading_frame_offset)
@@ -41,4 +48,38 @@ def build_observation(
         dtype=np.float32,
     )
 
-    return np.concatenate([lidar, direction_features])
+    if mode != "slam_v1":
+        return np.concatenate([lidar, direction_features])
+
+    pose_source = np.asarray(slam_pose if slam_pose is not None else pos, dtype=np.float32)
+    heading_source = float(slam_heading if slam_heading is not None else heading)
+    ref_dist = max(float(reference_distance), 1e-6)
+
+    if slam_cov_diag is None:
+        cov_diag = np.zeros(3, dtype=np.float32)
+    else:
+        cov_diag = np.asarray(slam_cov_diag, dtype=np.float32)
+        if cov_diag.size < 3:
+            cov_diag = np.pad(cov_diag, (0, 3 - cov_diag.size), mode="constant", constant_values=0.0)
+        else:
+            cov_diag = cov_diag[:3]
+
+    cov_trace = float(slam_cov_trace if slam_cov_trace is not None else float(np.sum(cov_diag)))
+
+    slam_features = np.array(
+        [
+            pose_source[0] / ref_dist,
+            pose_source[1] / ref_dist,
+            np.sin(heading_source),
+            np.cos(heading_source),
+            cov_diag[0],
+            cov_diag[1],
+            cov_diag[2],
+            cov_trace,
+            np.log1p(max(0, int(slam_keyframe_count))) / 10.0,
+            np.log1p(max(0, int(slam_landmark_count))) / 10.0,
+        ],
+        dtype=np.float32,
+    )
+
+    return np.concatenate([lidar, direction_features, slam_features])

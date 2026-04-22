@@ -63,6 +63,14 @@ class Config:
     goal_marker_height: float = 0.05  # Marker height above floor
     reference_distance: Optional[float] = None  # Start-to-goal distance, filled in at init
     force_fast_mode: bool = True  # Put Webots in FAST mode from controller at startup
+    observation_mode: str = "slam_v1"  # Observation schema mode: "baseline" or "slam_v1"
+
+    # SLAM Integration
+    enable_slam_runtime: bool = True  # Keep baseline behavior unless explicitly enabled
+    slam_cnn_checkpoint_path: Optional[str] = None  # Optional path to CNN landmark checkpoint
+    slam_cnn_update_every: int = 5  # Run CNN landmark inference every N environment steps
+    slam_pose_graph_optimize_every: int = 50  # Run map optimization every N keyframes
+    slam_telemetry_interval: int = 100  # Emit SLAM telemetry every N environment steps
 
     # Robot Control
     actions: Optional[List[Tuple[float, float]]] = None  # (steering, speed) pairs

@@ -764,6 +764,13 @@ DEF ALTINO Robot {
           occlusion TRUE
         }
         Accelerometer {
+          name "accelerometer"
+        }
+        Gyro {
+          name "gyro"
+        }
+        InertialUnit {
+          name "inertial unit"
         }
         Emitter {
         }

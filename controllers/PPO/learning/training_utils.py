@@ -72,6 +72,11 @@ class RollingDiagnostics:
         self.recent_end_reasons: List[str] = []
         self.recent_rewards: List[float] = []
         self.recent_min_dists: List[float] = []
+        self.recent_slam_cov_trace: List[float] = []
+        self.recent_slam_step_ms: List[float] = []
+        self.recent_slam_keyframes: List[float] = []
+        self.recent_slam_landmarks: List[float] = []
+        self.recent_slam_cnn_ratio: List[float] = []
         self.total_sim_steps = 0
         self.train_start_time = time.perf_counter()
 
@@ -81,11 +86,34 @@ class RollingDiagnostics:
         reward_sum: float,
         min_distance: float,
         episode_steps: int,
+        slam_metrics: Dict[str, float] | None = None,
     ) -> None:
         """Add one episode to rolling diagnostics."""
         self.recent_end_reasons.append(end_reason)
         self.recent_rewards.append(float(reward_sum))
         self.recent_min_dists.append(float(min_distance))
+        if slam_metrics is not None:
+            if "cov_trace" in slam_metrics:
+                self.recent_slam_cov_trace.append(float(slam_metrics["cov_trace"]))
+            if "step_ms" in slam_metrics:
+                self.recent_slam_step_ms.append(float(slam_metrics["step_ms"]))
+            if "keyframes" in slam_metrics:
+                self.recent_slam_keyframes.append(float(slam_metrics["keyframes"]))
+            if "landmarks" in slam_metrics:
+                self.recent_slam_landmarks.append(float(slam_metrics["landmarks"]))
+            if "cnn_ratio" in slam_metrics:
+                self.recent_slam_cnn_ratio.append(float(slam_metrics["cnn_ratio"]))
+            if len(self.recent_slam_cov_trace) > self.window_size:
+                self.recent_slam_cov_trace.pop(0)
+            if len(self.recent_slam_step_ms) > self.window_size:
+                self.recent_slam_step_ms.pop(0)
+            if len(self.recent_slam_keyframes) > self.window_size:
+                self.recent_slam_keyframes.pop(0)
+            if len(self.recent_slam_landmarks) > self.window_size:
+                self.recent_slam_landmarks.pop(0)
+            if len(self.recent_slam_cnn_ratio) > self.window_size:
+                self.recent_slam_cnn_ratio.pop(0)
+
         if len(self.recent_end_reasons) > self.window_size:
             self.recent_end_reasons.pop(0)
             self.recent_rewards.pop(0)
@@ -124,4 +152,29 @@ class RollingDiagnostics:
             "steps_per_sec": steps_per_sec,
             "realtime_factor": realtime_factor,
             "total_sim_steps": float(self.total_sim_steps),
+            **(
+                {"slam_cov_trace": float(np.mean(self.recent_slam_cov_trace))}
+                if self.recent_slam_cov_trace
+                else {}
+            ),
+            **(
+                {"slam_step_ms": float(np.mean(self.recent_slam_step_ms))}
+                if self.recent_slam_step_ms
+                else {}
+            ),
+            **(
+                {"slam_keyframes": float(np.mean(self.recent_slam_keyframes))}
+                if self.recent_slam_keyframes
+                else {}
+            ),
+            **(
+                {"slam_landmarks": float(np.mean(self.recent_slam_landmarks))}
+                if self.recent_slam_landmarks
+                else {}
+            ),
+            **(
+                {"slam_cnn_ratio": float(np.mean(self.recent_slam_cnn_ratio))}
+                if self.recent_slam_cnn_ratio
+                else {}
+            ),
         }

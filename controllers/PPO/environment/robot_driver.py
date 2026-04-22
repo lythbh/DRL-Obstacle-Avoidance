@@ -70,9 +70,26 @@ class SensorReader:
         self.lidar_inv_max_range = 1.0 / max(float(self.lidar_max_range), 1e-6)
         self._pool_starts: Optional[np.ndarray] = None
         self._pool_raw_size = 0
+        self._lidar_angles: Optional[np.ndarray] = None
+        self._lidar_angles_size = 0
 
         self.gps = supervisor.getDevice("gps")
         self.gps.enable(timestep)
+
+        self.inertial_unit = self._enable_optional_device("inertial unit")
+        self.accelerometer = self._enable_optional_device("accelerometer")
+        self.gyro = self._enable_optional_device("gyro")
+
+    def _enable_optional_device(self, name: str):
+        """Try to enable an optional device and return it when available."""
+        try:
+            device = self.supervisor.getDevice(name)
+            if device is not None:
+                device.enable(self.timestep)
+            return device
+        except Exception:
+            print(f"[PPO] WARNING: Optional device '{name}' is unavailable.")
+            return None
 
     def _pool_lidar_ranges(self, range_array: np.ndarray) -> np.ndarray:
         """Min-pool raw LiDAR beams into a fixed number of bins."""
@@ -100,6 +117,50 @@ class SensorReader:
         collision = min_range < self.collision_threshold
 
         return lidar_data, position, collision
+
+    def read_lidar_raw(self) -> np.ndarray:
+        """Read raw LiDAR ranges in meters (first layer when multi-layer LiDAR is used)."""
+        range_array = np.asarray(self.lidar.getRangeImage(), dtype=np.float32)
+        try:
+            horizontal_resolution = int(self.lidar.getHorizontalResolution())
+        except Exception:
+            horizontal_resolution = 0
+
+        if horizontal_resolution > 0 and range_array.size > horizontal_resolution:
+            range_array = range_array[:horizontal_resolution]
+
+        return np.clip(range_array, 0.0, self.lidar_max_range)
+
+    def lidar_angles(self, sample_count: Optional[int] = None) -> np.ndarray:
+        """Get LiDAR ray angles in radians for the requested sample count."""
+        if sample_count is None:
+            sample_count = int(self.read_lidar_raw().size)
+
+        sample_count = max(1, int(sample_count))
+        if self._lidar_angles is None or self._lidar_angles_size != sample_count:
+            fov = float(self.lidar.getFov())
+            self._lidar_angles = np.linspace(-fov / 2.0, fov / 2.0, sample_count, dtype=np.float32)
+            self._lidar_angles_size = sample_count
+        return self._lidar_angles.copy()
+
+    def read_imu(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Read IMU signals as roll/pitch/yaw, accelerometer, and gyroscope values."""
+        rpy = np.zeros(3, dtype=np.float32)
+        accel = np.zeros(3, dtype=np.float32)
+        gyro = np.zeros(3, dtype=np.float32)
+
+        if self.inertial_unit is not None:
+            rpy = np.asarray(self.inertial_unit.getRollPitchYaw(), dtype=np.float32)
+        if self.accelerometer is not None:
+            accel = np.asarray(self.accelerometer.getValues(), dtype=np.float32)
+        if self.gyro is not None:
+            gyro = np.asarray(self.gyro.getValues(), dtype=np.float32)
+
+        return rpy, accel, gyro
+
+    def read_gps_xyz(self) -> np.ndarray:
+        """Read GPS position (x, y, z)."""
+        return np.asarray(self.gps.getValues(), dtype=np.float32)
 
 
 class AltinoDriver:
@@ -175,6 +236,26 @@ class AltinoDriver:
         lidar, pos, collision = self.sensors.read_observation()
         heading = self._get_heading()
         return lidar, pos, heading, collision
+
+    def read_lidar_raw(self) -> np.ndarray:
+        """Read raw LiDAR ranges in meters."""
+        return self.sensors.read_lidar_raw()
+
+    def read_lidar_angles(self, sample_count: Optional[int] = None) -> np.ndarray:
+        """Get LiDAR ray angles in radians."""
+        return self.sensors.lidar_angles(sample_count)
+
+    def read_imu(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Read IMU as roll/pitch/yaw, accelerometer, and gyroscope vectors."""
+        return self.sensors.read_imu()
+
+    def read_gps_xyz(self) -> np.ndarray:
+        """Read GPS position (x, y, z)."""
+        return self.sensors.read_gps_xyz()
+
+    def get_lidar_max_range(self) -> float:
+        """Get LiDAR maximum range in meters."""
+        return float(self.sensors.lidar_max_range)
 
     def reset_position(self) -> None:
         """Reset robot to start position and orientation."""

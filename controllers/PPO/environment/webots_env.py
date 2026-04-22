@@ -9,6 +9,7 @@ from controller import Supervisor  # pyright: ignore[reportMissingImports]
 from config import Config
 from environment.observation_builder import build_observation, goal_geometry
 from environment.robot_driver import AltinoDriver
+from environment.slam_adapter import PPOSLAMAdapter, SLAMInputFrame, SLAMStateSnapshot
 from rewards.base import RewardComputer
 from rewards.penalties import calculate_clearance_penalty
 
@@ -44,6 +45,18 @@ class WebotsEnv:
 
         self.goal_marker_node = None
         self._ensure_goal_marker()
+
+        obs_mode = str(getattr(config, "observation_mode", "baseline")).strip().lower()
+        self.observation_mode = obs_mode if obs_mode in {"baseline", "slam_v1"} else "baseline"
+        self.slam_enabled = bool(getattr(config, "enable_slam_runtime", False)) and self.observation_mode == "slam_v1"
+        self.slam_adapter: Optional[PPOSLAMAdapter] = None
+        self.last_slam_snapshot: Optional[SLAMStateSnapshot] = None
+        self._wheel_radius_m = 0.033
+
+        if bool(getattr(config, "enable_slam_runtime", False)) and self.observation_mode != "slam_v1":
+            print("[PPO][SLAM] INFO: SLAM runtime requested, but observation_mode != 'slam_v1'; using baseline.")
+        if self.slam_enabled:
+            self.slam_adapter = PPOSLAMAdapter(self.timestep / 1000.0, config)
 
         self.current_step = 0
         self.episode_reward = 0.0
@@ -117,6 +130,7 @@ class WebotsEnv:
         self.current_step = 0
         self.prev_distance = None
         self.episode_reward = 0.0
+        self.last_slam_snapshot = None
         self.current_heading = 0.0
         self.current_distance = float("inf")
         self.min_episode_distance = float("inf")
@@ -136,14 +150,71 @@ class WebotsEnv:
     def _build_observation(self, lidar: np.ndarray, pos: np.ndarray, heading: float) -> np.ndarray:
         """Build compact observation vector with goal-direction context."""
         ref_dist = float(self.config.reference_distance if self.config.reference_distance is not None else 1.0)
+        slam_snapshot = self.last_slam_snapshot if self.slam_enabled else None
+        obs_pos = slam_snapshot.pose_xy if slam_snapshot is not None else pos
+        obs_heading = slam_snapshot.heading if slam_snapshot is not None else heading
+
+        slam_cov_diag = None
+        slam_cov_trace = None
+        slam_keyframes = 0
+        slam_landmarks = 0
+        if slam_snapshot is not None:
+            slam_cov_diag = slam_snapshot.covariance_diag[:3]
+            slam_cov_trace = slam_snapshot.covariance_trace
+            slam_keyframes = slam_snapshot.keyframe_count
+            slam_landmarks = slam_snapshot.landmark_count
+
         return build_observation(
             lidar,
-            pos,
-            heading,
+            obs_pos,
+            obs_heading,
             self.reward_computer.endpoint,
             ref_dist,
             self.config.heading_frame_offset,
+            mode=self.observation_mode,
+            slam_pose=slam_snapshot.pose_xy if slam_snapshot is not None else None,
+            slam_heading=slam_snapshot.heading if slam_snapshot is not None else None,
+            slam_cov_diag=slam_cov_diag,
+            slam_cov_trace=slam_cov_trace,
+            slam_keyframe_count=slam_keyframes,
+            slam_landmark_count=slam_landmarks,
         )
+
+    def _wheel_speed_to_mps(self, wheel_speed: float) -> float:
+        """Convert wheel angular speed (rad/s) to approximate linear speed (m/s)."""
+        return float(wheel_speed) * self._wheel_radius_m
+
+    def _build_slam_input_frame(self, heading: float, commanded_wheel_speed: float) -> SLAMInputFrame:
+        """Create one SLAM input frame from current raw robot sensors."""
+        lidar_raw = self.robot.read_lidar_raw()
+        lidar_angles = self.robot.read_lidar_angles(lidar_raw.size)
+        gps_xyz = self.robot.read_gps_xyz()
+        rpy, accel, gyro = self.robot.read_imu()
+        return SLAMInputFrame(
+            lidar_ranges=lidar_raw,
+            lidar_angles=lidar_angles,
+            gps_xyz=gps_xyz,
+            heading=float(heading),
+            rpy=rpy,
+            accel=accel,
+            gyro=gyro,
+            commanded_speed_mps=self._wheel_speed_to_mps(commanded_wheel_speed),
+        )
+
+    def _attach_slam_info(self, info: Dict[str, Any]) -> None:
+        """Append SLAM telemetry and health metrics to info for diagnostics."""
+        if not self.slam_enabled or self.last_slam_snapshot is None:
+            return
+
+        snapshot = self.last_slam_snapshot
+        telemetry = snapshot.telemetry
+        info["slam_enabled"] = True
+        info["slam_cov_trace"] = float(snapshot.covariance_trace)
+        info["slam_keyframes"] = int(snapshot.keyframe_count)
+        info["slam_landmarks"] = int(snapshot.landmark_count)
+        info["slam_step_ms"] = float(telemetry.total_ms)
+        info["slam_ran_cnn"] = bool(telemetry.ran_cnn)
+        info["slam_cnn_landmarks"] = int(telemetry.cnn_landmark_count)
 
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Reset environment and return initial observation."""
@@ -157,17 +228,27 @@ class WebotsEnv:
             self.robot.step(self.timestep)
 
         lidar, pos, heading, collision = self.robot.read_sensors()
-        self.current_pos = pos
-        self.current_heading = heading
+        if self.slam_enabled and self.slam_adapter is not None:
+            self.last_slam_snapshot = self.slam_adapter.reset()
+            initial_frame = self._build_slam_input_frame(heading, commanded_wheel_speed=0.0)
+            self.last_slam_snapshot = self.slam_adapter.step(initial_frame)
+
+        geometry_pos = self.last_slam_snapshot.pose_xy if self.last_slam_snapshot is not None else pos
+        geometry_heading = self.last_slam_snapshot.heading if self.last_slam_snapshot is not None else heading
+
+        self.current_pos = np.asarray(geometry_pos, dtype=np.float32)
+        self.current_heading = float(geometry_heading)
         self.collision = collision
-        self.current_distance, _ = self._goal_geometry(pos, heading)
+        self.current_distance, _ = self._goal_geometry(self.current_pos, self.current_heading)
         self.min_episode_distance = self.current_distance
         self.best_distance = self.current_distance
         self.steps_without_progress = 0
         self.reward_computer.reference_distance = max(self.current_distance, 1e-6)
 
         observation = self._build_observation(lidar, pos, heading)
-        return observation, {}
+        info: Dict[str, Any] = {}
+        self._attach_slam_info(info)
+        return observation, info
 
     def step(self, action_idx: int) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
         """Step environment."""
@@ -182,11 +263,18 @@ class WebotsEnv:
                 break
 
         lidar, pos, heading, collision = self.robot.read_sensors()
-        self.current_pos = pos
-        self.current_heading = heading
+        if self.slam_enabled and self.slam_adapter is not None:
+            frame = self._build_slam_input_frame(heading, commanded_wheel_speed=speed)
+            self.last_slam_snapshot = self.slam_adapter.step(frame)
+
+        geometry_pos = self.last_slam_snapshot.pose_xy if self.last_slam_snapshot is not None else pos
+        geometry_heading = self.last_slam_snapshot.heading if self.last_slam_snapshot is not None else heading
+
+        self.current_pos = np.asarray(geometry_pos, dtype=np.float32)
+        self.current_heading = float(geometry_heading)
         self.collision = collision
         min_lidar_norm = float(np.min(lidar)) if lidar.size > 0 else 1.0
-        self.current_distance, goal_error = self._goal_geometry(pos, heading)
+        self.current_distance, goal_error = self._goal_geometry(self.current_pos, self.current_heading)
         if self.current_distance + 1e-6 < self.min_episode_distance:
             self.min_episode_distance = self.current_distance
         if self.current_distance < (self.best_distance - self.config.stagnation_progress_delta):
@@ -215,6 +303,7 @@ class WebotsEnv:
         terminated = collision
         truncated = self.current_step >= self.config.max_steps
         info: Dict[str, Any] = {}
+        self._attach_slam_info(info)
 
         if collision:
             info["reset_reason"] = "collision"
