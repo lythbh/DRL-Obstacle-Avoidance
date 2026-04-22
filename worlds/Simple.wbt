@@ -733,6 +733,8 @@ DEF ALTINO Robot {
         }
         Accelerometer {
         }
+        Gyro {
+        }
         Emitter {
         }
         Receiver {

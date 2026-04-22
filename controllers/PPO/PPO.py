@@ -1,11 +1,27 @@
 """PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Tuple, List, Optional, Dict, Any, Union
 import numpy as np
 import torch
 from torch import multiprocessing, nn
 
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
+
+# ── SLAM sensor-processing modules ──────────────────────────────────────────
+# Controllers live one level up from controllers/PPO/
+sys.path.insert(0, str(Path(__file__).parent.parent))
+try:
+    from lidar_preprocessing import LiDARPreprocessor, LiDARFeatures  # type: ignore
+    from imu_filter import IMUProcessor, IMUState                       # type: ignore
+    from iekf_backend import IEKFBackend                                # type: ignore
+    _SLAM_AVAILABLE = True
+    print("[PPO] SLAM sensor modules loaded OK", flush=True)
+except ImportError as _slam_err:
+    _SLAM_AVAILABLE = False
+    print(f"[PPO] WARNING: SLAM modules not importable ({_slam_err}). "
+          "Falling back to basic sensor processing.", flush=True)
 
 
 # ============================================================================
@@ -148,57 +164,159 @@ class MotorController:
 
 
 class SensorReader:
-    """Manages LiDAR and GPS sensors."""
-    
+    """Manages LiDAR, GPS, accelerometer, and gyroscope sensors."""
+
     def __init__(self, supervisor: Supervisor, timestep: int, collision_threshold: float):
         """Initialize sensors."""
         self.supervisor = supervisor
         self.timestep = timestep
         self.collision_threshold = collision_threshold
-        
+
         # LiDAR
         self.lidar = supervisor.getDevice("lidar")
         self.lidar.enable(timestep)
         self.lidar_max_range = self.lidar.getMaxRange()
-        
+
         # GPS
         self.gps = supervisor.getDevice("gps")
         self.gps.enable(timestep)
 
+        # Accelerometer
         self.accelerometer = supervisor.getDevice("accelerometer")
         self.accelerometer.enable(timestep)
-    
-    def read_observation(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, bool]:
-        """Read LiDAR, GPS, and accelerometer data.
-        
+
+        # Gyroscope (needed for IMU filtering and IEKF odometry)
+        try:
+            self.gyro = supervisor.getDevice("gyro")
+            self.gyro.enable(timestep)
+            self._has_gyro = True
+        except Exception:
+            self.gyro = None
+            self._has_gyro = False
+            print("[PPO] WARNING: 'gyro' device not found – gyro readings will be zero.", flush=True)
+
+    def read_observation(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, bool]:
+        """Read raw sensor data (unnormalized for SLAM preprocessing).
+
         Returns:
-            lidar_data: Normalized LiDAR ranges [0, 1]
-            position: GPS [x, y] in world coordinates
-            acceleration: Accelerometer [x, y, z] in m/s²
-            collision: Boolean collision detection
+            raw_ranges:  Raw LiDAR range image in metres (not normalized)
+            position:    GPS [x, y] in world coordinates
+            accel:       Accelerometer [x, y, z] in m/s²
+            gyro:        Gyroscope [x, y, z] in rad/s (zeros if unavailable)
+            collision:   True when any valid range is below collision_threshold
         """
-        # Read and normalize LiDAR
-        range_array = np.array(self.lidar.getRangeImage(), dtype=np.float32)
-        lidar_data = np.clip(range_array, 0, self.lidar_max_range)
-        lidar_data = lidar_data / self.lidar_max_range
-        
-        # Read GPS
+        raw_ranges = np.array(self.lidar.getRangeImage(), dtype=np.float32)
+
         gps_values = self.gps.getValues()
         position = np.array([gps_values[0], gps_values[1]], dtype=np.float32)
-        
-        # Read accelerometer
+
         accel_values = self.accelerometer.getValues()
-        acceleration = np.array([accel_values[0], accel_values[1], accel_values[2]], dtype=np.float32)
-        
-        # Collision detection
-        collision = bool(np.any(range_array < self.collision_threshold))
-        
-        return lidar_data, position, acceleration, collision
+        accel = np.array([accel_values[0], accel_values[1], accel_values[2]], dtype=np.float32)
+
+        if self._has_gyro:
+            gyro_values = self.gyro.getValues()
+            gyro = np.array([gyro_values[0], gyro_values[1], gyro_values[2]], dtype=np.float32)
+        else:
+            gyro = np.zeros(3, dtype=np.float32)
+
+        # Collision: ignore zero/invalid returns (below min_range)
+        valid = raw_ranges[raw_ranges > 0.01]
+        collision = bool(len(valid) > 0 and float(valid.min()) < self.collision_threshold)
+
+        return raw_ranges, position, accel, gyro, collision
+
+
+class SLAMProcessor:
+    """
+    IMU filtering + IEKF heading estimation for the PPO controller.
+
+    Per-timestep pipeline:
+      1. IMUProcessor (Madgwick + EKF) – filtered quaternion, accel, gyro.
+      2. IEKF propagate_odom           – heading estimate from wheel odometry + gyro.
+      3. Sector LiDAR (vectorised)     – 16 angular-sector min-ranges, normalised.
+
+    The expensive LiDARPreprocessor (Python curvature loop) and IEKF
+    measurement update (O(N_pts × N_map) matching) are intentionally omitted
+    from the hot path to keep each timestep fast.
+    """
+
+    WHEEL_RADIUS: float = 0.033   # metres – ALTINO wheel radius
+    N_SECTORS:    int   = 16      # LiDAR angular sectors for the observation
+
+    def __init__(self, lidar_max_range: float, dt: float) -> None:
+        self._dt = dt
+        self._lidar_max_range = lidar_max_range
+
+        if _SLAM_AVAILABLE:
+            self.imu_proc = IMUProcessor(dt=dt)
+            self.iekf = IEKFBackend()
+        else:
+            self.imu_proc = None   # type: ignore[assignment]
+            self.iekf = None       # type: ignore[assignment]
+
+    def reset(self, init_pos: np.ndarray, init_heading: float) -> None:
+        """Reset filter states at episode start using known robot pose."""
+        if not _SLAM_AVAILABLE:
+            return
+        self.imu_proc.reset()
+        self.iekf = IEKFBackend(
+            init_pos=init_pos.astype(np.float64),
+            init_heading=float(init_heading),
+        )
+
+    def sector_lidar(self, raw_ranges: np.ndarray) -> np.ndarray:
+        """Vectorised 16-sector min-range from the raw LiDAR image.
+
+        Invalid/zero returns are treated as max range (no obstacle).
+        Returns a (16,) float32 array normalised to [0, 1].
+        """
+        n = len(raw_ranges)
+        # Replace invalid returns with max range so they don't falsely show as obstacles
+        valid = np.where(raw_ranges > 0.01, raw_ranges, self._lidar_max_range)
+
+        # Pad to nearest multiple of N_SECTORS, then reshape for fast min per sector
+        remainder = n % self.N_SECTORS
+        if remainder:
+            pad = self.N_SECTORS - remainder
+            valid = np.concatenate([valid, np.full(pad, self._lidar_max_range, dtype=np.float32)])
+
+        sectors = valid.reshape(self.N_SECTORS, -1).min(axis=1)
+        return np.clip(sectors / self._lidar_max_range, 0.0, 1.0).astype(np.float32)
+
+    def process(
+        self,
+        raw_ranges: np.ndarray,
+        accel: np.ndarray,
+        gyro: np.ndarray,
+        cmd_speed_rads: float,
+    ) -> Tuple[np.ndarray, Any]:
+        """
+        Run one sensor-processing step.
+
+        Returns:
+            lidar_sectors: (16,) normalised sector min-ranges
+            imu_state:     IMUState with filtered accel/gyro/quaternion
+                           (or None if SLAM unavailable)
+        """
+        lidar_sectors = self.sector_lidar(raw_ranges)
+
+        if not _SLAM_AVAILABLE:
+            return lidar_sectors, None
+
+        # ── 1. IMU filtering (Madgwick + EKF) ───────────────────────────────
+        imu_state = self.imu_proc.step(gyro, accel)
+
+        # ── 2. IEKF wheel-odometry propagation (heading estimate) ────────────
+        cmd_speed_ms = cmd_speed_rads * self.WHEEL_RADIUS
+        self.iekf.propagate_odom(cmd_speed_ms, float(gyro[2]), self._dt)
+        # Measurement update skipped – avoids O(N_pts × N_map) matching cost.
+
+        return lidar_sectors, imu_state
 
 
 class AltinoDriver:
     """High-level robot control interface."""
-    
+
     def __init__(self, config: Config):
         """Initialize robot with config."""
         global _supervisor
@@ -206,15 +324,24 @@ class AltinoDriver:
         self.supervisor = _supervisor
         self.config = config
         self.timestep = int(self.supervisor.getBasicTimeStep())  # type: ignore[union-attr]
-        
+        self._dt: float = self.timestep / 1000.0
+
         # Hardware components
         self.motors = MotorController(self.supervisor)  # type: ignore[arg-type]
         self.sensors = SensorReader(
             self.supervisor,
             self.timestep,
-            config.collision_threshold
+            config.collision_threshold,
         )  # type: ignore[arg-type]
-        
+
+        # SLAM sensor-processing pipeline
+        self.slam = SLAMProcessor(
+            lidar_max_range=self.sensors.lidar_max_range,
+            dt=self._dt,
+        )
+        # Commanded wheel speed (rad/s) – updated by set_speed(); used for IEKF odometry
+        self._cmd_speed_rads: float = 0.0
+
         # Position reset
         try:
             self.altino_node = self.supervisor.getFromDef('ALTINO')  # type: ignore[union-attr]
@@ -229,28 +356,27 @@ class AltinoDriver:
     def set_steering(self, angle: float) -> None:
         """Set steering angle."""
         self.motors.set_steering(angle)
-    
+
     def set_speed(self, speed: float) -> None:
-        """Set velocity."""
+        """Set velocity and record it for IEKF wheel-odometry propagation."""
         self.motors.set_speed(speed)
-    
+        self._cmd_speed_rads = speed
+
     def get_device(self, name: str):
         """Get a named device from supervisor."""
         return self.supervisor.getDevice(name)  # type: ignore[union-attr]
-    
+
     def step(self, timestep: int) -> int:
         """Step simulation."""
         return self.supervisor.step(timestep)  # type: ignore[union-attr]
-    
+
     def _get_heading(self) -> float:
-        """Estimate robot yaw in world frame from rotation field."""
+        """Estimate robot yaw from the Webots rotation field (axis-angle → yaw)."""
         if self.rotation_field is None:
             return 0.0
-
         rotation = self.rotation_field.getSFRotation()
         if rotation is None or len(rotation) < 4:
             return 0.0
-
         x, y, z, angle = map(float, rotation)
         axis_norm = np.sqrt(x * x + y * y + z * z)
         if axis_norm < 1e-8:
@@ -258,8 +384,6 @@ class AltinoDriver:
         x /= axis_norm
         y /= axis_norm
         z /= axis_norm
-
-        # Convert axis-angle to rotation matrix and extract yaw.
         c = float(np.cos(angle))
         s = float(np.sin(angle))
         one_c = 1.0 - c
@@ -268,11 +392,34 @@ class AltinoDriver:
         yaw = float(np.arctan2(r10, r00))
         return float(np.arctan2(np.sin(yaw), np.cos(yaw)))
 
-    def read_sensors(self) -> Tuple[np.ndarray, np.ndarray, float, np.ndarray, bool]:
-        """Read LiDAR, GPS, heading, accelerometer and collision status."""
-        lidar, pos, accel, collision = self.sensors.read_observation()
-        heading = self._get_heading()
-        return lidar, pos, heading, accel, collision
+    def reset_slam(self) -> None:
+        """Seed SLAM filters from GPS + Webots heading after physics settle."""
+        gps_vals = self.sensors.gps.getValues()
+        init_pos = np.array([gps_vals[0], gps_vals[1]], dtype=np.float32)
+        self.slam.reset(init_pos, self._get_heading())
+        self._cmd_speed_rads = 0.0
+
+    def read_sensors(self) -> Tuple[np.ndarray, np.ndarray, float, Any, bool]:
+        """Read and process all sensor data for one timestep.
+
+        Returns:
+            lidar_sectors: (16,) normalised sector min-ranges
+            position:      GPS [x, y] in world frame
+            heading:       Yaw in radians (IEKF if available, else Webots field)
+            imu_state:     Filtered IMU state (quaternion, accel_body, gyro_body)
+            collision:     True when an obstacle is within collision_threshold
+        """
+        raw_ranges, pos, accel, gyro, collision = self.sensors.read_observation()
+
+        lidar_sectors, imu_state = self.slam.process(
+            raw_ranges, accel, gyro, self._cmd_speed_rads
+        )
+
+        heading = (self.slam.iekf.state.heading
+                   if (_SLAM_AVAILABLE and self.slam.iekf is not None)
+                   else self._get_heading())
+
+        return lidar_sectors, pos, heading, imu_state, collision
     
     def reset_position(self) -> None:
         """Reset robot to start position and orientation."""
@@ -490,8 +637,23 @@ class WebotsEnv:
         goal_error = float(np.arctan2(np.sin(goal_direction - heading), np.cos(goal_direction - heading)))
         return goal_distance, goal_error
 
-    def _build_observation(self, lidar: np.ndarray, pos: np.ndarray, heading: float, accel: np.ndarray) -> np.ndarray:
-        """Build observation vector with heading, goal-direction context, and acceleration."""
+    def _build_observation(
+        self,
+        lidar_sectors: np.ndarray,
+        pos: np.ndarray,
+        heading: float,
+        imu_state: Any,
+    ) -> np.ndarray:
+        """Build a 33-D observation vector.
+
+        Layout:
+          [0:16]  lidar_sectors – 16 angular-sector min-ranges, normalised [0,1]
+          [16:18] GPS position  – world-frame [x, y]
+          [18:23] direction     – sin/cos heading, sin/cos goal_error, norm dist
+          [23:26] accel_body    – filtered accelerometer (÷10, clipped)
+          [26:29] gyro_body     – filtered gyroscope (÷π, clipped)
+          [29:33] quaternion    – orientation [w, x, y, z]
+        """
         goal_distance, goal_error = self._goal_geometry(pos, heading)
         ref_dist = float(self.config.reference_distance if self.config.reference_distance is not None else 1.0)
 
@@ -503,38 +665,54 @@ class WebotsEnv:
             goal_distance / max(ref_dist, 1e-6),
         ], dtype=np.float32)
 
-        # Normalize acceleration (assuming typical range, clip to -10 to 10 m/s²)
-        accel_norm = np.clip(accel, -10.0, 10.0) / 10.0
+        if _SLAM_AVAILABLE and imu_state is not None:
+            accel_norm = np.clip(imu_state.accel_body, -10.0, 10.0) / 10.0
+            gyro_norm  = np.clip(imu_state.gyro_body,  -np.pi, np.pi) / np.pi
+            quat       = imu_state.quaternion.astype(np.float32)
+        else:
+            accel_norm = np.zeros(3, dtype=np.float32)
+            gyro_norm  = np.zeros(3, dtype=np.float32)
+            quat       = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
 
-        return np.concatenate([lidar, pos, direction_features, accel_norm])
+        return np.concatenate([
+            lidar_sectors,      # (16,)
+            pos,                # (2,)
+            direction_features, # (5,)
+            accel_norm,         # (3,)
+            gyro_norm,          # (3,)
+            quat,               # (4,)
+        ])  # total 33
     
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Reset environment and return initial observation.
-        
+
         Returns:
-            observation: Initial LiDAR + GPS observation
-            info: Info dict (empty on reset)
+            observation: Initial SLAM-processed sensor observation
+            info:        Empty info dict
         """
         # Stop motors before reset
         self.robot.motors.stop()
-        
-        # Reset position
+
+        # Reset robot position
         self.robot.reset_position()
         self._reset_episode_state()
-        
+
         # Settle physics
         for _ in range(self.config.reset_settle_steps):
             self.robot.step(self.timestep)
-        
-        # Get observation
-        lidar, pos, heading, accel, collision = self.robot.read_sensors()
+
+        # Re-seed SLAM filters from ground-truth pose after settling
+        self.robot.reset_slam()
+
+        # Get initial observation
+        lidar_sectors, pos, heading, imu_state, collision = self.robot.read_sensors()
         self.current_pos = pos
         self.current_heading = heading
         self.collision = collision
         self.current_distance, _ = self._goal_geometry(pos, heading)
         self.min_episode_distance = self.current_distance
-        
-        observation = self._build_observation(lidar, pos, heading, accel)
+
+        observation = self._build_observation(lidar_sectors, pos, heading, imu_state)
         return observation, {}
     
     def step(self, action_idx: int) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
@@ -554,12 +732,12 @@ class WebotsEnv:
         assert self.config.actions is not None, "Actions not initialized"
         steering, speed = self.config.actions[action_idx]
         self.robot.set_steering(steering)
-        self.robot.set_speed(speed)
+        self.robot.set_speed(speed)  # also updates _cmd_speed_rads for IEKF
         self.robot.step(self.timestep)
         self.current_step += 1
-        
-        # Sense
-        lidar, pos, heading, accel, collision = self.robot.read_sensors()
+
+        # Sense (SLAM-processed)
+        lidar_sectors, pos, heading, imu_state, collision = self.robot.read_sensors()
         self.current_pos = pos
         self.current_heading = heading
         self.collision = collision
@@ -567,9 +745,15 @@ class WebotsEnv:
         reached_new_best_distance = self.current_distance + 1e-6 < self.min_episode_distance
         if reached_new_best_distance:
             self.min_episode_distance = self.current_distance
-        min_lidar_norm = float(np.min(lidar))
+
+        # Sectors are already normalised [0,1]; min = closest obstacle reading
+        min_lidar_norm = float(lidar_sectors.min())
         speed_norm = float(speed / max(self.config.max_speed, 1e-6))
         goal_reached = self.current_distance < self.config.goal_threshold
+
+        accel_for_reward = (imu_state.accel_body
+                            if (_SLAM_AVAILABLE and imu_state is not None)
+                            else np.zeros(3, dtype=np.float32))
 
         # Termination bookkeeping
         terminated = False
@@ -586,7 +770,7 @@ class WebotsEnv:
             min_lidar_norm,
             speed_norm,
             reached_new_best_distance,
-            accel,
+            accel_for_reward,
         )
         self.prev_distance = new_distance
         self.episode_reward += reward
@@ -624,9 +808,8 @@ class WebotsEnv:
         if terminated or truncated:
             self.robot.motors.stop()
         
-        # Observation
-        observation = self._build_observation(lidar, pos, heading, accel)
-        
+        observation = self._build_observation(lidar_sectors, pos, heading, imu_state)
+
         return observation, reward, terminated, truncated, info
 
 
