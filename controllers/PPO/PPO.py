@@ -86,6 +86,10 @@ def train(config: Optional[Config] = None) -> None:
     best_episode = 0
     best_actor_state = _clone_state_dict_to_cpu(agent.actor.state_dict())
     best_critic_state = _clone_state_dict_to_cpu(agent.critic.state_dict())
+    ever_reached_goal = False
+    collapsed_windows = 0
+    rollback_cooldown_remaining = 0
+    rollback_count = 0
 
     def _run_ppo_update(progress_episode: int) -> None:
         """Run PPO update on buffered trajectories and clear buffer."""
@@ -189,6 +193,8 @@ def train(config: Optional[Config] = None) -> None:
             env.min_episode_distance,
             env.current_step,
         )
+        if episode_end_reason == "goal_reached":
+            ever_reached_goal = True
 
         if diagnostics.recent_rewards:
             current_score = float(np.mean(diagnostics.recent_rewards))
@@ -208,6 +214,37 @@ def train(config: Optional[Config] = None) -> None:
                 f"CollisionRate: {summary['collision_rate'] * 100:5.1f}% | "
                 f"StagnationRate: {summary['stagnation_rate'] * 100:5.1f}%"
             )
+
+            if rollback_cooldown_remaining > 0:
+                rollback_cooldown_remaining -= 1
+
+            should_check_rollback = (
+                config.enable_policy_rollback
+                and ever_reached_goal
+                and (episode + 1) >= max(1, int(config.rollback_min_episodes))
+            )
+            if should_check_rollback:
+                if summary["goal_rate"] < float(config.rollback_goal_rate_threshold):
+                    collapsed_windows += 1
+                else:
+                    collapsed_windows = 0
+
+                if (
+                    collapsed_windows >= max(1, int(config.rollback_patience_windows))
+                    and rollback_cooldown_remaining == 0
+                    and best_episode > 0
+                ):
+                    agent.actor.load_state_dict(best_actor_state)
+                    agent.critic.load_state_dict(best_critic_state)
+                    agent.optimizer.state.clear()
+                    trajectory_buffer.clear()
+                    rollback_count += 1
+                    rollback_cooldown_remaining = max(0, int(config.rollback_cooldown_windows))
+                    collapsed_windows = 0
+                    print(
+                        f"[ROLLBACK] Restored best policy from episode {best_episode} "
+                        f"(score {best_score:.2f}) after sustained goal-rate collapse."
+                    )
 
     # Apply one last PPO update for any leftover rollout data when episodes
     # are not divisible by update_every.
@@ -233,6 +270,8 @@ def train(config: Optional[Config] = None) -> None:
         f"[TRAIN] Saved best checkpoint from episode {best_episode} "
         f"(score {best_score:.2f}) to {checkpoint_path}"
     )
+    if config.enable_policy_rollback:
+        print(f"[TRAIN] Rollbacks performed: {rollback_count}")
     
     # Cleanup
     env.robot.motors.stop()

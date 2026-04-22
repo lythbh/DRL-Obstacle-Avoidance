@@ -1,6 +1,6 @@
 """Configuration definitions for PPO training and environment behavior."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -11,8 +11,8 @@ class Config:
     """Training and environment hyperparameters."""
 
     # Training
-    episodes: int = 2500
-    update_every: int = 10  # PPO update frequency (episodes)
+    episodes: int = 500
+    update_every: int = 4  # PPO update frequency (episodes)
     epochs: int = 2  # Optimization epochs per update
     batch_size: int = 512
     diagnostics_window: int = 25  # Episode window size for diagnostics/performance logs
@@ -23,14 +23,19 @@ class Config:
     gamma: float = 0.99  # Discount factor
     epsilon: float = 0.2  # PPO clip parameter
     learning_rate: float = 2e-4
-    entropy_coef: float = 0.008  # Entropy regularization (initial)
-    entropy_final_coef: float = 0.003  # Entropy regularization (final)
+    entropy_coef: float = 0.006  # Entropy regularization (initial)
+    entropy_final_coef: float = 0.0005  # Entropy regularization (final)
     max_grad_norm: float = 0.5  # Gradient clipping for stabler PPO updates
     hidden_size: int = 64  # Network hidden layer size
     train_device: str = "auto"  # "auto", "cpu", or "cuda"
+    enable_policy_rollback: bool = True  # Reload best model if rolling goal-rate collapses
+    rollback_goal_rate_threshold: float = 0.02  # Treat windows below this goal-rate as collapse
+    rollback_patience_windows: int = 3  # Consecutive collapsed windows before rollback
+    rollback_cooldown_windows: int = 2  # Windows to wait before another rollback
+    rollback_min_episodes: int = 100  # Earliest episode to allow rollback checks
 
     # Environment
-    max_steps: int = 800  # Max steps per episode
+    max_steps: int = 3000  # Max steps per episode
     collision_threshold: float = 0.1  # LiDAR distance threshold for collision
     low_score_threshold: float = -300.0  # Episode reset threshold
     collision_penalty: float = -80.0  # Penalty when collision happens
@@ -61,7 +66,7 @@ class Config:
 
     # Robot Control
     actions: Optional[List[Tuple[float, float]]] = None  # (steering, speed) pairs
-    start_position: Optional[List[float]] = None  # [x, y, z]
+    start_position: Optional[List[float]] = field(default_factory=lambda: [-2, 0, 0.02])  # [x, y, z]
     start_rotation: Optional[List[float]] = None  # [x, y, z, w]
     start_position_noise: float = 0.0  # Random position jitter at reset
     start_yaw_noise: float = 0.1  # Random yaw jitter at reset
