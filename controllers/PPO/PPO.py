@@ -326,6 +326,7 @@ class SLAMProcessor:
         accel: np.ndarray,
         gyro: np.ndarray,
         cmd_speed_rads: float,
+        gps_pos: np.ndarray = None,
     ) -> Tuple[np.ndarray, Any]:
         """Run one sensor-processing step.
 
@@ -341,13 +342,13 @@ class SLAMProcessor:
         # ── 1. IMU filter ────────────────────────────────────────────────────
         imu_state = self.imu_proc.step(gyro, accel)
 
-        # ── 2. IEKF odometry propagation (heading) ───────────────────────────
+        # ── 2. IEKF odometry propagation (heading only; GPS used for position) ─
         cmd_speed_ms = cmd_speed_rads * self.WHEEL_RADIUS
         self.iekf.propagate_odom(cmd_speed_ms, float(gyro[2]), self._dt)
 
-        # ── 3. Map update (keyframe-gated, cheap when not triggered) ─────────
-        pos     = self.iekf.state.position
+        # ── 3. Map update: use GPS position if available, else IEKF ──────────
         heading = self.iekf.state.heading
+        pos = gps_pos if gps_pos is not None else self.iekf.state.position
         pts_2d  = self._scan_to_world(raw_ranges, pos, heading)
         self.slam_map.try_add_keyframe(
             float(pos[0]), float(pos[1]), heading, scan_points=pts_2d
@@ -456,7 +457,7 @@ class AltinoDriver:
         raw_ranges, pos, accel, gyro, collision = self.sensors.read_observation()
 
         lidar_sectors, imu_state = self.slam.process(
-            raw_ranges, accel, gyro, self._cmd_speed_rads
+            raw_ranges, accel, gyro, self._cmd_speed_rads, gps_pos=pos
         )
 
         heading = (self.slam.iekf.state.heading
@@ -662,9 +663,10 @@ class WebotsEnv:
         self.prev_distance: Optional[float] = None
         self.was_in_goal: bool = False
 
-        # Per-run output folder for SLAM maps (one folder per training session)
+        # Per-run output folder for SLAM maps (DRL-Obstacle-Avoidance/plots/<timestamp>/)
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.run_folder = os.path.join("slam_runs", ts)
+        _repo_root = Path(__file__).parent.parent.parent
+        self.run_folder = str(_repo_root / "plots" / ts)
         os.makedirs(self.run_folder, exist_ok=True)
         self._episode_count = 0
         print(f"[PPO] SLAM maps will be saved to: {self.run_folder}", flush=True)
