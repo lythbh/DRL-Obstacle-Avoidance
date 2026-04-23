@@ -52,7 +52,9 @@ class Config:
     latent_size: int = 128  # Encoder output size before the recurrent core
     lstm_hidden_size: int = 128  # Hidden size of the recurrent core
     lstm_layers: int = 1
-    slam_pose_dim: int = 6  # [x, y, z, roll, pitch, yaw] when using split SLAM observations
+    lidar_sector_dim: int = 16
+    pose_goal_dim: int = 7  # [x, y] + [sin/cos heading, sin/cos goal_error, norm dist]
+    imu_feature_dim: int = 10  # accel(3) + gyro(3) + quaternion(4)
     occupancy_grid_shape: Optional[Tuple[int, ...]] = None  # Optional CNN shape, e.g. (1, 16, 16)
     
     # Environment
@@ -877,7 +879,7 @@ class WebotsEnv:
 # ============================================================================
 
 class SLAMActorCritic(nn.Module):
-    """Actor-critic network with SLAM-aware encoding and an LSTM core."""
+    """Actor-critic network with lightweight SLAM feature branches and an LSTM core."""
 
     def __init__(
         self,
@@ -890,20 +892,41 @@ class SLAMActorCritic(nn.Module):
         self.obs_size = obs_size
         self.action_dim = action_dim
         self.action_space = action_space
-        self.pose_dim = min(config.slam_pose_dim, obs_size)
         self.grid_shape = config.occupancy_grid_shape
+        self.obstacle_dim = config.lidar_sector_dim
+        self.pose_goal_dim = config.pose_goal_dim
+        self.imu_dim = config.imu_feature_dim
+        self.structured_obs_dim = self.obstacle_dim + self.pose_goal_dim + self.imu_dim
+        if obs_size < self.structured_obs_dim:
+            raise ValueError(
+                f"Observation size {obs_size} is smaller than the structured feature layout "
+                f"({self.structured_obs_dim})."
+            )
 
-        self.pose_encoder = nn.Sequential(
-            nn.Linear(self.pose_dim, config.hidden_size),
+        branch_latent_dim = max(config.latent_size // 2, 32)
+        self.obstacle_encoder = nn.Sequential(
+            nn.Linear(self.obstacle_dim, config.hidden_size),
             nn.ReLU(),
-            nn.Linear(config.hidden_size, config.latent_size),
+            nn.Linear(config.hidden_size, branch_latent_dim),
+            nn.ReLU(),
+        )
+        self.pose_goal_encoder = nn.Sequential(
+            nn.Linear(self.pose_goal_dim, config.hidden_size),
+            nn.ReLU(),
+            nn.Linear(config.hidden_size, branch_latent_dim),
+            nn.ReLU(),
+        )
+        self.imu_encoder = nn.Sequential(
+            nn.Linear(self.imu_dim, config.hidden_size),
+            nn.ReLU(),
+            nn.Linear(config.hidden_size, branch_latent_dim),
             nn.ReLU(),
         )
 
         grid_latent_dim = config.latent_size
         self.grid_encoder_cnn: Optional[nn.Module]
         self.grid_encoder_mlp: Optional[nn.Module]
-        self.grid_feature_dim = max(obs_size - self.pose_dim, 0)
+        self.grid_feature_dim = max(obs_size - self.structured_obs_dim, 0)
         if self.grid_shape is not None:
             if len(self.grid_shape) == 2:
                 in_channels = 1
@@ -937,9 +960,11 @@ class SLAMActorCritic(nn.Module):
             self.grid_encoder_mlp = None
             grid_latent_dim = 0
 
-        fusion_input_dim = config.latent_size + grid_latent_dim
+        fusion_input_dim = 3 * branch_latent_dim + grid_latent_dim
         self.encoder = nn.Sequential(
-            nn.Linear(fusion_input_dim, config.latent_size),
+            nn.Linear(fusion_input_dim, config.hidden_size),
+            nn.ReLU(),
+            nn.Linear(config.hidden_size, config.latent_size),
             nn.ReLU(),
         )
         self.lstm = nn.LSTM(
@@ -1002,18 +1027,30 @@ class SLAMActorCritic(nn.Module):
         observation: Union[np.ndarray, torch.Tensor, Dict[str, Union[np.ndarray, torch.Tensor]]],
         recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
         done_mask: Optional[torch.Tensor],
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], int, int]:
-        """Split observation into pose and occupancy-grid components."""
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor], int, int]:
+        """Split observation into semantic SLAM feature groups."""
         if isinstance(observation, dict):
-            pose_input = observation.get("pose", observation.get("slam_pose"))
-            if pose_input is None:
-                raise KeyError("Observation dict must contain 'pose' or 'slam_pose'.")
+            obstacle_input = observation.get("obstacle_features", observation.get("lidar_sectors"))
+            pose_goal_input = observation.get("pose_goal_features", observation.get("pose_goal"))
+            imu_input = observation.get("imu_features", observation.get("imu"))
+            if obstacle_input is None or pose_goal_input is None or imu_input is None:
+                raise KeyError(
+                    "Observation dict must contain obstacle/lidar, pose_goal, and imu feature groups."
+                )
             grid_input = observation.get("grid", observation.get("occupancy_grid", observation.get("feature_map")))
-            pose = self._prepare_tensor_component(pose_input, recurrent_state, done_mask, trailing_dims=1)
-            batch_size, seq_len = pose.shape[:2]
+            obstacle = self._prepare_tensor_component(
+                obstacle_input, recurrent_state, done_mask, trailing_dims=1
+            )
+            pose_goal = self._prepare_tensor_component(
+                pose_goal_input, recurrent_state, done_mask, trailing_dims=1
+            )
+            imu = self._prepare_tensor_component(
+                imu_input, recurrent_state, done_mask, trailing_dims=1
+            )
+            batch_size, seq_len = obstacle.shape[:2]
             grid = None
             if grid_input is not None:
-                grid_tensor = torch.as_tensor(grid_input, dtype=torch.float32, device=pose.device)
+                grid_tensor = torch.as_tensor(grid_input, dtype=torch.float32, device=obstacle.device)
                 grid_tensor = torch.nan_to_num(grid_tensor, nan=0.0, posinf=1.0, neginf=-1.0)
                 if grid_tensor.ndim <= 3:
                     grid = self._prepare_tensor_component(grid_tensor, recurrent_state, done_mask, trailing_dims=1)
@@ -1024,15 +1061,20 @@ class SLAMActorCritic(nn.Module):
                         grid = grid_tensor.reshape(batch_size, seq_len, *grid_tensor.shape[-2:])
                 else:
                     grid = grid_tensor.reshape(batch_size, seq_len, *grid_tensor.shape[-3:])
-            return pose, grid, batch_size, seq_len
+            return obstacle, pose_goal, imu, grid, batch_size, seq_len
 
         obs_tensor = torch.as_tensor(observation, dtype=torch.float32, device=next(self.parameters()).device)
         obs_tensor = torch.nan_to_num(obs_tensor, nan=0.0, posinf=1.0, neginf=-1.0)
         batch_size, seq_len = self._infer_batch_time(obs_tensor, recurrent_state, done_mask)
         obs_tensor = obs_tensor.reshape(batch_size, seq_len, -1)
-        pose = obs_tensor[..., :self.pose_dim]
-        grid = obs_tensor[..., self.pose_dim:] if self.grid_feature_dim > 0 else None
-        return pose, grid, batch_size, seq_len
+        obstacle_end = self.obstacle_dim
+        pose_goal_end = obstacle_end + self.pose_goal_dim
+        imu_end = pose_goal_end + self.imu_dim
+        obstacle = obs_tensor[..., :obstacle_end]
+        pose_goal = obs_tensor[..., obstacle_end:pose_goal_end]
+        imu = obs_tensor[..., pose_goal_end:imu_end]
+        grid = obs_tensor[..., imu_end:] if self.grid_feature_dim > 0 else None
+        return obstacle, pose_goal, imu, grid, batch_size, seq_len
 
     def _encode_observation(
         self,
@@ -1040,10 +1082,16 @@ class SLAMActorCritic(nn.Module):
         recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
         done_mask: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, int, int]:
-        """Encode raw SLAM observations to latent features [B, T, D]."""
-        pose, grid, batch_size, seq_len = self._split_observation(observation, recurrent_state, done_mask)
-        pose_latent = self.pose_encoder(pose.reshape(batch_size * seq_len, -1))
-        encoded_parts = [pose_latent]
+        """Encode lightweight SLAM feature groups to latent features [B, T, D]."""
+        obstacle, pose_goal, imu, grid, batch_size, seq_len = self._split_observation(
+            observation,
+            recurrent_state,
+            done_mask,
+        )
+        obstacle_latent = self.obstacle_encoder(obstacle.reshape(batch_size * seq_len, -1))
+        pose_goal_latent = self.pose_goal_encoder(pose_goal.reshape(batch_size * seq_len, -1))
+        imu_latent = self.imu_encoder(imu.reshape(batch_size * seq_len, -1))
+        encoded_parts = [obstacle_latent, pose_goal_latent, imu_latent]
 
         if grid is not None:
             if self.grid_encoder_cnn is not None:
