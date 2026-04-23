@@ -4,6 +4,8 @@ from typing import Tuple, List, Optional, Dict, Any, Union
 import numpy as np
 import torch
 from torch import multiprocessing, nn
+from torch.distributions import Independent, Normal, TransformedDistribution
+from torch.distributions.transforms import AffineTransform, TanhTransform
 
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
 
@@ -55,7 +57,8 @@ class Config:
     reference_distance: Optional[float] = None  # Start-to-goal distance, filled in at init
     
     # Robot Control
-    actions: Optional[List[Tuple[float, float]]] = None  # (steering, speed) pairs
+    max_steering_angle: float = 0.9
+    min_speed: float = 0.0
     start_position: Optional[List[float]] = None  # [x, y, z]
     start_rotation: Optional[List[float]] = None  # [x, y, z, w]
     start_position_noise: float = 0.03  # Random position jitter at reset
@@ -68,16 +71,6 @@ class Config:
     
     def __post_init__(self) -> None:
         """Initialize defaults for mutable fields."""
-        if self.actions is None:
-            self.actions = [
-                (-0.9, 0.8 * self.max_speed),   # hard left
-                (-0.5, 0.5 * self.max_speed),   # medium left
-                (0.0, self.max_speed),    # straight
-                (0.5, 0.5 * self.max_speed),    # medium right
-                (0.9, 0.8 * self.max_speed),    # hard right
-                (0.0, 0.5 * self.max_speed),    # slow straight
-                (0.0, 0.0)     # stop
-            ]
         if self.start_position is None:
             self.start_position = [-2.0, 0.0, 0.02]
         if self.start_rotation is None:
@@ -541,11 +534,11 @@ class WebotsEnv:
         observation = self._build_observation(lidar, pos, heading, accel)
         return observation, {}
     
-    def step(self, action_idx: int) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+    def step(self, action: Union[np.ndarray, List[float], Tuple[float, float]]) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
         """Step environment.
         
         Args:
-            action_idx: Discrete action index
+            action: Continuous action [steering, speed]
         
         Returns:
             observation: Current observation
@@ -555,8 +548,11 @@ class WebotsEnv:
             info: Info dict with metadata
         """
         # Apply action
-        assert self.config.actions is not None, "Actions not initialized"
-        steering, speed = self.config.actions[action_idx]
+        action_arr = np.asarray(action, dtype=np.float32).reshape(-1)
+        if action_arr.size != 2:
+            raise ValueError(f"Expected action with 2 elements [steering, speed], got shape {action_arr.shape}")
+        steering = float(np.clip(action_arr[0], -self.config.max_steering_angle, self.config.max_steering_angle))
+        speed = float(np.clip(action_arr[1], self.config.min_speed, self.config.max_speed))
         self.robot.set_steering(steering)
         self.robot.set_speed(speed)
         self.robot.step(self.timestep)
@@ -641,23 +637,25 @@ class WebotsEnv:
 class PPOAgent:
     """Proximal Policy Optimization agent."""
     
-    def __init__(self, obs_size: int, n_actions: int, config: Config):
+    def __init__(self, obs_size: int, action_dim: int, config: Config):
         """Initialize PPO agent.
         
         Args:
             obs_size: Observation dimension
-            n_actions: Number of discrete actions
+            action_dim: Number of continuous action dimensions
             config: Configuration object
         """
         self.config = config
         self.device = self._get_device()
+        self.action_dim = action_dim
         
         # Networks
-        self.actor = self._build_actor(obs_size, n_actions)
+        self.actor = self._build_actor(obs_size, action_dim)
+        self.actor_log_std = nn.Parameter(torch.full((action_dim,), -0.5, dtype=torch.float32, device=self.device))
         self.critic = self._build_critic(obs_size)
         
         # Optimizer
-        params = list(self.actor.parameters()) + list(self.critic.parameters())
+        params = list(self.actor.parameters()) + [self.actor_log_std] + list(self.critic.parameters())
         self.optimizer = torch.optim.Adam(params, lr=config.learning_rate)
     
     def load_model(self, model_path: str) -> None:
@@ -669,6 +667,8 @@ class PPOAgent:
         try:
             checkpoint = torch.load(model_path, map_location=self.device)
             self.actor.load_state_dict(checkpoint['actor'])
+            if 'actor_log_std' in checkpoint:
+                self.actor_log_std.data.copy_(checkpoint['actor_log_std'].to(self.device))
             self.critic.load_state_dict(checkpoint['critic'])
             print(f"[PPO] Loaded model from {model_path}")
             print(f"[PPO] Model from episode: {checkpoint.get('episode', 'unknown')}")
@@ -688,15 +688,14 @@ class PPOAgent:
             return torch.device("cuda:0")
         return torch.device("cpu")
     
-    def _build_actor(self, obs_size: int, n_actions: int) -> nn.Module:
-        """Build actor (policy) network."""
+    def _build_actor(self, obs_size: int, action_dim: int) -> nn.Module:
+        """Build actor backbone for continuous control."""
         return nn.Sequential(
             nn.Linear(obs_size, self.config.hidden_size),
             nn.ReLU(),
             nn.Linear(self.config.hidden_size, self.config.hidden_size),
             nn.ReLU(),
-            nn.Linear(self.config.hidden_size, n_actions),
-            nn.Softmax(dim=-1)
+            nn.Linear(self.config.hidden_size, action_dim)
         ).to(self.device)
     
     def _build_critic(self, obs_size: int) -> nn.Module:
@@ -709,29 +708,60 @@ class PPOAgent:
             nn.Linear(self.config.hidden_size, 1)
         ).to(self.device)
     
-    def select_action(self, obs: np.ndarray) -> Tuple[int, torch.Tensor]:
+    def _action_bounds(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Get per-dimension action bounds."""
+        low = torch.tensor(
+            [-self.config.max_steering_angle, self.config.min_speed],
+            dtype=torch.float32,
+            device=self.device,
+        )
+        high = torch.tensor(
+            [self.config.max_steering_angle, self.config.max_speed],
+            dtype=torch.float32,
+            device=self.device,
+        )
+        return low, high
+
+    def _actor_dist(self, obs_tensor: torch.Tensor) -> Tuple[TransformedDistribution, torch.Tensor, torch.Tensor]:
+        """Build bounded continuous action distribution."""
+        mean = self.actor(obs_tensor)
+        log_std = self.actor_log_std.expand_as(mean).clamp(-5.0, 2.0)
+        std = log_std.exp()
+
+        base_dist = Independent(Normal(mean, std), 1)
+        low, high = self._action_bounds()
+        center = (high + low) / 2.0
+        scale = (high - low) / 2.0
+        dist = TransformedDistribution(
+            base_dist,
+            [
+                TanhTransform(cache_size=1),
+                AffineTransform(loc=center, scale=scale),
+            ],
+        )
+        deterministic_action = torch.tanh(mean) * scale + center
+        return dist, base_dist.entropy().sum(dim=-1), deterministic_action
+
+    def select_action(self, obs: np.ndarray) -> Tuple[np.ndarray, torch.Tensor]:
         """Select action using current policy.
         
         Args:
             obs: Observation array
         
         Returns:
-            action: Sampled action index
+            action: Continuous action [steering, speed]
             log_prob: Log probability of action
         """
         obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
         with torch.no_grad():
-            probs = self.actor(obs_tensor)
+            dist, _, deterministic_action = self._actor_dist(obs_tensor)
             if self.config.inference_mode:
-                # Deterministic action selection for inference
-                action = torch.argmax(probs, dim=-1)
-                log_prob = torch.log(probs[0, action])  # Log prob of the selected action
+                action = deterministic_action
+                log_prob = dist.log_prob(action)
             else:
-                # Stochastic action selection for training
-                dist = torch.distributions.Categorical(probs)
                 action = dist.sample()
                 log_prob = dist.log_prob(action)
-        return int(action.item()), log_prob
+        return action.squeeze(0).cpu().numpy(), log_prob.squeeze(0)
     
     def calculate_returns(self, rewards: np.ndarray) -> np.ndarray:
         """Calculate cumulative discounted returns.
@@ -768,7 +798,7 @@ class PPOAgent:
         """
         # Convert to tensors
         obs_tensor = torch.as_tensor(observations, dtype=torch.float32, device=self.device)
-        act_tensor = torch.as_tensor(actions, dtype=torch.long, device=self.device)
+        act_tensor = torch.as_tensor(actions, dtype=torch.float32, device=self.device)
         logp_old_tensor = torch.stack(log_probs_old).detach().to(self.device)
         ret_tensor = torch.as_tensor(returns, dtype=torch.float32, device=self.device)
         adv_tensor = torch.as_tensor(advantages, dtype=torch.float32, device=self.device)
@@ -789,10 +819,9 @@ class PPOAgent:
                 adv_batch = adv_tensor[batch_idx]
                 
                 # Forward pass
-                probs = self.actor(obs_batch)
-                dist = torch.distributions.Categorical(probs)
+                dist, base_entropy, _ = self._actor_dist(obs_batch)
                 log_probs_new = dist.log_prob(act_batch)
-                entropy = dist.entropy().mean()
+                entropy = base_entropy.mean()
                 
                 # PPO loss
                 ratio = torch.exp(log_probs_new - logp_old_batch)
@@ -834,9 +863,8 @@ def train(config: Optional[Config] = None) -> None:
     env = WebotsEnv(config)
     obs, _ = env.reset()
     obs_size = len(obs)
-    assert config.actions is not None, "Actions not initialized"
-    n_actions = len(config.actions)
-    agent = PPOAgent(obs_size, n_actions, config)
+    action_dim = 2
+    agent = PPOAgent(obs_size, action_dim, config)
     
     # Check if inference mode
     if config.inference_mode:
@@ -887,11 +915,11 @@ def train(config: Optional[Config] = None) -> None:
     
     print(f"[TRAIN] Starting training: {config.episodes} episodes, "
           f"update every {config.update_every} episodes")
-    print(f"[TRAIN] Observation size: {obs_size}, Action space: {n_actions}")
+    print(f"[TRAIN] Observation size: {obs_size}, Action dims: {action_dim}")
     
     # Training buffers
     all_observations: List[np.ndarray] = []
-    all_actions: List[int] = []
+    all_actions: List[np.ndarray] = []
     all_log_probs: List[torch.Tensor] = []
     all_returns: List[float] = []
     all_advantages: List[float] = []
@@ -905,7 +933,7 @@ def train(config: Optional[Config] = None) -> None:
         done = False
         episode_step = 0
         episode_observations: List[np.ndarray] = []
-        episode_actions: List[int] = []
+        episode_actions: List[np.ndarray] = []
         episode_log_probs: List[torch.Tensor] = []
         episode_rewards: List[float] = []
         episode_end_reason = "max_steps"
@@ -969,7 +997,7 @@ def train(config: Optional[Config] = None) -> None:
             # Update policy
             agent.update(
                 obs_array,
-                np.array(all_actions, dtype=np.int64),
+                np.array(all_actions, dtype=np.float32),
                 all_log_probs,
                 returns,
                 advantages
@@ -999,6 +1027,7 @@ def train(config: Optional[Config] = None) -> None:
                 best_goal_episode = episode + 1
                 torch.save({
                     'actor': agent.actor.state_dict(),
+                    'actor_log_std': agent.actor_log_std.detach().cpu(),
                     'critic': agent.critic.state_dict(),
                     'episode': best_goal_episode,
                     'reward': best_goal_reward,
@@ -1012,6 +1041,7 @@ def train(config: Optional[Config] = None) -> None:
             best_reward = episode_reward_sum
             torch.save({
                 'actor': agent.actor.state_dict(),
+                'actor_log_std': agent.actor_log_std.detach().cpu(),
                 'critic': agent.critic.state_dict(),
                 'episode': episode + 1,
                 'reward': best_reward,
@@ -1028,6 +1058,7 @@ def train(config: Optional[Config] = None) -> None:
     # Save final model
     torch.save({
         'actor': agent.actor.state_dict(),
+        'actor_log_std': agent.actor_log_std.detach().cpu(),
         'critic': agent.critic.state_dict(),
         'episode': 'final',
         'reward': best_reward
