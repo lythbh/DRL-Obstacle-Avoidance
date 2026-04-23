@@ -8,6 +8,7 @@ from typing import Tuple, List, Optional, Dict, Any, Union
 import numpy as np
 import torch
 from torch import multiprocessing, nn
+from torch.nn.utils.rnn import pad_sequence
 from torch.distributions import Independent, Normal, TransformedDistribution
 from torch.distributions.transforms import AffineTransform, TanhTransform
 
@@ -49,6 +50,11 @@ class Config:
     learning_rate: float = 1e-4
     entropy_coef: float = 0.02  # Entropy regularization
     hidden_size: int = 128  # Network hidden layer size
+    latent_size: int = 128  # Encoder output size before the recurrent core
+    lstm_hidden_size: int = 128  # Hidden size of the recurrent core
+    lstm_layers: int = 1
+    slam_pose_dim: int = 6  # [x, y, z, roll, pitch, yaw] when using split SLAM observations
+    occupancy_grid_shape: Optional[Tuple[int, ...]] = None  # Optional CNN shape, e.g. (1, 16, 16)
     
     # Environment
     max_steps: int = 4000  # Max steps per episode
@@ -720,14 +726,15 @@ class WebotsEnv:
             gyro_norm  = np.zeros(3, dtype=np.float32)
             quat       = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
 
-        return np.concatenate([
+        observation = np.concatenate([
             lidar_sectors,      # (16,)
             pos,                # (2,)
             direction_features, # (5,)
             accel_norm,         # (3,)
             gyro_norm,          # (3,)
             quat,               # (4,)
-        ])  # total 33
+        ]).astype(np.float32)  # total 33
+        return np.nan_to_num(observation, nan=0.0, posinf=1.0, neginf=-1.0)
     
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Reset environment and return initial observation.
@@ -870,57 +877,279 @@ class WebotsEnv:
 # PPO AGENT
 # ============================================================================
 
-class PPOAgent:
-    """Proximal Policy Optimization agent."""
-    
-    def __init__(self, obs_size: int, action_dim: int, config: Config):
-        """Initialize PPO agent.
-        
-        Args:
-            obs_size: Observation dimension
-            action_dim: Number of continuous action dimensions
-            config: Configuration object
+class SLAMActorCritic(nn.Module):
+    """Actor-critic network with SLAM-aware encoding and an LSTM core."""
+
+    def __init__(
+        self,
+        obs_size: int,
+        action_dim: int,
+        config: Config,
+        action_space: str = "continuous",
+    ) -> None:
+        super().__init__()
+        self.obs_size = obs_size
+        self.action_dim = action_dim
+        self.action_space = action_space
+        self.pose_dim = min(config.slam_pose_dim, obs_size)
+        self.grid_shape = config.occupancy_grid_shape
+
+        self.pose_encoder = nn.Sequential(
+            nn.Linear(self.pose_dim, config.hidden_size),
+            nn.ReLU(),
+            nn.Linear(config.hidden_size, config.latent_size),
+            nn.ReLU(),
+        )
+
+        grid_latent_dim = config.latent_size
+        self.grid_encoder_cnn: Optional[nn.Module]
+        self.grid_encoder_mlp: Optional[nn.Module]
+        self.grid_feature_dim = max(obs_size - self.pose_dim, 0)
+        if self.grid_shape is not None:
+            if len(self.grid_shape) == 2:
+                in_channels = 1
+            elif len(self.grid_shape) == 3:
+                in_channels = self.grid_shape[0]
+            else:
+                raise ValueError(
+                    "occupancy_grid_shape must be (H, W) or (C, H, W) when using CNN encoding."
+                )
+            self.grid_encoder_cnn = nn.Sequential(
+                nn.Conv2d(in_channels, 16, kernel_size=3, stride=2, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool2d(1),
+                nn.Flatten(),
+                nn.Linear(32, grid_latent_dim),
+                nn.ReLU(),
+            )
+            self.grid_encoder_mlp = None
+        elif self.grid_feature_dim > 0:
+            self.grid_encoder_cnn = None
+            self.grid_encoder_mlp = nn.Sequential(
+                nn.Linear(self.grid_feature_dim, config.hidden_size),
+                nn.ReLU(),
+                nn.Linear(config.hidden_size, grid_latent_dim),
+                nn.ReLU(),
+            )
+        else:
+            self.grid_encoder_cnn = None
+            self.grid_encoder_mlp = None
+            grid_latent_dim = 0
+
+        fusion_input_dim = config.latent_size + grid_latent_dim
+        self.encoder = nn.Sequential(
+            nn.Linear(fusion_input_dim, config.latent_size),
+            nn.ReLU(),
+        )
+        self.lstm = nn.LSTM(
+            input_size=config.latent_size,
+            hidden_size=config.lstm_hidden_size,
+            num_layers=config.lstm_layers,
+            batch_first=True,
+        )
+        self.policy_head = nn.Linear(config.lstm_hidden_size, action_dim)
+        self.value_head = nn.Linear(config.lstm_hidden_size, 1)
+
+    def get_initial_state(
+        self,
+        batch_size: int,
+        device: Optional[torch.device] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return zero-initialized hidden and cell state."""
+        if device is None:
+            device = next(self.parameters()).device
+        h0 = torch.zeros(self.lstm.num_layers, batch_size, self.lstm.hidden_size, device=device)
+        c0 = torch.zeros(self.lstm.num_layers, batch_size, self.lstm.hidden_size, device=device)
+        return h0, c0
+
+    def _infer_batch_time(
+        self,
+        tensor: torch.Tensor,
+        recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
+        done_mask: Optional[torch.Tensor],
+    ) -> Tuple[int, int]:
+        """Infer batch/time layout for 1D, 2D, and 3D+ observations."""
+        if tensor.ndim == 1:
+            return 1, 1
+        if tensor.ndim == 2:
+            if recurrent_state is not None and recurrent_state[0].shape[1] == tensor.shape[0]:
+                return tensor.shape[0], 1
+            if done_mask is not None and done_mask.ndim == 1 and done_mask.shape[0] == tensor.shape[0]:
+                return 1, tensor.shape[0]
+            return tensor.shape[0], 1
+        return tensor.shape[0], tensor.shape[1]
+
+    def _prepare_tensor_component(
+        self,
+        component: Union[np.ndarray, torch.Tensor],
+        recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
+        done_mask: Optional[torch.Tensor],
+        trailing_dims: int,
+    ) -> torch.Tensor:
+        """Convert an observation component to [B, T, ...]."""
+        tensor = torch.as_tensor(component, dtype=torch.float32, device=next(self.parameters()).device)
+        tensor = torch.nan_to_num(tensor, nan=0.0, posinf=1.0, neginf=-1.0)
+        batch_size, seq_len = self._infer_batch_time(tensor, recurrent_state, done_mask)
+        if tensor.ndim == trailing_dims:
+            return tensor.reshape(batch_size, seq_len, *tensor.shape[-trailing_dims:])
+        if tensor.ndim == trailing_dims + 1:
+            return tensor.reshape(batch_size, seq_len, *tensor.shape[-trailing_dims:])
+        return tensor
+
+    def _split_observation(
+        self,
+        observation: Union[np.ndarray, torch.Tensor, Dict[str, Union[np.ndarray, torch.Tensor]]],
+        recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
+        done_mask: Optional[torch.Tensor],
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], int, int]:
+        """Split observation into pose and occupancy-grid components."""
+        if isinstance(observation, dict):
+            pose_input = observation.get("pose", observation.get("slam_pose"))
+            if pose_input is None:
+                raise KeyError("Observation dict must contain 'pose' or 'slam_pose'.")
+            grid_input = observation.get("grid", observation.get("occupancy_grid", observation.get("feature_map")))
+            pose = self._prepare_tensor_component(pose_input, recurrent_state, done_mask, trailing_dims=1)
+            batch_size, seq_len = pose.shape[:2]
+            grid = None
+            if grid_input is not None:
+                grid_tensor = torch.as_tensor(grid_input, dtype=torch.float32, device=pose.device)
+                grid_tensor = torch.nan_to_num(grid_tensor, nan=0.0, posinf=1.0, neginf=-1.0)
+                if grid_tensor.ndim <= 3:
+                    grid = self._prepare_tensor_component(grid_tensor, recurrent_state, done_mask, trailing_dims=1)
+                elif grid_tensor.ndim == 4:
+                    if self.grid_shape is not None and len(self.grid_shape) == 3:
+                        grid = grid_tensor.reshape(batch_size, seq_len, *grid_tensor.shape[-3:])
+                    else:
+                        grid = grid_tensor.reshape(batch_size, seq_len, *grid_tensor.shape[-2:])
+                else:
+                    grid = grid_tensor.reshape(batch_size, seq_len, *grid_tensor.shape[-3:])
+            return pose, grid, batch_size, seq_len
+
+        obs_tensor = torch.as_tensor(observation, dtype=torch.float32, device=next(self.parameters()).device)
+        obs_tensor = torch.nan_to_num(obs_tensor, nan=0.0, posinf=1.0, neginf=-1.0)
+        batch_size, seq_len = self._infer_batch_time(obs_tensor, recurrent_state, done_mask)
+        obs_tensor = obs_tensor.reshape(batch_size, seq_len, -1)
+        pose = obs_tensor[..., :self.pose_dim]
+        grid = obs_tensor[..., self.pose_dim:] if self.grid_feature_dim > 0 else None
+        return pose, grid, batch_size, seq_len
+
+    def _encode_observation(
+        self,
+        observation: Union[np.ndarray, torch.Tensor, Dict[str, Union[np.ndarray, torch.Tensor]]],
+        recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
+        done_mask: Optional[torch.Tensor],
+    ) -> Tuple[torch.Tensor, int, int]:
+        """Encode raw SLAM observations to latent features [B, T, D]."""
+        pose, grid, batch_size, seq_len = self._split_observation(observation, recurrent_state, done_mask)
+        pose_latent = self.pose_encoder(pose.reshape(batch_size * seq_len, -1))
+        encoded_parts = [pose_latent]
+
+        if grid is not None:
+            if self.grid_encoder_cnn is not None:
+                grid_flat = grid.reshape(batch_size * seq_len, *grid.shape[2:])
+                if grid_flat.ndim == 3:
+                    grid_flat = grid_flat.unsqueeze(1)
+                grid_latent = self.grid_encoder_cnn(grid_flat)
+            elif self.grid_encoder_mlp is not None:
+                grid_latent = self.grid_encoder_mlp(grid.reshape(batch_size * seq_len, -1))
+            else:
+                grid_latent = grid.reshape(batch_size * seq_len, -1)
+            encoded_parts.append(grid_latent)
+
+        latent = torch.cat(encoded_parts, dim=-1)
+        latent = self.encoder(latent).reshape(batch_size, seq_len, -1)
+        return latent, batch_size, seq_len
+
+    def _prepare_done_mask(
+        self,
+        done_mask: Optional[Union[np.ndarray, torch.Tensor]],
+        batch_size: int,
+        seq_len: int,
+        device: torch.device,
+    ) -> Optional[torch.Tensor]:
+        """Format done flags to [B, T] float mask."""
+        if done_mask is None:
+            return None
+        mask = torch.as_tensor(done_mask, dtype=torch.float32, device=device)
+        if mask.ndim == 0:
+            mask = mask.view(1, 1)
+        elif mask.ndim == 1:
+            mask = mask.view(batch_size, seq_len)
+        elif mask.ndim != 2:
+            raise ValueError(f"done_mask must be scalar, [T], or [B, T], got shape {tuple(mask.shape)}")
+        return mask
+
+    def forward(
+        self,
+        observation: Union[np.ndarray, torch.Tensor, Dict[str, Union[np.ndarray, torch.Tensor]]],
+        recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        done_mask: Optional[Union[np.ndarray, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """Run the encoder, recurrent core, and policy/value heads.
+
+        Supports:
+          - single-step inference with flat observations [D] or batched [B, D]
+          - sequence training with [T, D] or [B, T, D]
+          - dict observations with separate pose and grid inputs
         """
+        latent, batch_size, seq_len = self._encode_observation(observation, recurrent_state, done_mask)
+        device = latent.device
+        if recurrent_state is None:
+            recurrent_state = self.get_initial_state(batch_size, device=device)
+        h_t, c_t = recurrent_state
+        mask = self._prepare_done_mask(done_mask, batch_size, seq_len, device)
+
+        outputs: List[torch.Tensor] = []
+        for t in range(seq_len):
+            if mask is not None:
+                keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
+                h_t = h_t * keep
+                c_t = c_t * keep
+            lstm_out, (h_t, c_t) = self.lstm(latent[:, t : t + 1], (h_t, c_t))
+            outputs.append(lstm_out)
+
+        recurrent_features = torch.cat(outputs, dim=1)
+        policy_output = torch.nan_to_num(self.policy_head(recurrent_features), nan=0.0, posinf=1.0, neginf=-1.0)
+        state_value = torch.nan_to_num(
+            self.value_head(recurrent_features).squeeze(-1),
+            nan=0.0,
+            posinf=1.0,
+            neginf=-1.0,
+        )
+
+        if seq_len == 1:
+            policy_output = policy_output[:, 0]
+            state_value = state_value[:, 0]
+        return policy_output, state_value, (h_t, c_t)
+
+
+class PPOAgent:
+    """Proximal Policy Optimization agent with a recurrent actor-critic core."""
+
+    def __init__(self, obs_size: int, action_dim: int, config: Config):
         self.config = config
         self.device = self._get_device()
         self.action_dim = action_dim
-        
-        # Networks
-        self.actor = self._build_actor(obs_size, action_dim)
+        self.model = SLAMActorCritic(obs_size, action_dim, config).to(self.device)
+        self.actor = self.model.policy_head
+        self.critic = self.model.value_head
         self.actor_log_std = nn.Parameter(torch.full((action_dim,), -0.5, dtype=torch.float32, device=self.device))
-        self.critic = self._build_critic(obs_size)
-        
-        # Optimizer
-        params = list(self.actor.parameters()) + [self.actor_log_std] + list(self.critic.parameters())
+        params = list(self.model.parameters()) + [self.actor_log_std]
         self.optimizer = torch.optim.Adam(params, lr=config.learning_rate)
-    
+
     def _get_device(self) -> torch.device:
         """Get appropriate device (GPU or CPU)."""
         is_fork = multiprocessing.get_start_method(allow_none=True) == 'fork'
         if torch.cuda.is_available() and not is_fork:
             return torch.device("cuda:0")
         return torch.device("cpu")
-    
-    def _build_actor(self, obs_size: int, action_dim: int) -> nn.Module:
-        """Build actor backbone for continuous control."""
-        return nn.Sequential(
-            nn.Linear(obs_size, self.config.hidden_size),
-            nn.ReLU(),
-            nn.Linear(self.config.hidden_size, self.config.hidden_size),
-            nn.ReLU(),
-            nn.Linear(self.config.hidden_size, action_dim)
-        ).to(self.device)
-    
-    def _build_critic(self, obs_size: int) -> nn.Module:
-        """Build critic (value) network."""
-        return nn.Sequential(
-            nn.Linear(obs_size, self.config.hidden_size),
-            nn.ReLU(),
-            nn.Linear(self.config.hidden_size, self.config.hidden_size),
-            nn.ReLU(),
-            nn.Linear(self.config.hidden_size, 1)
-        ).to(self.device)
-    
+
+    def get_initial_state(self, batch_size: int = 1) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Expose recurrent state initialization for rollouts."""
+        return self.model.get_initial_state(batch_size, device=self.device)
+
     def _action_bounds(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """Get per-dimension action bounds."""
         low = torch.tensor(
@@ -935,13 +1164,12 @@ class PPOAgent:
         )
         return low, high
 
-    def _actor_dist(self, obs_tensor: torch.Tensor) -> Tuple[TransformedDistribution, torch.Tensor]:
-        """Build bounded continuous action distribution."""
-        mean = self.actor(obs_tensor)
-        log_std = self.actor_log_std.expand_as(mean).clamp(-5.0, 2.0)
+    def _actor_dist(self, policy_output: torch.Tensor) -> Tuple[TransformedDistribution, torch.Tensor]:
+        """Build a bounded Normal policy compatible with PPO."""
+        policy_output = torch.nan_to_num(policy_output, nan=0.0, posinf=1.0, neginf=-1.0)
+        log_std = self.actor_log_std.expand_as(policy_output).clamp(-5.0, 2.0)
         std = log_std.exp()
-
-        base_dist = Independent(Normal(mean, std), 1)
+        base_dist = Independent(Normal(policy_output, std), 1)
         low, high = self._action_bounds()
         center = (high + low) / 2.0
         scale = (high - low) / 2.0
@@ -952,102 +1180,170 @@ class PPOAgent:
                 AffineTransform(loc=center, scale=scale),
             ],
         )
-        return dist, base_dist.entropy().sum(dim=-1)
+        entropy = base_dist.entropy()
+        return dist, entropy
 
-    def select_action(self, obs: np.ndarray) -> Tuple[np.ndarray, torch.Tensor]:
-        """Select action using current policy.
-        
-        Args:
-            obs: Observation array
-        
-        Returns:
-            action: Sampled continuous action [steering, speed]
-            log_prob: Log probability of action
-        """
-        obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+    def select_action(
+        self,
+        obs: Union[np.ndarray, Dict[str, np.ndarray]],
+        recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        done: bool = False,
+    ) -> Tuple[np.ndarray, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """Sample a single action and advance the recurrent state."""
+        done_mask = torch.tensor([float(done)], dtype=torch.float32, device=self.device)
         with torch.no_grad():
-            dist, _ = self._actor_dist(obs_tensor)
+            policy_output, state_value, next_state = self.model(
+                obs,
+                recurrent_state=recurrent_state,
+                done_mask=done_mask,
+            )
+            dist, _ = self._actor_dist(policy_output)
             action = dist.sample()
             log_prob = dist.log_prob(action)
-        return action.squeeze(0).cpu().numpy(), log_prob.squeeze(0)
-    
+        return (
+            action.squeeze(0).cpu().numpy(),
+            log_prob.squeeze(0),
+            state_value.squeeze(0),
+            next_state,
+        )
+
     def calculate_returns(self, rewards: np.ndarray) -> np.ndarray:
-        """Calculate cumulative discounted returns.
-        
-        Args:
-            rewards: Reward array
-        
-        Returns:
-            returns: Cumulative returns
-        """
+        """Calculate cumulative discounted returns."""
         returns = np.zeros(len(rewards), dtype=np.float32)
-        G = 0.0
+        discounted_return = 0.0
         for t in reversed(range(len(rewards))):
-            G = rewards[t] + self.config.gamma * G
-            returns[t] = G
+            discounted_return = rewards[t] + self.config.gamma * discounted_return
+            returns[t] = discounted_return
         return returns
-    
-    def update(
+
+    def _prepare_batch(
         self,
-        observations: np.ndarray,
-        actions: np.ndarray,
-        log_probs_old: List[torch.Tensor],
-        returns: np.ndarray,
-        advantages: np.ndarray
-    ) -> None:
-        """Update policy using collected rollout.
-        
-        Args:
-            observations: Trajectory observations
-            actions: Trajectory actions
-            log_probs_old: Old log probabilities
-            returns: Cumulative returns
-            advantages: Computed advantages
-        """
-        # Convert to tensors
-        obs_tensor = torch.as_tensor(observations, dtype=torch.float32, device=self.device)
-        act_tensor = torch.as_tensor(actions, dtype=torch.float32, device=self.device)
-        logp_old_tensor = torch.stack(log_probs_old).detach().to(self.device)
-        ret_tensor = torch.as_tensor(returns, dtype=torch.float32, device=self.device)
-        adv_tensor = torch.as_tensor(advantages, dtype=torch.float32, device=self.device)
-        
-        dataset_size = len(observations)
-        
-        # Multiple epochs of updates
-        for epoch in range(self.config.epochs):
-            indices = torch.randperm(dataset_size)
-            
-            for start in range(0, dataset_size, self.config.batch_size):
-                batch_idx = indices[start:start + self.config.batch_size]
-                
-                obs_batch = obs_tensor[batch_idx]
-                act_batch = act_tensor[batch_idx]
-                logp_old_batch = logp_old_tensor[batch_idx]
-                ret_batch = ret_tensor[batch_idx]
-                adv_batch = adv_tensor[batch_idx]
-                
-                # Forward pass
-                dist, base_entropy = self._actor_dist(obs_batch)
-                log_probs_new = dist.log_prob(act_batch)
-                entropy = base_entropy.mean()
-                
-                # PPO loss
-                ratio = torch.exp(log_probs_new - logp_old_batch)
-                surrogate1 = ratio * adv_batch
-                surrogate2 = torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon) * adv_batch
-                policy_loss = -torch.min(surrogate1, surrogate2).mean()
-                
-                # Value loss
-                values = self.critic(obs_batch).squeeze()
-                value_loss = nn.MSELoss()(values, ret_batch)
-                
-                # Combined loss
-                loss = policy_loss + 0.5 * value_loss - self.config.entropy_coef * entropy
-                
-                # Backward pass
+        trajectories: List[Dict[str, np.ndarray]],
+    ) -> Dict[str, torch.Tensor]:
+        """Pad variable-length episode trajectories to a batch of sequences."""
+        obs_tensors = [torch.as_tensor(t["observations"], dtype=torch.float32, device=self.device) for t in trajectories]
+        act_tensors = [torch.as_tensor(t["actions"], dtype=torch.float32, device=self.device) for t in trajectories]
+        logp_tensors = [torch.as_tensor(t["log_probs"], dtype=torch.float32, device=self.device) for t in trajectories]
+        ret_tensors = [torch.as_tensor(t["returns"], dtype=torch.float32, device=self.device) for t in trajectories]
+        adv_tensors = [torch.as_tensor(t["advantages"], dtype=torch.float32, device=self.device) for t in trajectories]
+        obs_tensors = [torch.nan_to_num(t, nan=0.0, posinf=1.0, neginf=-1.0) for t in obs_tensors]
+        act_tensors = [torch.nan_to_num(t, nan=0.0, posinf=0.0, neginf=0.0) for t in act_tensors]
+        logp_tensors = [torch.nan_to_num(t, nan=0.0, posinf=0.0, neginf=0.0) for t in logp_tensors]
+        ret_tensors = [torch.nan_to_num(t, nan=0.0, posinf=0.0, neginf=0.0) for t in ret_tensors]
+        adv_tensors = [torch.nan_to_num(t, nan=0.0, posinf=0.0, neginf=0.0) for t in adv_tensors]
+        valid_masks = [
+            torch.ones(len(t["returns"]), dtype=torch.float32, device=self.device)
+            for t in trajectories
+        ]
+        reset_masks = []
+        for trajectory in trajectories:
+            mask = torch.zeros(len(trajectory["returns"]), dtype=torch.float32, device=self.device)
+            if len(mask) > 0:
+                mask[0] = 1.0
+            reset_masks.append(mask)
+
+        return {
+            "observations": pad_sequence(obs_tensors, batch_first=True),
+            "actions": pad_sequence(act_tensors, batch_first=True),
+            "log_probs": pad_sequence(logp_tensors, batch_first=True),
+            "returns": pad_sequence(ret_tensors, batch_first=True),
+            "advantages": pad_sequence(adv_tensors, batch_first=True),
+            "valid_mask": pad_sequence(valid_masks, batch_first=True),
+            "done_mask": pad_sequence(reset_masks, batch_first=True),
+        }
+
+    def evaluate_sequences(
+        self,
+        observations: torch.Tensor,
+        actions: torch.Tensor,
+        done_mask: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Evaluate PPO quantities over full recurrent sequences."""
+        policy_output, state_values, _ = self.model(
+            observations,
+            recurrent_state=self.get_initial_state(observations.shape[0]),
+            done_mask=done_mask,
+        )
+        dist, entropy = self._actor_dist(policy_output)
+        log_probs = dist.log_prob(actions)
+        return log_probs, state_values, entropy
+
+    def update(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
+        """Update the recurrent PPO policy from complete episodes."""
+        if not trajectories:
+            return
+
+        for trajectory in trajectories:
+            trajectory["observations"] = np.nan_to_num(
+                trajectory["observations"], nan=0.0, posinf=1.0, neginf=-1.0
+            ).astype(np.float32)
+            trajectory["actions"] = np.nan_to_num(
+                trajectory["actions"], nan=0.0, posinf=0.0, neginf=0.0
+            ).astype(np.float32)
+            trajectory["log_probs"] = np.nan_to_num(
+                trajectory["log_probs"], nan=0.0, posinf=0.0, neginf=0.0
+            ).astype(np.float32)
+            trajectory["returns"] = np.nan_to_num(
+                trajectory["returns"], nan=0.0, posinf=0.0, neginf=0.0
+            ).astype(np.float32)
+            trajectory["advantages"] = np.nan_to_num(
+                trajectory["advantages"], nan=0.0, posinf=0.0, neginf=0.0
+            ).astype(np.float32)
+
+        all_advantages = np.concatenate([t["advantages"] for t in trajectories], axis=0)
+        adv_mean = float(all_advantages.mean())
+        adv_std = float(all_advantages.std() + 1e-8)
+        for trajectory in trajectories:
+            trajectory["advantages"] = ((trajectory["advantages"] - adv_mean) / adv_std).astype(np.float32)
+
+        num_episodes = len(trajectories)
+        for _ in range(self.config.epochs):
+            indices = torch.randperm(num_episodes).tolist()
+            for start in range(0, num_episodes, self.config.batch_size):
+                batch_indices = indices[start : start + self.config.batch_size]
+                batch = self._prepare_batch([trajectories[idx] for idx in batch_indices])
+
+                log_probs_new, values, entropy = self.evaluate_sequences(
+                    batch["observations"],
+                    batch["actions"],
+                    batch["done_mask"],
+                )
+
+                valid_mask = batch["valid_mask"]
+                ratio = torch.exp(log_probs_new - batch["log_probs"])
+                surrogate1 = ratio * batch["advantages"]
+                surrogate2 = (
+                    torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon)
+                    * batch["advantages"]
+                )
+                policy_loss = -(
+                    torch.min(surrogate1, surrogate2) * valid_mask
+                ).sum() / valid_mask.sum().clamp_min(1.0)
+                value_loss = (
+                    ((values - batch["returns"]) ** 2) * valid_mask
+                ).sum() / valid_mask.sum().clamp_min(1.0)
+                entropy_bonus = (entropy * valid_mask).sum() / valid_mask.sum().clamp_min(1.0)
+
+                loss = policy_loss + 0.5 * value_loss - self.config.entropy_coef * entropy_bonus
+                if not torch.isfinite(loss):
+                    print("[PPO] WARNING: Skipping update batch due to non-finite loss.", flush=True)
+                    continue
                 self.optimizer.zero_grad()
                 loss.backward()
+                nn.utils.clip_grad_norm_(list(self.model.parameters()) + [self.actor_log_std], max_norm=1.0)
                 self.optimizer.step()
+
+    def load_model(self, model_path: str) -> None:
+        """Load saved recurrent model weights."""
+        checkpoint = torch.load(model_path, map_location=self.device)
+        if "model" not in checkpoint:
+            raise ValueError(
+                "Checkpoint does not contain recurrent 'model' weights. "
+                "Legacy feed-forward checkpoints are not compatible with this module."
+            )
+        self.model.load_state_dict(checkpoint["model"])
+        if "actor_log_std" in checkpoint:
+            self.actor_log_std.data.copy_(checkpoint["actor_log_std"].to(self.device))
 
 
 
@@ -1079,11 +1375,7 @@ def train(config: Optional[Config] = None) -> None:
     print(f"[TRAIN] Observation size: {obs_size}, Action dims: {action_dim}")
     
     # Training buffers
-    all_observations: List[np.ndarray] = []
-    all_actions: List[np.ndarray] = []
-    all_log_probs: List[torch.Tensor] = []
-    all_returns: List[float] = []
-    all_advantages: List[float] = []
+    rollout_trajectories: List[Dict[str, np.ndarray]] = []
     best_reward = float('-inf')
     best_goal_reward = float('-inf')
     best_goal_episode: Optional[int] = None
@@ -1095,18 +1387,25 @@ def train(config: Optional[Config] = None) -> None:
         episode_step = 0
         episode_observations: List[np.ndarray] = []
         episode_actions: List[np.ndarray] = []
-        episode_log_probs: List[torch.Tensor] = []
+        episode_log_probs: List[float] = []
         episode_rewards: List[float] = []
         episode_end_reason = "max_steps"
+        recurrent_state = agent.get_initial_state(batch_size=1)
+        prev_done = True
         
         while not done:
             # Select action from the current policy for every transition so the
             # rollout stays on-policy for PPO updates.
-            action, log_prob = agent.select_action(obs)
+            action, log_prob, _, recurrent_state = agent.select_action(
+                obs,
+                recurrent_state=recurrent_state,
+                done=prev_done,
+            )
             
             # Step environment
             obs_next, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
+            prev_done = done
             episode_step += 1
             
             # Track termination reason
@@ -1123,7 +1422,7 @@ def train(config: Optional[Config] = None) -> None:
             # Accumulate
             episode_observations.append(obs)
             episode_actions.append(action)
-            episode_log_probs.append(log_prob)
+            episode_log_probs.append(float(log_prob.item()))
             episode_rewards.append(reward)
             
             obs = obs_next
@@ -1133,43 +1432,32 @@ def train(config: Optional[Config] = None) -> None:
         episode_returns = agent.calculate_returns(np.array(episode_rewards, dtype=np.float32))
         episode_obs_array = np.array(episode_observations, dtype=np.float32)
         with torch.no_grad():
-            episode_obs_tensor = torch.as_tensor(
+            _, episode_values, _ = agent.model(
                 episode_obs_array,
-                dtype=torch.float32,
-                device=agent.device,
+                recurrent_state=agent.get_initial_state(batch_size=1),
+                done_mask=np.concatenate(([1.0], np.zeros(len(episode_rewards) - 1, dtype=np.float32))),
             )
-            episode_values = agent.critic(episode_obs_tensor).squeeze().detach().cpu().numpy()
+            episode_values = episode_values.squeeze(0).detach().cpu().numpy()
 
         episode_advantages = episode_returns - episode_values
 
-        all_observations.extend(episode_obs_array)
-        all_actions.extend(episode_actions)
-        all_log_probs.extend(episode_log_probs)
-        all_returns.extend(episode_returns.tolist())
-        all_advantages.extend(episode_advantages.tolist())
+        rollout_trajectories.append(
+            {
+                "observations": episode_obs_array,
+                "actions": np.array(episode_actions, dtype=np.float32),
+                "log_probs": np.array(episode_log_probs, dtype=np.float32),
+                "returns": episode_returns.astype(np.float32),
+                "advantages": episode_advantages.astype(np.float32),
+            }
+        )
         
         # PPO update every N episodes
         if (episode + 1) % config.update_every == 0:
-            obs_array = np.array(all_observations, dtype=np.float32)
-            returns = np.array(all_returns, dtype=np.float32)
-            advantages = np.array(all_advantages, dtype=np.float32)
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-            
             # Update policy
-            agent.update(
-                obs_array,
-                np.array(all_actions, dtype=np.float32),
-                all_log_probs,
-                returns,
-                advantages
-            )
+            agent.update(rollout_trajectories)
             
             # Clear buffers
-            all_observations.clear()
-            all_actions.clear()
-            all_log_probs.clear()
-            all_returns.clear()
-            all_advantages.clear()
+            rollout_trajectories.clear()
         
         # Logging
         episode_reward_sum = sum(episode_rewards)
@@ -1188,9 +1476,8 @@ def train(config: Optional[Config] = None) -> None:
                 best_goal_episode = episode + 1
                 env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward_sum)
                 torch.save({
-                    'actor': agent.actor.state_dict(),
+                    'model': agent.model.state_dict(),
                     'actor_log_std': agent.actor_log_std.detach().cpu(),
-                    'critic': agent.critic.state_dict(),
                     'episode': best_goal_episode,
                     'reward': best_goal_reward,
                     'goal_episode': True
@@ -1203,9 +1490,8 @@ def train(config: Optional[Config] = None) -> None:
             best_reward = episode_reward_sum
             env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward_sum)
             torch.save({
-                'actor': agent.actor.state_dict(),
+                'model': agent.model.state_dict(),
                 'actor_log_std': agent.actor_log_std.detach().cpu(),
-                'critic': agent.critic.state_dict(),
                 'episode': episode + 1,
                 'reward': best_reward,
                 'goal_episode': False
@@ -1217,12 +1503,14 @@ def train(config: Optional[Config] = None) -> None:
         
         if episode_end_reason == "goal":
             break
+
+    if rollout_trajectories:
+        agent.update(rollout_trajectories)
     
     # Save final model
     torch.save({
-        'actor': agent.actor.state_dict(),
+        'model': agent.model.state_dict(),
         'actor_log_std': agent.actor_log_std.detach().cpu(),
-        'critic': agent.critic.state_dict(),
         'episode': 'final',
         'reward': best_reward
     }, 'final_model.pth')
