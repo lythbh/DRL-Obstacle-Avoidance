@@ -1,73 +1,30 @@
-# Environment setup
-1. Create an environment with Python `3.10.19`.
-2. Activate the environment.
-3. Run:
+# Environment Setup
+1. Create and activate a Python `3.10.19` environment.
+2. Install the dependencies:
    ```bash
    pip install -r requirements.txt
+   ```
 
----
-   
-# Webots setup
-In Webots, click on the **Webots logo** → **Preferences** (shortcut: `Command + ,` on macOS) → **Python command** → point it to the Python executable in your environment (e.g. your virtualenv).
+# Repository Layout
+- `run_model.py` runs inference with the trained PPO agent.
+- `controllers/PPO/PPO.py` contains the PPO controller, Webots environment wrapper, and training loop.
+- `controllers/RNN/lstm.py` contains the shared LSTM actor-critic used by PPO and future agents.
+- `controllers/SLAM/` contains LiDAR, IMU, SLAM, and map preprocessing utilities.
+- `worlds/Simple.wbt` is the Webots world used for training and evaluation.
+- `plots/` and `controllers/PPO/slam_runs/` are generated outputs.
 
----
+# Webots Setup
+In Webots, open **Preferences** and point **Python command** to the Python executable in your environment.
 
-# Supervisor
-Only job is to restart the simulation, needed to set ALTINO in position and run the simulation when training is complete, to make it autonomous.
+# Controller Setup
+Use the ALTINO robot in Webots with the PPO controller selected from the project tree. The current controller stack is split into:
+- PPO logic in `controllers/PPO/`
+- Shared recurrent policy code in `controllers/RNN/`
+- Sensor processing in `controllers/SLAM/`
 
----
-
-# PPO ALTINO
-Controller for ALTINO (the robot). Uses PPO (through PyTorch).
-
-- Controller is selected in Webots.
-
----
-
-# Arena setup
-1. Press `+`.
-2. Select `rectangle-arena`.
-3. Go down to **floorSize** and change to `5 5`.
-4. Mark it and press `+`.
-
----
-
-# ALTINO setup
-1. Go to **PROTO nodes**:  
-   `webots projects -> robots -> saeon -> altino`
-2. Click **Add**.
-3. Expand `altino`.
-4. Set a recognizable **name**.
-5. Click on `altino` → set **DEF** to `ALTINO`.
-6. Go down to **controller**.
-7. Select the controller file (downloaded DRL controller, etc.).
-
----
-
-# ALTINO sensor setup
-1. Expand **children** of `ALTINO`.
-2. Click `+`:
-   - **Base nodes** → add `Lidar`.
-   - **Base nodes** → add `GPS`.
-3. Expand `GPS`:
-   - `translation` → set `x` to `0.03` (position on the car).
-4. Add camera:
-   - **Base nodes** → add `Camera`.
-   - Expand `Camera`.
-   - `translation` → set `x` to `0.012` and `z` to `0.06`.
-
----
-
-# Supervisor setup
-1. Select `rectangle-arena`.
-2. Click `+` → **PROTO nodes Webots** → pick a robot from `webots projects`.
-3. Expand the robot:
-   - `translation` → set `x` and `y` to `2.5`.
-4. Set `supervisor` to `TRUE`.
-5. Controller → select `supervisor-controller`.
-
----
+# World Setup
+The repository currently uses `worlds/Simple.wbt`.
 
 # Run
-- Click **Run** to start the simulation.
+- Start the simulation from Webots.
 
