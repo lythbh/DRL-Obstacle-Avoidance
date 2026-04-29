@@ -14,13 +14,13 @@ from torch.distributions import Independent, Normal
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
 
 # ── SLAM sensor-processing modules ──────────────────────────────────────────
-# Controllers live one level up from controllers/PPO/
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add the repository root so controllers.* imports resolve when Webots runs this file directly.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 try:
-    from lidar_preprocessing import LiDARPreprocessor, LiDARFeatures  # type: ignore
-    from imu_filter import IMUProcessor, IMUState                       # type: ignore
-    from iekf_backend import IEKFBackend                                # type: ignore
-    from slam_map import SLAMMap                                        # type: ignore
+    from controllers.SLAM.lidar_preprocessing import LiDARPreprocessor, LiDARFeatures  # type: ignore
+    from controllers.SLAM.imu_filter import IMUProcessor, IMUState                       # type: ignore
+    from controllers.SLAM.iekf_backend import IEKFBackend                                # type: ignore
+    from controllers.SLAM.slam_map import SLAMMap                                        # type: ignore
     _SLAM_AVAILABLE = True
     print("[PPO] SLAM sensor modules loaded OK", flush=True)
 except ImportError as _slam_err:
@@ -122,15 +122,15 @@ class MotorController:
     
     def __init__(self, supervisor: Supervisor):
         """Initialize motor devices."""
-        self.supervisor = supervisor
+        self.supervisor: Any = supervisor
         
         # Steering motors
-        self.left_steer = supervisor.getDevice('left_steer')
-        self.right_steer = supervisor.getDevice('right_steer')
+        self.left_steer: Any = supervisor.getDevice('left_steer')
+        self.right_steer: Any = supervisor.getDevice('right_steer')
         self._init_steering()
         
         # Wheel motors
-        self.wheels = [
+        self.wheels: List[Any] = [
             supervisor.getDevice('left_front_wheel'),
             supervisor.getDevice('right_front_wheel'),
             supervisor.getDevice('left_rear_wheel'),
@@ -171,26 +171,26 @@ class SensorReader:
 
     def __init__(self, supervisor: Supervisor, timestep: int, collision_threshold: float):
         """Initialize sensors."""
-        self.supervisor = supervisor
+        self.supervisor: Any = supervisor
         self.timestep = timestep
         self.collision_threshold = collision_threshold
 
         # LiDAR
-        self.lidar = supervisor.getDevice("lidar")
+        self.lidar: Any = supervisor.getDevice("lidar")
         self.lidar.enable(timestep)
         self.lidar_max_range = self.lidar.getMaxRange()
 
         # GPS
-        self.gps = supervisor.getDevice("gps")
+        self.gps: Any = supervisor.getDevice("gps")
         self.gps.enable(timestep)
 
         # Accelerometer
-        self.accelerometer = supervisor.getDevice("accelerometer")
+        self.accelerometer: Any = supervisor.getDevice("accelerometer")
         self.accelerometer.enable(timestep)
 
         # Gyroscope (needed for IMU filtering and IEKF odometry)
         try:
-            self.gyro = supervisor.getDevice("gyro")
+            self.gyro: Any = supervisor.getDevice("gyro")
             self.gyro.enable(timestep)
             self._has_gyro = True
         except Exception:
@@ -256,19 +256,19 @@ class SLAMProcessor:
         self._goal = goal
 
         if _SLAM_AVAILABLE:
-            self.imu_proc = IMUProcessor(dt=dt)
-            self.iekf     = IEKFBackend()
-            self.slam_map = SLAMMap(map_resolution=0.05)
+            self.imu_proc: Any = IMUProcessor(dt=dt)
+            self.iekf: Any = IEKFBackend()
+            self.slam_map: Any = SLAMMap(map_resolution=0.05)
         else:
-            self.imu_proc  = None   # type: ignore[assignment]
-            self.iekf      = None   # type: ignore[assignment]
-            self.slam_map  = None   # type: ignore[assignment]
+            self.imu_proc = None
+            self.iekf = None
+            self.slam_map = None
 
     # ── Episode management ───────────────────────────────────────────────────
 
     def reset(self, init_pos: np.ndarray, init_heading: float) -> None:
         """Reset IMU/IEKF filters at episode start with current ground-truth pose."""
-        if not _SLAM_AVAILABLE:
+        if not _SLAM_AVAILABLE or self.imu_proc is None:
             return
         self.imu_proc.reset()
         self.iekf = IEKFBackend(
@@ -326,7 +326,7 @@ class SLAMProcessor:
         accel: np.ndarray,
         gyro: np.ndarray,
         cmd_speed_rads: float,
-        gps_pos: np.ndarray = None,
+        gps_pos: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, Any]:
         """Run one sensor-processing step.
 
@@ -336,7 +336,7 @@ class SLAMProcessor:
         """
         lidar_sectors = self.sector_lidar(raw_ranges)
 
-        if not _SLAM_AVAILABLE:
+        if not _SLAM_AVAILABLE or self.imu_proc is None or self.iekf is None or self.slam_map is None:
             return lidar_sectors, None
 
         # ── 1. IMU filter ────────────────────────────────────────────────────
@@ -365,7 +365,7 @@ class AltinoDriver:
         global _supervisor
         assert _supervisor is not None, "Supervisor not initialized. Call _init_supervisor() first."
         self.supervisor = _supervisor
-        self.config = config
+        self.config: Config = config
         self.timestep = int(self.supervisor.getBasicTimeStep())  # type: ignore[union-attr]
         self._dt: float = self.timestep / 1000.0
 
@@ -382,7 +382,7 @@ class AltinoDriver:
             lidar_max_range=self.sensors.lidar_max_range,
             lidar_fov=self.sensors.lidar.getFov(),
             dt=self._dt,
-            goal=tuple(config.endpoint),
+            goal=config.endpoint,
         )
         # Commanded wheel speed (rad/s) – updated by set_speed(); used for IEKF odometry
         self._cmd_speed_rads: float = 0.0
@@ -992,7 +992,7 @@ class SLAMActorCritic(nn.Module):
         self,
         tensor: torch.Tensor,
         recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
-        done_mask: Optional[torch.Tensor],
+        done_mask: Optional[Union[np.ndarray, torch.Tensor]],
     ) -> Tuple[int, int]:
         """Infer batch/time layout for 1D, 2D, and 3D+ observations."""
         if tensor.ndim == 1:
@@ -1009,7 +1009,7 @@ class SLAMActorCritic(nn.Module):
         self,
         component: Union[np.ndarray, torch.Tensor],
         recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
-        done_mask: Optional[torch.Tensor],
+        done_mask: Optional[Union[np.ndarray, torch.Tensor]],
         trailing_dims: int,
     ) -> torch.Tensor:
         """Convert an observation component to [B, T, ...]."""
@@ -1026,7 +1026,7 @@ class SLAMActorCritic(nn.Module):
         self,
         observation: Union[np.ndarray, torch.Tensor, Dict[str, Union[np.ndarray, torch.Tensor]]],
         recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
-        done_mask: Optional[torch.Tensor],
+        done_mask: Optional[Union[np.ndarray, torch.Tensor]],
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor], int, int]:
         """Split observation into semantic SLAM feature groups."""
         if isinstance(observation, dict):
@@ -1080,7 +1080,7 @@ class SLAMActorCritic(nn.Module):
         self,
         observation: Union[np.ndarray, torch.Tensor, Dict[str, Union[np.ndarray, torch.Tensor]]],
         recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
-        done_mask: Optional[torch.Tensor],
+        done_mask: Optional[Union[np.ndarray, torch.Tensor]],
     ) -> Tuple[torch.Tensor, int, int]:
         """Encode lightweight SLAM feature groups to latent features [B, T, D]."""
         obstacle, pose_goal, imu, grid, batch_size, seq_len = self._split_observation(

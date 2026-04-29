@@ -29,7 +29,7 @@ import sys
 import time
 from collections import deque
 from pathlib import Path
-from typing import Deque, List, Optional, Tuple
+from typing import Any, Deque, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -38,19 +38,19 @@ print("[CNN-LiDAR-SLAM] controller loading …", flush=True)
 
 # ── Webots controller API ────────────────────────────────────────────────────
 try:
-    from controller import Robot, Supervisor, Lidar, InertialUnit, Accelerometer, Gyro, Display, GPS
+    from controller import Robot, Supervisor, Lidar, InertialUnit, Accelerometer, Gyro, Display, GPS  # pyright: ignore[reportMissingImports]
     print("[CNN-LiDAR-SLAM] Webots controller API imported OK", flush=True)
 except ImportError as _e:
     print(f"[CNN-LiDAR-SLAM] WARNING: {_e}", flush=True)
     Robot = Supervisor = InertialUnit = Accelerometer = Gyro = Display = GPS = Lidar = object  # type: ignore
 
 # ── Project modules ──────────────────────────────────────────────────────────
-sys.path.insert(0, str(Path(__file__).parent))
-from lidar_preprocessing import LiDARPreprocessor, LiDARFeatures
-from imu_filter import IMUProcessor, IMUState
-from cnn_model import CNNObjectDetector, build_model
-from iekf_backend import IEKFBackend
-from slam_map import SLAMMap
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from controllers.SLAM.lidar_preprocessing import LiDARPreprocessor, LiDARFeatures
+from controllers.SLAM.imu_filter import IMUProcessor, IMUState
+from controllers.SLAM.cnn_model import CNNObjectDetector, build_model
+from controllers.SLAM.iekf_backend import IEKFBackend
+from controllers.SLAM.slam_map import SLAMMap
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -87,7 +87,7 @@ def _read_lidar(lidar) -> np.ndarray:
     return raw
 
 
-def _read_imu(inertial: InertialUnit, accel_dev: Accelerometer, gyro_dev: Gyro
+def _read_imu(inertial: Any, accel_dev: Any, gyro_dev: Any
               ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Read raw IMU values from Webots devices.
@@ -129,14 +129,14 @@ class CNNLidarSLAMController:
     """
 
     def __init__(self) -> None:
-        self.robot = Supervisor()
+        self.robot: Any = Supervisor()
         self.timestep = int(self.robot.getBasicTimeStep())
         self.dt = self.timestep / 1000.0  # seconds
 
         print("[CNN-LiDAR-SLAM] Initialising …", flush=True)
 
         # ── Sensors ──────────────────────────────────────────────────────────
-        self.lidar: Lidar = self.robot.getDevice("lidar")
+        self.lidar: Any = self.robot.getDevice("lidar")
         self.lidar.enable(self.timestep)
         # enablePointCloud() is only valid for 3-D LiDARs; skip for 2-D
         self.lidar_max_range = self.lidar.getMaxRange()
@@ -153,37 +153,37 @@ class CNNLidarSLAMController:
         )
         self.lidar_angles = None  # built after first step (length = _lidar_h_res)
 
-        self.inertial: InertialUnit = self.robot.getDevice("inertial unit")
+        self.inertial: Any = self.robot.getDevice("inertial unit")
         self.inertial.enable(self.timestep)
 
-        self.accel_dev: Accelerometer = self.robot.getDevice("accelerometer")
+        self.accel_dev: Any = self.robot.getDevice("accelerometer")
         self.accel_dev.enable(self.timestep)
 
-        self.gyro_dev: Gyro = self.robot.getDevice("gyro")
+        self.gyro_dev: Any = self.robot.getDevice("gyro")
         self.gyro_dev.enable(self.timestep)
 
         # Optional GPS for ground-truth comparison / ATE logging
-        self._gps: Optional[GPS] = None
+        self._gps: Optional[Any] = None
         gps_dev = self.robot.getDevice("gps")
         if gps_dev is not None:
             self._gps = gps_dev
-            self._gps.enable(self.timestep)
+            gps_dev.enable(self.timestep)
 
         # Optional display for trajectory visualisation (not required)
-        self._display: Optional[Display] = None
+        self._display: Optional[Any] = None
         disp_dev = self.robot.getDevice("display")
         if disp_dev is not None:
             self._display = disp_dev
 
         # ── Motors ───────────────────────────────────────────────────────────
-        self._left_steer = self.robot.getDevice("left_steer")
-        self._right_steer = self.robot.getDevice("right_steer")
+        self._left_steer: Any = self.robot.getDevice("left_steer")
+        self._right_steer: Any = self.robot.getDevice("right_steer")
         self._left_steer.setPosition(0.0)
         self._right_steer.setPosition(0.0)
         self._left_steer.setVelocity(1.0)
         self._right_steer.setVelocity(1.0)
 
-        self._wheels = [
+        self._wheels: List[Any] = [
             self.robot.getDevice("left_front_wheel"),
             self.robot.getDevice("right_front_wheel"),
             self.robot.getDevice("left_rear_wheel"),
@@ -361,9 +361,6 @@ class CNNLidarSLAMController:
         )
         if new_kf is not None:
             self._keyframe_count += 1
-            # Accumulate 3-D scan points for the map plot
-            pts_3d = self._raw_to_3d_world(raw_ranges, state)
-            self.slam_map.add_scan_points_3d(pts_3d)
 
             # Update semantic landmark map
             R = self._rot2_mat(heading)
@@ -568,6 +565,8 @@ class CNNLidarSLAMController:
 
     def _draw_display(self, pos: np.ndarray) -> None:
         """Draw the current robot position on the Webots display."""
+        if self._display is None:
+            return
         try:
             ox, oy = DISPLAY_ORIGIN
             px = int(ox + pos[0] * DISPLAY_SCALE)

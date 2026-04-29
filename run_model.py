@@ -6,10 +6,7 @@ import torch
 
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
 
-
-# Import the classes from PPO.py
-# Assuming PPO.py is in the same directory or adjust path
-from PPO import Config, WebotsEnv, PPOAgent, _init_supervisor
+from controllers.PPO.PPO import Config, WebotsEnv, PPOAgent, _init_supervisor
 
 
 @dataclass
