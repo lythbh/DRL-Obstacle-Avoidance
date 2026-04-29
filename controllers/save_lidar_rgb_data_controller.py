@@ -3,10 +3,9 @@
 import csv
 import json
 import os
-from typing import Tuple
 
 import numpy as np
-from controller import Camera, Lidar, Robot
+from controller import Camera, Lidar, Robot  # pyright: ignore[reportMissingImports]
 from PIL import Image
 
 RECORD_SECONDS = 10
