@@ -6,7 +6,8 @@ import torch
 
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
 
-from controllers.PPO.PPO import Config, WebotsEnv, PPOAgent, _init_supervisor
+from controllers.PPO.PPO import Config, PPOAgent
+from controllers.Webots import WebotsEnv, _init_supervisor
 
 
 @dataclass
