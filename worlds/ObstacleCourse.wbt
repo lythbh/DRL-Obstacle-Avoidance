@@ -7,70 +7,43 @@ EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/project
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/chairs/protos/WoodenChair.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/drinks/protos/BeerBottle.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/obstacles/protos/OilBarrel.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/obstacles/protos/ConstructionCone.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/balls/protos/Football.proto"
 
 WorldInfo {
 }
-
 Viewpoint {
   orientation -0.01226883505553565 0.999689345373289 0.02169535511359242 1.0298143119969385
   position -11.582393906931934 -0.4294819623663883 16.03315727551396
 }
-
 TexturedBackground {
 }
-
 TexturedBackgroundLight {
 }
-
 RectangleArena {
   rotation 0 0 1 3.14159
   floorSize 8 8
 }
-
-# Obstacle 1: Oil Barrel near center-left
 OilBarrel {
-  translation -1.5 1.2 0
+  translation -0.95 0.06 0
 }
-
-# Obstacle 2: Construction Cone near center-right
-ConstructionCone {
-  translation 1.0 0.5 0
-}
-
-# Obstacle 3: Football (rolling obstacle)
-Football {
-  translation -0.8 -1.5 0.1
-}
-
-# Obstacle 4: Water Bottle (left side)
 WaterBottle {
-  translation -1.99883 -2.0 -0.0023924
+  translation -1.99883 -2 -0.0023924
   rotation 8.581729703268216e-08 -0.9999999999989376 -1.4551535939760312e-06 1.231913643218931e-10
 }
-
-# Obstacle 5: Wooden Chair (right side)
 WoodenChair {
-  translation 2.0 -1.0 0
+  translation 2 -1 0
 }
-
-# Obstacle 6: Beer Bottle cluster
 BeerBottle {
   translation -2.5 -0.5 0.00034304000000001666
   rotation -0.9999999999980901 1.7059566573256889e-06 9.537045380834872e-07 6.753468877011697e-11
   name "beer bottle(1)"
 }
-
 BeerBottle {
-  translation 0.5 2.0 0.00034304000000001666
+  translation 0.5 2 0.00034304000000001666
   rotation -0.9999999999999858 -4.991012414899358e-08 -1.6076375172976184e-07 1.1965093783228038e-09
   name "beer bottle(2)"
 }
-
-# Obstacle 7: Wall/Block obstacles (Box primitives)
 Solid {
-  translation 0.0 2.5 0.2
+  translation 0 2.5 0.2
   children [
     Shape {
       appearance PBRAppearance {
@@ -78,18 +51,17 @@ Solid {
         roughness 0.5
       }
       geometry Box {
-        size 2.0 0.2 0.4
+        size 2 0.2 0.4
       }
     }
   ]
-  boundingObject Box {
-    size 2.0 0.2 0.4
-  }
   name "obstacle_wall_1"
+  boundingObject Box {
+    size 2 0.2 0.4
+  }
 }
-
 Solid {
-  translation -2.5 0.0 0.2
+  translation -2.5 0 0.2
   children [
     Shape {
       appearance PBRAppearance {
@@ -97,17 +69,15 @@ Solid {
         roughness 0.5
       }
       geometry Box {
-        size 0.2 3.0 0.4
+        size 0.2 3 0.4
       }
     }
   ]
-  boundingObject Box {
-    size 0.2 3.0 0.4
-  }
   name "obstacle_wall_2"
+  boundingObject Box {
+    size 0.2 3 0.4
+  }
 }
-
-# Obstacle 8: Cylinder obstacles
 Solid {
   translation 1.5 1.5 0.15
   children [
@@ -122,15 +92,14 @@ Solid {
       }
     }
   ]
+  name "obstacle_cylinder_1"
   boundingObject Cylinder {
     height 0.3
     radius 0.15
   }
-  name "obstacle_cylinder_1"
 }
-
 Solid {
-  translation -1.0 -2.0 0.1
+  translation -1 -2 0.1
   children [
     Shape {
       appearance PBRAppearance {
@@ -143,11 +112,11 @@ Solid {
       }
     }
   ]
+  name "obstacle_cylinder_2"
   boundingObject Cylinder {
     height 0.2
     radius 0.1
   }
-  name "obstacle_cylinder_2"
 }
 DEF ALTINO Robot {
   translation -2.27893 -0.01536 0.017746
