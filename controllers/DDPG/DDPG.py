@@ -9,7 +9,11 @@ from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModule, TensorDictSequential
 from torch import multiprocessing
 
-from torchrl.collectors import Collector
+try:
+    from torchrl.collectors import Collector
+except ImportError:
+    from torchrl.collectors import SyncDataCollector as Collector
+
 from torchrl.data import LazyMemmapStorage, RandomSampler, ReplayBuffer
 
 from torchrl.envs import (
