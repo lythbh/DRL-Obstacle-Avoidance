@@ -1,8 +1,6 @@
 """Webots simulation stack for the ALTINO robot."""
 
 import os
-import sys
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
@@ -11,10 +9,7 @@ import numpy as np
 
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
 try:
-    from controllers.SLAM.lidar_preprocessing import LiDARPreprocessor, LiDARFeatures  # type: ignore
     from controllers.SLAM.imu_filter import IMUProcessor, IMUState                       # type: ignore
     from controllers.SLAM.iekf_backend import IEKFBackend                                # type: ignore
     from controllers.SLAM.slam_map import SLAMMap                                        # type: ignore
@@ -135,6 +130,7 @@ class SLAMProcessor:
     def __init__(self, lidar_max_range: float, lidar_fov: float, dt: float, goal: Tuple[float, float] = (0.0, 0.0)) -> None:
         self._dt = dt
         self._lidar_max_range = lidar_max_range
+        self._lidar_max_range_inv = 1.0 / max(lidar_max_range, 1e-6)
         self._lidar_fov = lidar_fov
         self._lidar_angles: Optional[np.ndarray] = None
         self._goal = goal
@@ -175,7 +171,7 @@ class SLAMProcessor:
                 [valid, np.full(self.N_SECTORS - remainder, self._lidar_max_range, dtype=np.float32)]
             )
         sectors = valid.reshape(self.N_SECTORS, -1).min(axis=1)
-        return np.clip(sectors / self._lidar_max_range, 0.0, 1.0).astype(np.float32)
+        return np.clip(sectors * self._lidar_max_range_inv, 0.0, 1.0).astype(np.float32)
 
     def _scan_to_world(self, raw_ranges: np.ndarray, pos: np.ndarray, heading: float) -> np.ndarray:
         n = len(raw_ranges)
@@ -428,6 +424,10 @@ class WebotsEnv:
 
     def __init__(self, config: "Config"):
         self.config = config
+        self.action_dim = 2
+        self.observation_size = config.lidar_sector_dim + config.pose_goal_dim + config.imu_feature_dim
+        self._endpoint = np.array(config.endpoint, dtype=np.float32)
+        self._reference_distance = float(config.reference_distance if config.reference_distance is not None else 1.0)
         self.robot = AltinoDriver(config)
         self.timestep = self.robot.timestep
 
@@ -435,8 +435,8 @@ class WebotsEnv:
         self.backlights = self.robot.get_device("backlights")
 
         self.reward_computer = RewardComputer(
-            np.array(config.endpoint, dtype=np.float32),
-            reference_distance=float(config.reference_distance if config.reference_distance is not None else 1.0),
+            self._endpoint,
+            reference_distance=self._reference_distance,
             collision_reward=config.collision_penalty,
             progress_scale=config.progress_reward_scale,
             distance_reward_scale=config.distance_reward_scale,
@@ -480,7 +480,7 @@ class WebotsEnv:
         self.was_in_goal = False
 
     def _goal_geometry(self, pos: np.ndarray, heading: float) -> Tuple[float, float]:
-        goal_vec = np.array(self.config.endpoint, dtype=np.float32) - pos
+        goal_vec = self._endpoint - pos
         goal_distance = float(np.linalg.norm(goal_vec))
         goal_direction = float(np.arctan2(goal_vec[1], goal_vec[0]))
         goal_error = float(np.arctan2(np.sin(goal_direction - heading), np.cos(goal_direction - heading)))
@@ -494,7 +494,7 @@ class WebotsEnv:
         imu_state: Any,
     ) -> np.ndarray:
         goal_distance, goal_error = self._goal_geometry(pos, heading)
-        ref_dist = float(self.config.reference_distance if self.config.reference_distance is not None else 1.0)
+        ref_dist = self._reference_distance
 
         direction_features = np.array([
             np.sin(heading),

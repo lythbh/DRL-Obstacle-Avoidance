@@ -15,7 +15,7 @@ RecurrentState = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
-from controllers.Webots import WebotsEnv, _init_supervisor
+from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
 
 
 # ============================================================================
@@ -133,6 +133,61 @@ class PPOAgent:
     def get_initial_state(self, batch_size: int = 1) -> RecurrentState:
         """Expose recurrent state initialization for rollouts."""
         return self.model.get_initial_state(batch_size, device=self.device)
+
+    def _checkpoint_metadata(self) -> Dict[str, Any]:
+        """Return architecture metadata needed to validate checkpoints."""
+        return {
+            "obs_size": self.obs_size,
+            "action_dim": self.action_dim,
+            "recurrent_cell": self.config.recurrent_cell,
+            "architecture": {
+                "hidden_size": self.config.hidden_size,
+                "latent_size": self.config.latent_size,
+                "lstm_hidden_size": self.config.lstm_hidden_size,
+                "lstm_layers": self.config.lstm_layers,
+                "lidar_sector_dim": self.config.lidar_sector_dim,
+                "pose_goal_dim": self.config.pose_goal_dim,
+                "imu_feature_dim": self.config.imu_feature_dim,
+                "occupancy_grid_shape": (
+                    tuple(self.config.occupancy_grid_shape)
+                    if self.config.occupancy_grid_shape is not None
+                    else None
+                ),
+            },
+        }
+
+    def _validate_checkpoint_metadata(self, checkpoint: Dict[str, Any]) -> None:
+        """Fail fast when a checkpoint was trained with incompatible dimensions."""
+        saved_obs_size = checkpoint.get("obs_size")
+        if saved_obs_size is not None and int(saved_obs_size) != self.obs_size:
+            raise ValueError(
+                f"Checkpoint observation size {saved_obs_size} does not match current observation size {self.obs_size}."
+            )
+
+        saved_action_dim = checkpoint.get("action_dim")
+        if saved_action_dim is not None and int(saved_action_dim) != self.action_dim:
+            raise ValueError(
+                f"Checkpoint action dim {saved_action_dim} does not match current action dim {self.action_dim}."
+            )
+
+        saved_architecture = checkpoint.get("architecture")
+        if not isinstance(saved_architecture, dict):
+            return
+
+        current_architecture = self._checkpoint_metadata()["architecture"]
+        mismatches: List[str] = []
+        for key, expected_value in current_architecture.items():
+            if key not in saved_architecture:
+                continue
+            actual_value = saved_architecture[key]
+            if key == "occupancy_grid_shape" and actual_value is not None:
+                actual_value = tuple(actual_value)
+            if actual_value != expected_value:
+                mismatches.append(f"{key}: checkpoint={actual_value}, current={expected_value}")
+
+        if mismatches:
+            mismatch_text = "; ".join(mismatches)
+            raise ValueError(f"Checkpoint architecture is incompatible with the current configuration: {mismatch_text}")
 
     def _action_bounds(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """Get per-dimension action bounds."""
@@ -376,6 +431,7 @@ class PPOAgent:
                 "Checkpoint does not contain recurrent 'model' weights. "
                 "Legacy feed-forward checkpoints are not compatible with this module."
             )
+        self._validate_checkpoint_metadata(checkpoint)
         checkpoint_cell = str(checkpoint.get("recurrent_cell", self.config.recurrent_cell)).lower().strip()
         if checkpoint_cell not in {"lstm", "gru"}:
             raise ValueError(f"Unsupported recurrent_cell in checkpoint: {checkpoint_cell}")
@@ -408,8 +464,8 @@ def train(config: Optional[Config] = None) -> None:
     # Create environment and agent
     env = WebotsEnv(config)
     obs, _ = env.reset()
-    obs_size = len(obs)
-    action_dim = 2
+    obs_size = env.observation_size
+    action_dim = env.action_dim
     agent = PPOAgent(obs_size, action_dim, config)
     
     print(f"[TRAIN] Starting training: {config.episodes} episodes, "
@@ -517,14 +573,15 @@ def train(config: Optional[Config] = None) -> None:
                 best_goal_reward = episode_reward_sum
                 best_goal_episode = episode + 1
                 env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward_sum)
-                torch.save({
+                checkpoint = {
                     'model': agent.model.state_dict(),
                     'actor_log_std': agent.actor_log_std.detach().cpu(),
                     'episode': best_goal_episode,
                     'reward': best_goal_reward,
-                    'recurrent_cell': config.recurrent_cell,
-                    'goal_episode': True
-                }, 'best_model.pth')
+                    'goal_episode': True,
+                }
+                checkpoint.update(agent._checkpoint_metadata())
+                torch.save(checkpoint, 'best_model.pth')
                 print(
                     f"[TRAIN] New best goal episode {best_goal_episode} "
                     f"with reward {best_goal_reward:.2f}, model saved."
@@ -532,14 +589,15 @@ def train(config: Optional[Config] = None) -> None:
         elif best_goal_episode is None and episode_reward_sum > best_reward:
             best_reward = episode_reward_sum
             env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward_sum)
-            torch.save({
+            checkpoint = {
                 'model': agent.model.state_dict(),
                 'actor_log_std': agent.actor_log_std.detach().cpu(),
                 'episode': episode + 1,
                 'reward': best_reward,
-                'recurrent_cell': config.recurrent_cell,
-                'goal_episode': False
-            }, 'best_model.pth')
+                'goal_episode': False,
+            }
+            checkpoint.update(agent._checkpoint_metadata())
+            torch.save(checkpoint, 'best_model.pth')
             print(
                 f"[TRAIN] New best episode {episode + 1} with reward {best_reward:.2f} "
                 f"(no goal episode yet), model saved."
@@ -552,13 +610,14 @@ def train(config: Optional[Config] = None) -> None:
         agent.update(rollout_trajectories)
     
     # Save final model
-    torch.save({
+    checkpoint = {
         'model': agent.model.state_dict(),
         'actor_log_std': agent.actor_log_std.detach().cpu(),
         'episode': 'final',
         'reward': best_reward,
-        'recurrent_cell': config.recurrent_cell
-    }, 'final_model.pth')
+    }
+    checkpoint.update(agent._checkpoint_metadata())
+    torch.save(checkpoint, 'final_model.pth')
     print("[TRAIN] Final model saved.")
 
     # Cleanup
