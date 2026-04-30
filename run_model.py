@@ -1,21 +1,26 @@
-"""Inference script for running the trained PPO model in Webots."""
-from dataclasses import dataclass
-from typing import Optional, Dict, Any
-import numpy as np
-import torch
-
-from controller import Supervisor  # pyright: ignore[reportMissingImports]
-
-from controllers.PPO.PPO import Config, PPOAgent
-from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
+"""Inference script for running a trained PPO or SAC model in Webots."""
+import argparse
+from dataclasses import dataclass, fields
+from typing import Optional, Dict, Any, Type
 
 
 @dataclass
 class InferenceConfig:
     """Configuration for inference."""
     model_path: str = 'best_model.pth'
+    algorithm: str = "sac"  # "ppo" or "sac"
     episodes: int = 10  # Number of episodes to run
     render: bool = True  # Whether to print episode info
+
+
+def _checkpoint_config(config_class: Type[Any], checkpoint: Dict[str, Any]) -> Any:
+    """Build a config from checkpoint metadata when available."""
+    saved_config = checkpoint.get("config")
+    if not isinstance(saved_config, dict):
+        return config_class()
+
+    valid_fields = {field.name for field in fields(config_class)}
+    return config_class(**{key: value for key, value in saved_config.items() if key in valid_fields})
 
 
 def run_inference(config: Optional[InferenceConfig] = None) -> None:
@@ -27,7 +32,29 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
     if config is None:
         config = InferenceConfig()
 
-    # Initialize Webots supervisor
+    if config.episodes <= 0:
+        print(f"[INFERENCE] ERROR: episodes must be greater than 0, got {config.episodes}.")
+        return
+
+    algorithm = config.algorithm.lower().strip()
+    if algorithm not in {"ppo", "sac"}:
+        print(f"[INFERENCE] ERROR: Unsupported algorithm '{config.algorithm}'. Use 'ppo' or 'sac'.")
+        return
+
+    print(f"[INFERENCE] Using algorithm: {algorithm.upper()}", flush=True)
+
+    try:
+        import numpy as np
+        import torch
+
+        from controllers.PPO.PPO import Config as PPOConfig, PPOAgent
+        from controllers.SAC.SAC import Config as SACConfig, SACAgent
+        from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
+    except ImportError as e:
+        print(f"[INFERENCE] ERROR importing runtime dependencies: {e}")
+        print("[INFERENCE] Run this from the Webots controller Python environment with the project dependencies installed.")
+        return
+
     _init_supervisor()
 
     try:
@@ -39,33 +66,52 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
         print(f"[INFERENCE] ERROR loading model metadata: {e}")
         return
 
-    recurrent_cell = str(checkpoint.get("recurrent_cell", "lstm")).lower().strip()
-    train_config = Config(recurrent_cell=recurrent_cell)
+    if algorithm == "ppo":
+        recurrent_cell = str(checkpoint.get("recurrent_cell", "gru")).lower().strip()
+        train_config = _checkpoint_config(PPOConfig, checkpoint)
+        train_config.recurrent_cell = recurrent_cell
+    else:
+        architecture = checkpoint.get("architecture")
+        if not isinstance(architecture, dict):
+            architecture = {}
+        recurrent_cell = str(architecture.get("recurrent_cell", "gru")).lower().strip()
+        train_config = _checkpoint_config(SACConfig, checkpoint)
+        train_config.recurrent_cell = recurrent_cell
 
-    # Create environment
     env = WebotsEnv(train_config)
-    obs, _ = env.reset()
+    env.reset()
     obs_size = env.observation_size
     n_actions = env.action_dim
 
-    # Create agent
-    agent = PPOAgent(obs_size, n_actions, train_config)
+    agent: Any
+    if algorithm == "ppo":
+        agent = PPOAgent(obs_size, n_actions, train_config)
+    else:
+        agent = SACAgent(obs_size, n_actions, train_config)
 
-    # Load saved model
     try:
-        agent.load_model(config.model_path)
+        if algorithm == "ppo":
+            agent.load_model(config.model_path)
+        else:
+            agent.load(config.model_path)
         print(f"[INFERENCE] Loaded model from {config.model_path}")
         print(f"[INFERENCE] Model from episode: {checkpoint.get('episode', 'unknown')}")
         print(f"[INFERENCE] Reward: {checkpoint.get('reward', 'unknown')}")
         print(f"[INFERENCE] Goal episode: {checkpoint.get('goal_episode', False)}")
-        print(f"[INFERENCE] Recurrent cell: {checkpoint.get('recurrent_cell', recurrent_cell)}")
+        print(f"[INFERENCE] Recurrent cell: {recurrent_cell}")
     except Exception as e:
         print(f"[INFERENCE] ERROR loading model: {e}")
         return
 
-    # Set to evaluation mode
-    agent.model.eval()
-    agent.actor_log_std.requires_grad_(False)
+    if algorithm == "ppo":
+        agent.model.eval()
+        agent.actor_log_std.requires_grad_(False)
+    else:
+        agent.actor.eval()
+        agent.q1.eval()
+        agent.q2.eval()
+        agent.target_q1.eval()
+        agent.target_q2.eval()
 
     print(f"[INFERENCE] Running {config.episodes} episodes...")
 
@@ -82,14 +128,21 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
         prev_done = True
 
         while not done:
-            action, _, _, recurrent_state = agent.select_action(
-                obs,
-                recurrent_state=recurrent_state,
-                done=prev_done,
-                deterministic=True,
-            )
+            if algorithm == "ppo":
+                action, _, _, recurrent_state = agent.select_action(
+                    obs,
+                    recurrent_state=recurrent_state,
+                    done=prev_done,
+                    deterministic=True,
+                )
+            else:
+                action, recurrent_state = agent.select_action(
+                    obs,
+                    recurrent_state=recurrent_state,
+                    done=prev_done,
+                    deterministic=True,
+                )
 
-            # Step environment
             obs_next, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             prev_done = done
@@ -119,19 +172,31 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
                 f"End: {episode_end_reason}"
             )
 
-    # Summary
     avg_reward = np.mean(total_rewards)
     std_reward = np.std(total_rewards)
     success_rate = goal_count / config.episodes * 100
 
     print("\n[INFERENCE] Summary:")
-    print(f"  Average Reward: {avg_reward:.2f} ± {std_reward:.2f}")
+    print(f"  Average Reward: {avg_reward:.2f} +/- {std_reward:.2f}")
     print(f"  Goal Success Rate: {success_rate:.1f}% ({goal_count}/{config.episodes})")
 
-    # Cleanup
     env.robot.motors.stop()
     print("[INFERENCE] Inference complete. Robot stopped.")
 
 
 if __name__ == "__main__":
-    run_inference()
+    parser = argparse.ArgumentParser(description="Run PPO or SAC inference in Webots.")
+    parser.add_argument("--algorithm", choices=("ppo", "sac"), default=InferenceConfig.algorithm)
+    parser.add_argument("--model-path", default=InferenceConfig.model_path)
+    parser.add_argument("--episodes", type=int, default=InferenceConfig.episodes)
+    parser.add_argument("--no-render", action="store_true")
+    args, _ = parser.parse_known_args()
+
+    run_inference(
+        InferenceConfig(
+            model_path=args.model_path,
+            algorithm=args.algorithm,
+            episodes=args.episodes,
+            render=not args.no_render,
+        )
+    )

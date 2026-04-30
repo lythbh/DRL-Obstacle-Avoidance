@@ -481,8 +481,12 @@ def train(config: Optional[Config] = None) -> None:
 
     _init_supervisor()
     env = WebotsEnv(config)
-    obs, _ = env.reset()
+    env.reset()
     agent = SACAgent(env.observation_size, env.action_dim, config)
+
+    print("[TRAIN] Algorithm: SAC", flush=True)
+    print(f"[TRAIN] Starting training: {config.episodes} episodes", flush=True)
+    print(f"[TRAIN] Observation size: {env.observation_size}, Action dims: {env.action_dim}", flush=True)
 
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     repo_root = Path(__file__).resolve().parents[2]

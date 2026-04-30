@@ -1,8 +1,6 @@
 """PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
-import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Tuple, List, Optional, Dict, Any, Union
 import numpy as np
@@ -463,11 +461,12 @@ def train(config: Optional[Config] = None) -> None:
     
     # Create environment and agent
     env = WebotsEnv(config)
-    obs, _ = env.reset()
+    env.reset()
     obs_size = env.observation_size
     action_dim = env.action_dim
     agent = PPOAgent(obs_size, action_dim, config)
     
+    print("[TRAIN] Algorithm: PPO", flush=True)
     print(f"[TRAIN] Starting training: {config.episodes} episodes, "
           f"update every {config.update_every} episodes")
     print(f"[TRAIN] Observation size: {obs_size}, Action dims: {action_dim}")
