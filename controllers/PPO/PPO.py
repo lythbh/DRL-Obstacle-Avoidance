@@ -72,6 +72,8 @@ class Config:
     motion_reward_scale: float = 0.05  # Bonus for moving forward to avoid stop-policy collapse
     new_best_distance_bonus: float = 1.0  # Bonus when reaching a new closest distance to goal
     step_penalty: float = -0.01  # Small per-step penalty to encourage efficiency
+    spin_penalty_scale: float = 0.1   # Penalty per rad/s of yaw rate (discourages spinning in place)
+    revisit_penalty_scale: float = 0.3  # Penalty per revisit of an already-visited grid cell (capped at 4x)
     endpoint: Tuple[float, float] = (2.0, 0.0)  # Goal location
     goal_threshold: float = 0.1  # Radius around goal considered reached
     goal_stop_bonus: float = 120.0  # Extra reward for stopping at the goal
@@ -512,22 +514,24 @@ class RewardComputer:
         self,
         endpoint: np.ndarray,
         reference_distance: float,
-        collision_reward: float = -40.0,
+        collision_reward: float = -300.0,
         progress_scale: float = 3.0,
-        distance_reward_scale: float = 2.0,
-        heading_reward_scale: float = 0.08,
+        distance_reward_scale: float = 20.0,
+        heading_reward_scale: float = 0.8,
         safety_reward_scale: float = 0.2,
         motion_reward_scale: float = 0.05,
         new_best_distance_bonus: float = 1.0,
-        step_penalty: float = -0.01,
+        step_penalty: float = -0.05,
         goal_threshold: float = 0.8,
         goal_stop_bonus: float = 120.0,
         goal_hold_reward: float = 10.0,
         goal_speed_penalty: float = -60.0,
         goal_overshoot_penalty: float = -50.0,
+        spin_penalty_scale: float = 0.3,
+        revisit_penalty_scale: float = 0.5,
     ):
         """Initialize reward computer.
-        
+
         Args:
             endpoint: Goal position [x, y]
             collision_reward: Penalty for collision
@@ -547,7 +551,13 @@ class RewardComputer:
         self.goal_hold_reward = goal_hold_reward
         self.goal_speed_penalty = goal_speed_penalty
         self.goal_overshoot_penalty = goal_overshoot_penalty
+        self.spin_penalty_scale = spin_penalty_scale
+        self.revisit_penalty_scale = revisit_penalty_scale
         self.best_time = np.inf
+        self._visited_cells: dict = {}  # grid_cell -> visit count this episode
+
+    def reset_episode(self) -> None:
+        self._visited_cells.clear()
     
     def compute(
         self,
@@ -560,6 +570,7 @@ class RewardComputer:
         speed_norm: float,
         reached_new_best_distance: bool,
         accel: np.ndarray,
+        gyro_z: float = 0.0,
     ) -> Tuple[float, Optional[float]]:
         """Compute reward for current state.
         
@@ -609,6 +620,16 @@ class RewardComputer:
         if distance_to_end < 1.5 and distance_to_end >= self.goal_threshold:
             accel_penalty = -0.05 * accel_magnitude
 
+        # Spin penalty — discourages turning in place
+        spin_penalty = -self.spin_penalty_scale * abs(gyro_z)
+
+        # Revisit penalty — discourages looping back to already-visited positions.
+        # Cap at 4 extra visits to prevent quadratic blowup when stuck in one spot.
+        cell = (int(current_pos[0] / 0.2), int(current_pos[1] / 0.2))
+        visits = self._visited_cells.get(cell, 0)
+        self._visited_cells[cell] = visits + 1
+        revisit_penalty = -self.revisit_penalty_scale * min(visits, 4)
+
         return (
             progress
             + proximity_reward
@@ -616,8 +637,9 @@ class RewardComputer:
             + safety_reward
             + motion_reward
             + new_best_bonus
-           # + approach_speed_penalty
             + accel_penalty
+            + spin_penalty
+            + revisit_penalty
             + self.step_penalty
         ), distance_to_end
 
@@ -656,6 +678,8 @@ class WebotsEnv:
             goal_hold_reward=config.goal_hold_reward,
             goal_speed_penalty=config.goal_speed_penalty,
             goal_overshoot_penalty=config.goal_overshoot_penalty,
+            spin_penalty_scale=config.spin_penalty_scale,
+            revisit_penalty_scale=config.revisit_penalty_scale,
         )
         
         # Episode state
@@ -752,6 +776,7 @@ class WebotsEnv:
         """
         # Clear the map for the new episode (saving is done in train() on new records only)
         self.robot.slam.reset_map()
+        self.reward_computer.reset_episode()
         self._episode_count += 1
 
         # Stop motors before reset
@@ -821,6 +846,9 @@ class WebotsEnv:
         accel_for_reward = (imu_state.accel_body
                             if (_SLAM_AVAILABLE and imu_state is not None)
                             else np.zeros(3, dtype=np.float32))
+        gyro_z_for_reward = (float(imu_state.gyro_body[2])
+                             if (_SLAM_AVAILABLE and imu_state is not None)
+                             else 0.0)
 
         # Termination bookkeeping
         terminated = False
@@ -838,6 +866,7 @@ class WebotsEnv:
             speed_norm,
             reached_new_best_distance,
             accel_for_reward,
+            gyro_z_for_reward,
         )
         self.prev_distance = new_distance
         self.episode_reward += reward
