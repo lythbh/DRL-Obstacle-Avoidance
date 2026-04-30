@@ -1,4 +1,4 @@
-"""LSTM actor-critic used by shared RL controllers."""
+"""GRU actor-critic used by shared RL controllers."""
 
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
@@ -10,11 +10,11 @@ if TYPE_CHECKING:
     from controllers.PPO.PPO import Config
 
 
-RecurrentState = Tuple[torch.Tensor, torch.Tensor]
+RecurrentState = torch.Tensor
 
 
-class LSTMActorCritic(nn.Module):
-    """Actor-critic network with lightweight feature branches and an LSTM core."""
+class GRUActorCritic(nn.Module):
+    """Actor-critic network with lightweight feature branches and a GRU core."""
 
     def __init__(
         self,
@@ -104,7 +104,7 @@ class LSTMActorCritic(nn.Module):
         )
         self.recurrent_hidden_size = config.lstm_hidden_size
         self.recurrent_layers = config.lstm_layers
-        self.lstm = nn.LSTM(
+        self.gru = nn.GRU(
             input_size=config.latent_size,
             hidden_size=self.recurrent_hidden_size,
             num_layers=self.recurrent_layers,
@@ -120,15 +120,12 @@ class LSTMActorCritic(nn.Module):
     ) -> RecurrentState:
         if device is None:
             device = next(self.parameters()).device
-        state_shape = (self.recurrent_layers, batch_size, self.recurrent_hidden_size)
-        h0 = torch.zeros(state_shape, device=device)
-        c0 = torch.zeros(state_shape, device=device)
-        return h0, c0
+        return torch.zeros((self.recurrent_layers, batch_size, self.recurrent_hidden_size), device=device)
 
     def _state_batch_size(self, recurrent_state: Optional[RecurrentState]) -> Optional[int]:
         if recurrent_state is None:
             return None
-        return recurrent_state[0].shape[1]
+        return recurrent_state.shape[1]
 
     def _infer_batch_time(
         self,
@@ -277,15 +274,13 @@ class LSTMActorCritic(nn.Module):
         mask = self._prepare_done_mask(done_mask, batch_size, seq_len, device)
 
         outputs: List[torch.Tensor] = []
-        h_t, c_t = recurrent_state
+        h_t = recurrent_state
         for t in range(seq_len):
             if mask is not None:
                 keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
                 h_t = h_t * keep
-                c_t = c_t * keep
-            step_output, (h_t, c_t) = self.lstm(latent[:, t : t + 1], (h_t, c_t))
+            step_output, h_t = self.gru(latent[:, t : t + 1], h_t)
             outputs.append(step_output)
-        next_state: RecurrentState = (h_t, c_t)
 
         recurrent_features = torch.cat(outputs, dim=1)
         policy_output = torch.nan_to_num(self.policy_head(recurrent_features), nan=0.0, posinf=1.0, neginf=-1.0)
@@ -299,5 +294,4 @@ class LSTMActorCritic(nn.Module):
         if seq_len == 1:
             policy_output = policy_output[:, 0]
             state_value = state_value[:, 0]
-        return policy_output, state_value, next_state
-RecurrentActorCritic = LSTMActorCritic
+        return policy_output, state_value, h_t

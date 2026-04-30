@@ -15,7 +15,7 @@ RecurrentState = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
 
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from controllers.RNN import RecurrentActorCritic as SLAMActorCritic
+from controllers.RNN import GRUActorCritic, LSTMActorCritic
 
 # ── SLAM sensor-processing modules ──────────────────────────────────────────
 try:
@@ -54,7 +54,7 @@ class Config:
     latent_size: int = 128  # Encoder output size before the recurrent core
     lstm_hidden_size: int = 128  # Hidden size of the recurrent core
     lstm_layers: int = 1
-    recurrent_cell: str = "lstm"
+    recurrent_cell: str = "gru" # "lstm" or "gru"
     lidar_sector_dim: int = 16
     pose_goal_dim: int = 7  # [x, y] + [sin/cos heading, sin/cos goal_error, norm dist]
     imu_feature_dim: int = 10  # accel(3) + gyro(3) + quaternion(4)
@@ -312,11 +312,16 @@ class SLAMProcessor:
         n = len(raw_ranges)
         if self._lidar_angles is None or len(self._lidar_angles) != n:
             self._lidar_angles = np.linspace(
-                -self._lidar_fov / 2.0, self._lidar_fov / 2.0, n, dtype=np.float32
+                start=-self._lidar_fov / 2.0,
+                stop=self._lidar_fov / 2.0,
+                num=n,
+                dtype=np.float32,
             )
         mask = (raw_ranges > 0.01) & np.isfinite(raw_ranges)
         r = raw_ranges[mask]
-        a = self._lidar_angles[mask]
+        lidar_angles = self._lidar_angles
+        assert lidar_angles is not None
+        a = lidar_angles[mask]
         c, s = float(np.cos(heading)), float(np.sin(heading))
         xl = r * np.cos(a)
         yl = r * np.sin(a)
@@ -891,17 +896,19 @@ class PPOAgent:
         self.config = config
         self.device = self._get_device()
         self.action_dim = action_dim
-        self.model = SLAMActorCritic(
-            obs_size,
-            action_dim,
-            config,
-            recurrent_type=config.recurrent_cell,
-        ).to(self.device)
+        self.obs_size = obs_size
+        self._build_model(self.config.recurrent_cell)
+        print(f"[PPO] Using recurrent cell: {self.config.recurrent_cell.upper()}", flush=True)
+
+    def _build_model(self, recurrent_cell: str) -> None:
+        recurrent_cell = recurrent_cell.lower().strip()
+        model_class = GRUActorCritic if recurrent_cell == "gru" else LSTMActorCritic
+        self.model = model_class(self.obs_size, self.action_dim, self.config).to(self.device)
         self.actor = self.model.policy_head
         self.critic = self.model.value_head
-        self.actor_log_std = nn.Parameter(torch.full((action_dim,), -0.5, dtype=torch.float32, device=self.device))
+        self.actor_log_std = nn.Parameter(torch.full((self.action_dim,), -0.5, dtype=torch.float32, device=self.device))
         params = list(self.model.parameters()) + [self.actor_log_std]
-        self.optimizer = torch.optim.Adam(params, lr=config.learning_rate)
+        self.optimizer = torch.optim.Adam(params, lr=self.config.learning_rate)
 
     def _get_device(self) -> torch.device:
         """Get appropriate device (GPU or CPU)."""
@@ -977,6 +984,7 @@ class PPOAgent:
         obs: Union[np.ndarray, Dict[str, np.ndarray]],
         recurrent_state: Optional[RecurrentState] = None,
         done: bool = False,
+        deterministic: bool = False,
     ) -> Tuple[np.ndarray, torch.Tensor, torch.Tensor, RecurrentState]:
         """Sample a single action and advance the recurrent state."""
         done_mask = torch.tensor([float(done)], dtype=torch.float32, device=self.device)
@@ -987,8 +995,7 @@ class PPOAgent:
                 done_mask=done_mask,
             )
             mean, std, _ = self._policy_stats(policy_output)
-            noise = torch.randn_like(mean)
-            pre_tanh_action = mean + std * noise
+            pre_tanh_action = mean if deterministic else mean + std * torch.randn_like(mean)
             action = self._squash_action(pre_tanh_action)
             log_prob = self._log_prob_from_action(mean, std, action)
         return (
@@ -1156,6 +1163,13 @@ class PPOAgent:
                 "Checkpoint does not contain recurrent 'model' weights. "
                 "Legacy feed-forward checkpoints are not compatible with this module."
             )
+        checkpoint_cell = str(checkpoint.get("recurrent_cell", self.config.recurrent_cell)).lower().strip()
+        if checkpoint_cell not in {"lstm", "gru"}:
+            raise ValueError(f"Unsupported recurrent_cell in checkpoint: {checkpoint_cell}")
+        if checkpoint_cell != self.config.recurrent_cell:
+            self.config.recurrent_cell = checkpoint_cell
+            self._build_model(checkpoint_cell)
+        print(f"[PPO] Loaded recurrent cell: {checkpoint_cell.upper()}", flush=True)
         self.model.load_state_dict(checkpoint["model"])
         if "actor_log_std" in checkpoint:
             self.actor_log_std.data.copy_(checkpoint["actor_log_std"].to(self.device))
