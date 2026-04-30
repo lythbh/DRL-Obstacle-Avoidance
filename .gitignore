@@ -14,6 +14,8 @@ build/
 dist/
 *.egg-info/
 .eggs/
+controllers/PPO/slam_runs
+plots
 
 # Machine learning outputs
 *.h5
