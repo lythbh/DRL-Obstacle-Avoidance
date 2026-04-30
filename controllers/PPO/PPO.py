@@ -11,12 +11,13 @@ from torch import multiprocessing, nn
 from torch.nn.utils.rnn import pad_sequence
 from torch.distributions import Independent, Normal
 
+RecurrentState = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
+
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
-from controllers.RNN import LSTMActorCritic as SLAMActorCritic
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from controllers.RNN import RecurrentActorCritic as SLAMActorCritic
 
 # ── SLAM sensor-processing modules ──────────────────────────────────────────
-# Add the repository root so controllers.* imports resolve when Webots runs this file directly.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 try:
     from controllers.SLAM.lidar_preprocessing import LiDARPreprocessor, LiDARFeatures  # type: ignore
     from controllers.SLAM.imu_filter import IMUProcessor, IMUState                       # type: ignore
@@ -53,6 +54,7 @@ class Config:
     latent_size: int = 128  # Encoder output size before the recurrent core
     lstm_hidden_size: int = 128  # Hidden size of the recurrent core
     lstm_layers: int = 1
+    recurrent_cell: str = "lstm"
     lidar_sector_dim: int = 16
     pose_goal_dim: int = 7  # [x, y] + [sin/cos heading, sin/cos goal_error, norm dist]
     imu_feature_dim: int = 10  # accel(3) + gyro(3) + quaternion(4)
@@ -94,6 +96,9 @@ class Config:
     
     def __post_init__(self) -> None:
         """Initialize defaults for mutable fields."""
+        self.recurrent_cell = self.recurrent_cell.lower().strip()
+        if self.recurrent_cell not in {"lstm", "gru"}:
+            raise ValueError(f"Unsupported recurrent_cell: {self.recurrent_cell}")
         if self.start_position is None:
             self.start_position = [-2.0, 0.0, 0.02]
         if self.start_rotation is None:
@@ -886,7 +891,12 @@ class PPOAgent:
         self.config = config
         self.device = self._get_device()
         self.action_dim = action_dim
-        self.model = SLAMActorCritic(obs_size, action_dim, config).to(self.device)
+        self.model = SLAMActorCritic(
+            obs_size,
+            action_dim,
+            config,
+            recurrent_type=config.recurrent_cell,
+        ).to(self.device)
         self.actor = self.model.policy_head
         self.critic = self.model.value_head
         self.actor_log_std = nn.Parameter(torch.full((action_dim,), -0.5, dtype=torch.float32, device=self.device))
@@ -900,7 +910,7 @@ class PPOAgent:
             return torch.device("cuda:0")
         return torch.device("cpu")
 
-    def get_initial_state(self, batch_size: int = 1) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_initial_state(self, batch_size: int = 1) -> RecurrentState:
         """Expose recurrent state initialization for rollouts."""
         return self.model.get_initial_state(batch_size, device=self.device)
 
@@ -965,9 +975,9 @@ class PPOAgent:
     def select_action(
         self,
         obs: Union[np.ndarray, Dict[str, np.ndarray]],
-        recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        recurrent_state: Optional[RecurrentState] = None,
         done: bool = False,
-    ) -> Tuple[np.ndarray, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    ) -> Tuple[np.ndarray, torch.Tensor, torch.Tensor, RecurrentState]:
         """Sample a single action and advance the recurrent state."""
         done_mask = torch.tensor([float(done)], dtype=torch.float32, device=self.device)
         with torch.no_grad():
@@ -1285,6 +1295,7 @@ def train(config: Optional[Config] = None) -> None:
                     'actor_log_std': agent.actor_log_std.detach().cpu(),
                     'episode': best_goal_episode,
                     'reward': best_goal_reward,
+                    'recurrent_cell': config.recurrent_cell,
                     'goal_episode': True
                 }, 'best_model.pth')
                 print(
@@ -1299,6 +1310,7 @@ def train(config: Optional[Config] = None) -> None:
                 'actor_log_std': agent.actor_log_std.detach().cpu(),
                 'episode': episode + 1,
                 'reward': best_reward,
+                'recurrent_cell': config.recurrent_cell,
                 'goal_episode': False
             }, 'best_model.pth')
             print(
@@ -1317,7 +1329,8 @@ def train(config: Optional[Config] = None) -> None:
         'model': agent.model.state_dict(),
         'actor_log_std': agent.actor_log_std.detach().cpu(),
         'episode': 'final',
-        'reward': best_reward
+        'reward': best_reward,
+        'recurrent_cell': config.recurrent_cell
     }, 'final_model.pth')
     print("[TRAIN] Final model saved.")
 

@@ -1,4 +1,4 @@
-"""LSTM actor-critic used by shared RL controllers."""
+"""Shared recurrent actor-critic modules."""
 
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
@@ -10,8 +10,11 @@ if TYPE_CHECKING:
     from controllers.PPO.PPO import Config
 
 
+RecurrentState = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
+
+
 class LSTMActorCritic(nn.Module):
-    """Actor-critic network with lightweight feature branches and an LSTM core."""
+    """Actor-critic network with lightweight feature branches and a recurrent core."""
 
     def __init__(
         self,
@@ -19,11 +22,15 @@ class LSTMActorCritic(nn.Module):
         action_dim: int,
         config: "Config",
         action_space: str = "continuous",
+        recurrent_type: str = "lstm",
     ) -> None:
         super().__init__()
         self.obs_size = obs_size
         self.action_dim = action_dim
         self.action_space = action_space
+        self.recurrent_type = recurrent_type.lower()
+        if self.recurrent_type not in {"lstm", "gru"}:
+            raise ValueError(f"Unsupported recurrent_type: {recurrent_type}")
         self.grid_shape = config.occupancy_grid_shape
         self.obstacle_dim = config.lidar_sector_dim
         self.pose_goal_dim = config.pose_goal_dim
@@ -99,36 +106,59 @@ class LSTMActorCritic(nn.Module):
             nn.Linear(config.hidden_size, config.latent_size),
             nn.ReLU(),
         )
-        self.lstm = nn.LSTM(
-            input_size=config.latent_size,
-            hidden_size=config.lstm_hidden_size,
-            num_layers=config.lstm_layers,
-            batch_first=True,
-        )
-        self.policy_head = nn.Linear(config.lstm_hidden_size, action_dim)
-        self.value_head = nn.Linear(config.lstm_hidden_size, 1)
+        self.recurrent_hidden_size = config.lstm_hidden_size
+        self.recurrent_layers = config.lstm_layers
+        if self.recurrent_type == "lstm":
+            self.lstm = nn.LSTM(
+                input_size=config.latent_size,
+                hidden_size=self.recurrent_hidden_size,
+                num_layers=self.recurrent_layers,
+                batch_first=True,
+            )
+            self.gru = None
+        else:
+            self.gru = nn.GRU(
+                input_size=config.latent_size,
+                hidden_size=self.recurrent_hidden_size,
+                num_layers=self.recurrent_layers,
+                batch_first=True,
+            )
+            self.lstm = None
+        self.policy_head = nn.Linear(self.recurrent_hidden_size, action_dim)
+        self.value_head = nn.Linear(self.recurrent_hidden_size, 1)
 
     def get_initial_state(
         self,
         batch_size: int,
         device: Optional[torch.device] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> RecurrentState:
         if device is None:
             device = next(self.parameters()).device
-        h0 = torch.zeros(self.lstm.num_layers, batch_size, self.lstm.hidden_size, device=device)
-        c0 = torch.zeros(self.lstm.num_layers, batch_size, self.lstm.hidden_size, device=device)
-        return h0, c0
+        state_shape = (self.recurrent_layers, batch_size, self.recurrent_hidden_size)
+        if self.recurrent_type == "lstm":
+            h0 = torch.zeros(state_shape, device=device)
+            c0 = torch.zeros(state_shape, device=device)
+            return h0, c0
+        return torch.zeros(state_shape, device=device)
+
+    def _state_batch_size(self, recurrent_state: Optional[RecurrentState]) -> Optional[int]:
+        if recurrent_state is None:
+            return None
+        if isinstance(recurrent_state, tuple):
+            return recurrent_state[0].shape[1]
+        return recurrent_state.shape[1]
 
     def _infer_batch_time(
         self,
         tensor: torch.Tensor,
-        recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
+        recurrent_state: Optional[RecurrentState],
         done_mask: Optional[Union[np.ndarray, torch.Tensor]],
     ) -> Tuple[int, int]:
         if tensor.ndim == 1:
             return 1, 1
         if tensor.ndim == 2:
-            if recurrent_state is not None and recurrent_state[0].shape[1] == tensor.shape[0]:
+            state_batch_size = self._state_batch_size(recurrent_state)
+            if state_batch_size is not None and state_batch_size == tensor.shape[0]:
                 return tensor.shape[0], 1
             if done_mask is not None and done_mask.ndim == 1 and done_mask.shape[0] == tensor.shape[0]:
                 return 1, tensor.shape[0]
@@ -138,7 +168,7 @@ class LSTMActorCritic(nn.Module):
     def _prepare_tensor_component(
         self,
         component: Union[np.ndarray, torch.Tensor],
-        recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
+        recurrent_state: Optional[RecurrentState],
         done_mask: Optional[Union[np.ndarray, torch.Tensor]],
         trailing_dims: int,
     ) -> torch.Tensor:
@@ -154,7 +184,7 @@ class LSTMActorCritic(nn.Module):
     def _split_observation(
         self,
         observation: Union[np.ndarray, torch.Tensor, Dict[str, Union[np.ndarray, torch.Tensor]]],
-        recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
+        recurrent_state: Optional[RecurrentState],
         done_mask: Optional[Union[np.ndarray, torch.Tensor]],
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor], int, int]:
         if isinstance(observation, dict):
@@ -205,7 +235,7 @@ class LSTMActorCritic(nn.Module):
     def _encode_observation(
         self,
         observation: Union[np.ndarray, torch.Tensor, Dict[str, Union[np.ndarray, torch.Tensor]]],
-        recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]],
+        recurrent_state: Optional[RecurrentState],
         done_mask: Optional[Union[np.ndarray, torch.Tensor]],
     ) -> Tuple[torch.Tensor, int, int]:
         obstacle, pose_goal, imu, grid, batch_size, seq_len = self._split_observation(
@@ -255,24 +285,37 @@ class LSTMActorCritic(nn.Module):
     def forward(
         self,
         observation: Union[np.ndarray, torch.Tensor, Dict[str, Union[np.ndarray, torch.Tensor]]],
-        recurrent_state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        recurrent_state: Optional[RecurrentState] = None,
         done_mask: Optional[Union[np.ndarray, torch.Tensor]] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, RecurrentState]:
         latent, batch_size, seq_len = self._encode_observation(observation, recurrent_state, done_mask)
         device = latent.device
         if recurrent_state is None:
             recurrent_state = self.get_initial_state(batch_size, device=device)
-        h_t, c_t = recurrent_state
         mask = self._prepare_done_mask(done_mask, batch_size, seq_len, device)
 
         outputs: List[torch.Tensor] = []
-        for t in range(seq_len):
-            if mask is not None:
-                keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
-                h_t = h_t * keep
-                c_t = c_t * keep
-            lstm_out, (h_t, c_t) = self.lstm(latent[:, t : t + 1], (h_t, c_t))
-            outputs.append(lstm_out)
+        if self.recurrent_type == "lstm":
+            assert self.lstm is not None
+            h_t, c_t = recurrent_state
+            for t in range(seq_len):
+                if mask is not None:
+                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
+                    h_t = h_t * keep
+                    c_t = c_t * keep
+                step_output, (h_t, c_t) = self.lstm(latent[:, t : t + 1], (h_t, c_t))
+                outputs.append(step_output)
+            next_state: RecurrentState = (h_t, c_t)
+        else:
+            assert self.gru is not None
+            h_t = recurrent_state
+            for t in range(seq_len):
+                if mask is not None:
+                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
+                    h_t = h_t * keep
+                step_output, h_t = self.gru(latent[:, t : t + 1], h_t)
+                outputs.append(step_output)
+            next_state = h_t
 
         recurrent_features = torch.cat(outputs, dim=1)
         policy_output = torch.nan_to_num(self.policy_head(recurrent_features), nan=0.0, posinf=1.0, neginf=-1.0)
@@ -286,4 +329,18 @@ class LSTMActorCritic(nn.Module):
         if seq_len == 1:
             policy_output = policy_output[:, 0]
             state_value = state_value[:, 0]
-        return policy_output, state_value, (h_t, c_t)
+        return policy_output, state_value, next_state
+
+
+class GRUActorCritic(LSTMActorCritic):
+    def __init__(
+        self,
+        obs_size: int,
+        action_dim: int,
+        config: "Config",
+        action_space: str = "continuous",
+    ) -> None:
+        super().__init__(obs_size, action_dim, config, action_space=action_space, recurrent_type="gru")
+
+
+RecurrentActorCritic = LSTMActorCritic
