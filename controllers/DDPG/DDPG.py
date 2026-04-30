@@ -75,4 +75,3 @@ max_grad_norm = 1.0  # Maximum norm for the gradients
 gamma = 0.99  # Discount factor
 polyak_tau = 0.005  # Tau for the soft-update of the target network
 
-
