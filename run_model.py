@@ -29,35 +29,42 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
     # Initialize Webots supervisor
     _init_supervisor()
 
+    try:
+        checkpoint = torch.load(config.model_path, map_location="cpu")
+    except FileNotFoundError:
+        print(f"[INFERENCE] ERROR: Model file {config.model_path} not found!")
+        return
+    except Exception as e:
+        print(f"[INFERENCE] ERROR loading model metadata: {e}")
+        return
+
+    recurrent_cell = str(checkpoint.get("recurrent_cell", "lstm")).lower().strip()
+    train_config = Config(recurrent_cell=recurrent_cell)
+
     # Create environment
-    train_config = Config()  # Use default training config
     env = WebotsEnv(train_config)
     obs, _ = env.reset()
     obs_size = len(obs)
-    n_actions = len(train_config.actions)
+    n_actions = 2
 
     # Create agent
     agent = PPOAgent(obs_size, n_actions, train_config)
 
     # Load saved model
     try:
-        checkpoint = torch.load(config.model_path, map_location=agent.device)
-        agent.actor.load_state_dict(checkpoint['actor'])
-        agent.critic.load_state_dict(checkpoint['critic'])
+        agent.load_model(config.model_path)
         print(f"[INFERENCE] Loaded model from {config.model_path}")
         print(f"[INFERENCE] Model from episode: {checkpoint.get('episode', 'unknown')}")
         print(f"[INFERENCE] Reward: {checkpoint.get('reward', 'unknown')}")
         print(f"[INFERENCE] Goal episode: {checkpoint.get('goal_episode', False)}")
-    except FileNotFoundError:
-        print(f"[INFERENCE] ERROR: Model file {config.model_path} not found!")
-        return
+        print(f"[INFERENCE] Recurrent cell: {checkpoint.get('recurrent_cell', recurrent_cell)}")
     except Exception as e:
         print(f"[INFERENCE] ERROR loading model: {e}")
         return
 
     # Set to evaluation mode
-    agent.actor.eval()
-    agent.critic.eval()
+    agent.model.eval()
+    agent.actor_log_std.requires_grad_(False)
 
     print(f"[INFERENCE] Running {config.episodes} episodes...")
 
@@ -70,17 +77,21 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
         episode_reward = 0.0
         steps = 0
         episode_end_reason = "max_steps"
+        recurrent_state = agent.get_initial_state(batch_size=1)
+        prev_done = True
 
         while not done:
-            # Select action (deterministic for inference, take argmax)
-            obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=agent.device).unsqueeze(0)
-            with torch.no_grad():
-                probs = agent.actor(obs_tensor)
-                action = torch.argmax(probs, dim=-1).item()
+            action, _, _, recurrent_state = agent.select_action(
+                obs,
+                recurrent_state=recurrent_state,
+                done=prev_done,
+                deterministic=True,
+            )
 
             # Step environment
             obs_next, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
+            prev_done = done
             episode_reward += reward
             steps += 1
 

@@ -1,3 +1,4 @@
 """Shared recurrent policy modules."""
 
-from .lstm import GRUActorCritic, LSTMActorCritic, RecurrentActorCritic
+from .gru import GRUActorCritic
+from .lstm import LSTMActorCritic, RecurrentActorCritic
