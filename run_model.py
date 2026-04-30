@@ -7,7 +7,7 @@ import torch
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
 
 from controllers.PPO.PPO import Config, PPOAgent
-from controllers.Webots import WebotsEnv, _init_supervisor
+from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
 
 
 @dataclass
@@ -45,8 +45,8 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
     # Create environment
     env = WebotsEnv(train_config)
     obs, _ = env.reset()
-    obs_size = len(obs)
-    n_actions = 2
+    obs_size = env.observation_size
+    n_actions = env.action_dim
 
     # Create agent
     agent = PPOAgent(obs_size, n_actions, train_config)
