@@ -3,7 +3,7 @@
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -19,10 +19,6 @@ except ImportError as _slam_err:
     _SLAM_AVAILABLE = False
     print(f"[PPO] WARNING: SLAM modules not importable ({_slam_err}). "
           "Falling back to basic sensor processing.", flush=True)
-
-if TYPE_CHECKING:
-    from controllers.PPO.PPO import Config
-
 
 _supervisor: Optional[Supervisor] = None
 
@@ -224,7 +220,7 @@ class SLAMProcessor:
 class AltinoDriver:
     """High-level robot control interface."""
 
-    def __init__(self, config: "Config"):
+    def __init__(self, config: Any):
         global _supervisor
         assert _supervisor is not None, "Supervisor not initialized. Call _init_supervisor() first."
         self.supervisor = _supervisor
@@ -422,7 +418,7 @@ class RewardComputer:
 class WebotsEnv:
     """Webots simulation environment for ALTINO obstacle avoidance."""
 
-    def __init__(self, config: "Config"):
+    def __init__(self, config: Any):
         self.config = config
         self.action_dim = 2
         self.observation_size = config.lidar_sector_dim + config.pose_goal_dim + config.imu_feature_dim
