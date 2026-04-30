@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from dataclasses import asdict, dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -269,6 +267,7 @@ class SACAgent:
         self.action_scale = (self.action_high - self.action_low) / 2.0
 
         self.replay_buffer = ReplayBuffer(obs_size, action_dim, config.replay_size)
+        print(f"[SAC] Using recurrent cell: {self.config.recurrent_cell.upper()}", flush=True)
 
     def _get_device(self) -> torch.device:
         return torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
@@ -437,7 +436,7 @@ class SACAgent:
             "alpha": float(self.alpha.item()),
         }
 
-    def checkpoint(self, episode: int, reward: float) -> Dict[str, Any]:
+    def checkpoint(self, episode: Any, reward: float) -> Dict[str, Any]:
         checkpoint = {
             "episode": episode,
             "reward": reward,
@@ -455,7 +454,7 @@ class SACAgent:
         checkpoint["config"] = asdict(self.config)
         return checkpoint
 
-    def save(self, path: str, episode: int, reward: float) -> None:
+    def save(self, path: str, episode: Any, reward: float) -> None:
         torch.save(self.checkpoint(episode, reward), path)
 
     def load(self, path: str) -> Dict[str, Any]:
@@ -488,18 +487,16 @@ def train(config: Optional[Config] = None) -> None:
     print(f"[TRAIN] Starting training: {config.episodes} episodes", flush=True)
     print(f"[TRAIN] Observation size: {env.observation_size}, Action dims: {env.action_dim}", flush=True)
 
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    repo_root = Path(__file__).resolve().parents[2]
-    run_dir = repo_root / "controllers" / "SAC" / "checkpoints" / ts
-    os.makedirs(run_dir, exist_ok=True)
-
     total_steps = 0
     best_reward = float("-inf")
+    best_goal_reward = float("-inf")
+    best_goal_episode: Optional[int] = None
 
     for episode in range(config.episodes):
         obs, _ = env.reset()
         done = False
         episode_reward = 0.0
+        episode_end_reason = "max_steps"
         actor_state = agent.get_initial_state(batch_size=1)
         prev_done = True
 
@@ -523,19 +520,64 @@ def train(config: Optional[Config] = None) -> None:
             prev_done = done
             total_steps += 1
 
+            if done:
+                if info.get("reset_reason") == "low_score":
+                    episode_end_reason = "low_score"
+                elif info.get("reset_reason") == "collision":
+                    episode_end_reason = "collision"
+                elif info.get("reset_reason") == "goal":
+                    episode_end_reason = "goal"
+                elif truncated:
+                    episode_end_reason = "max_steps"
+
             if total_steps >= config.update_after_steps:
                 for _ in range(config.updates_per_step):
                     agent.update()
 
-        if episode_reward > best_reward:
+        print(
+            f"Episode {episode + 1:2d} | "
+            f"Reward: {episode_reward:8.2f} | "
+            f"Steps: {env.current_step:4d} | "
+            f"MinDist: {env.min_episode_distance:6.2f} | "
+            f"LastDist: {env.current_distance:6.2f} | "
+            f"End: {episode_end_reason}",
+            flush=True,
+        )
+
+        if episode_end_reason == "goal":
+            if episode_reward > best_goal_reward:
+                best_goal_reward = episode_reward
+                best_goal_episode = episode + 1
+                env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward)
+                checkpoint = agent.checkpoint(best_goal_episode, best_goal_reward)
+                checkpoint["goal_episode"] = True
+                torch.save(checkpoint, "best_model.pth")
+                print(
+                    f"[TRAIN] New best goal episode {best_goal_episode} "
+                    f"with reward {best_goal_reward:.2f}, model saved.",
+                    flush=True,
+                )
+        elif best_goal_episode is None and episode_reward > best_reward:
             best_reward = episode_reward
-            agent.save(str(run_dir / "best_model.pth"), episode, episode_reward)
+            env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward)
+            checkpoint = agent.checkpoint(episode + 1, best_reward)
+            checkpoint["goal_episode"] = False
+            torch.save(checkpoint, "best_model.pth")
+            print(
+                f"[TRAIN] New best episode {episode + 1} with reward {best_reward:.2f} "
+                f"(no goal episode yet), model saved.",
+                flush=True,
+            )
 
-        if (episode + 1) % 10 == 0:
-            agent.save(str(run_dir / "latest_model.pth"), episode, episode_reward)
-            print(f"[SAC] Episode {episode + 1:4d} | Reward {episode_reward:8.2f} | Best {best_reward:8.2f}", flush=True)
+        if episode_end_reason == "goal":
+            break
 
-    agent.save(str(run_dir / "final_model.pth"), config.episodes, best_reward)
+    final_reward = best_goal_reward if best_goal_episode is not None else best_reward
+    agent.save("final_model.pth", "final", final_reward)
+    print("[TRAIN] Final model saved.", flush=True)
+
+    env.robot.motors.stop()
+    print("[TRAIN] Training complete. Robot stopped.", flush=True)
 
 
 if __name__ == "__main__":
