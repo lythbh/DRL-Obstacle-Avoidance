@@ -1,13 +1,15 @@
 """Inference script for running a trained PPO or SAC model in Webots."""
 import argparse
+import time
 from dataclasses import dataclass, fields
+from pathlib import Path
 from typing import Optional, Dict, Any, Type
 
 
 @dataclass
 class InferenceConfig:
     """Configuration for inference."""
-    model_path: str = 'best_model.pth'
+    model_path: Optional[str] = None
     algorithm: str = "sac"  # "ppo" or "sac"
     episodes: int = 10  # Number of episodes to run
     render: bool = True  # Whether to print episode info
@@ -23,6 +25,11 @@ def _checkpoint_config(config_class: Type[Any], checkpoint: Dict[str, Any]) -> A
     return config_class(**{key: value for key, value in saved_config.items() if key in valid_fields})
 
 
+def _default_model_path(algorithm: str) -> str:
+    controller_dir = "PPO" if algorithm == "ppo" else "SAC"
+    return str(Path(__file__).resolve().parent / "controllers" / controller_dir / "best_model.pth")
+
+
 def run_inference(config: Optional[InferenceConfig] = None) -> None:
     """Run inference with the trained model.
 
@@ -33,15 +40,16 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
         config = InferenceConfig()
 
     if config.episodes <= 0:
-        print(f"[INFERENCE] ERROR: episodes must be greater than 0, got {config.episodes}.")
+        print(f"[INFER] ERROR: episodes must be greater than 0, got {config.episodes}.")
         return
 
     algorithm = config.algorithm.lower().strip()
     if algorithm not in {"ppo", "sac"}:
-        print(f"[INFERENCE] ERROR: Unsupported algorithm '{config.algorithm}'. Use 'ppo' or 'sac'.")
+        print(f"[INFER] ERROR: unsupported algorithm '{config.algorithm}'. Use 'ppo' or 'sac'.")
         return
 
-    print(f"[INFERENCE] Using algorithm: {algorithm.upper()}", flush=True)
+    model_path = config.model_path or _default_model_path(algorithm)
+    print(f"[INFER][{algorithm.upper()}] model={model_path} episodes={config.episodes}", flush=True)
 
     try:
         import numpy as np
@@ -51,19 +59,26 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
         from controllers.SAC.SAC import Config as SACConfig, SACAgent
         from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
     except ImportError as e:
-        print(f"[INFERENCE] ERROR importing runtime dependencies: {e}")
-        print("[INFERENCE] Run this from the Webots controller Python environment with the project dependencies installed.")
+        print(f"[INFER] ERROR importing runtime dependencies: {e}")
+        print("[INFER] Run this from the Webots controller Python environment with the project dependencies installed.")
         return
 
     _init_supervisor()
 
     try:
-        checkpoint = torch.load(config.model_path, map_location="cpu")
+        checkpoint = torch.load(model_path, map_location="cpu")
     except FileNotFoundError:
-        print(f"[INFERENCE] ERROR: Model file {config.model_path} not found!")
+        print(f"[INFER][{algorithm.upper()}] ERROR: model file not found: {model_path}")
         return
     except Exception as e:
-        print(f"[INFERENCE] ERROR loading model metadata: {e}")
+        print(f"[INFER][{algorithm.upper()}] ERROR loading model metadata: {e}")
+        return
+
+    checkpoint_algorithm = str(checkpoint.get("algorithm", algorithm)).lower().strip()
+    if checkpoint_algorithm != algorithm:
+        print(
+            f"[INFER][{algorithm.upper()}] ERROR: checkpoint algorithm '{checkpoint_algorithm}' does not match requested '{algorithm}'."
+        )
         return
 
     if algorithm == "ppo":
@@ -91,16 +106,16 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
 
     try:
         if algorithm == "ppo":
-            agent.load_model(config.model_path)
+            agent.load_model(model_path)
         else:
-            agent.load(config.model_path)
-        print(f"[INFERENCE] Loaded model from {config.model_path}")
-        print(f"[INFERENCE] Model from episode: {checkpoint.get('episode', 'unknown')}")
-        print(f"[INFERENCE] Reward: {checkpoint.get('reward', 'unknown')}")
-        print(f"[INFERENCE] Goal episode: {checkpoint.get('goal_episode', False)}")
-        print(f"[INFERENCE] Recurrent cell: {recurrent_cell}")
+            agent.load(model_path)
+        print(
+            f"[INFER][{algorithm.upper()}] loaded episode={checkpoint.get('episode', 'unknown')} "
+            f"reward={checkpoint.get('reward', 'unknown')} goal={checkpoint.get('goal_episode', False)} cell={recurrent_cell.upper()}",
+            flush=True,
+        )
     except Exception as e:
-        print(f"[INFERENCE] ERROR loading model: {e}")
+        print(f"[INFER][{algorithm.upper()}] ERROR loading model: {e}")
         return
 
     if algorithm == "ppo":
@@ -113,10 +128,11 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
         agent.target_q1.eval()
         agent.target_q2.eval()
 
-    print(f"[INFERENCE] Running {config.episodes} episodes...")
+    print(f"[INFER][{algorithm.upper()}] running {config.episodes} episodes", flush=True)
 
     total_rewards = []
     goal_count = 0
+    start_time = time.perf_counter()
 
     for episode in range(config.episodes):
         obs, _ = env.reset()
@@ -163,31 +179,33 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
         total_rewards.append(episode_reward)
 
         if config.render:
+            elapsed = time.perf_counter() - start_time
             print(
-                f"Episode {episode + 1:2d} | "
-                f"Reward: {episode_reward:8.2f} | "
-                f"Steps: {steps:4d} | "
-                f"MinDist: {env.min_episode_distance:6.2f} | "
-                f"LastDist: {env.current_distance:6.2f} | "
-                f"End: {episode_end_reason}"
+                f"[INFER][{algorithm.upper()}] ep={episode + 1:03d}/{config.episodes} "
+                f"r={episode_reward:8.2f} steps={steps:4d} min_d={env.min_episode_distance:5.2f} "
+                f"end={episode_end_reason} t={elapsed:7.1f}s",
+                flush=True,
             )
 
     avg_reward = np.mean(total_rewards)
     std_reward = np.std(total_rewards)
     success_rate = goal_count / config.episodes * 100
+    elapsed = time.perf_counter() - start_time
 
-    print("\n[INFERENCE] Summary:")
-    print(f"  Average Reward: {avg_reward:.2f} +/- {std_reward:.2f}")
-    print(f"  Goal Success Rate: {success_rate:.1f}% ({goal_count}/{config.episodes})")
+    print(
+        f"[INFER][{algorithm.upper()}] summary avg={avg_reward:.2f} std={std_reward:.2f} "
+        f"success={success_rate:.1f}% ({goal_count}/{config.episodes}) t={elapsed:7.1f}s",
+        flush=True,
+    )
 
     env.robot.motors.stop()
-    print("[INFERENCE] Inference complete. Robot stopped.")
+    print(f"[INFER][{algorithm.upper()}] done", flush=True)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run PPO or SAC inference in Webots.")
     parser.add_argument("--algorithm", choices=("ppo", "sac"), default=InferenceConfig.algorithm)
-    parser.add_argument("--model-path", default=InferenceConfig.model_path)
+    parser.add_argument("--model-path", default=None)
     parser.add_argument("--episodes", type=int, default=InferenceConfig.episodes)
     parser.add_argument("--no-render", action="store_true")
     args, _ = parser.parse_known_args()

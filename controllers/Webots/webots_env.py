@@ -9,16 +9,31 @@ import numpy as np
 
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
 
+_SLAM_IMPORT_ERROR: Optional[Exception] = None
 try:
     from controllers.SLAM.imu_filter import IMUProcessor, IMUState                       # type: ignore
     from controllers.SLAM.iekf_backend import IEKFBackend                                # type: ignore
     from controllers.SLAM.slam_map import SLAMMap                                        # type: ignore
     _SLAM_AVAILABLE = True
-    print("[PPO] SLAM sensor modules loaded OK", flush=True)
 except ImportError as _slam_err:
     _SLAM_AVAILABLE = False
-    print(f"[PPO] WARNING: SLAM modules not importable ({_slam_err}). "
-          "Falling back to basic sensor processing.", flush=True)
+    _SLAM_IMPORT_ERROR = _slam_err
+
+_SLAM_STATUS_REPORTED = False
+
+
+def _report_slam_status() -> None:
+    global _SLAM_STATUS_REPORTED
+    if _SLAM_STATUS_REPORTED:
+        return
+    _SLAM_STATUS_REPORTED = True
+    if _SLAM_AVAILABLE:
+        print("[ENV] SLAM modules loaded", flush=True)
+    else:
+        print(
+            f"[ENV] WARNING: SLAM modules unavailable ({_SLAM_IMPORT_ERROR}); using basic sensor processing.",
+            flush=True,
+        )
 
 _supervisor: Optional[Supervisor] = None
 
@@ -94,7 +109,7 @@ class SensorReader:
         except Exception:
             self.gyro = None
             self._has_gyro = False
-            print("[PPO] WARNING: 'gyro' device not found – gyro readings will be zero.", flush=True)
+            print("[ENV] WARNING: gyro device not found; using zeros.", flush=True)
 
     def read_observation(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, bool]:
         raw_ranges = np.array(self.lidar.getRangeImage(), dtype=np.float32)
@@ -243,7 +258,7 @@ class AltinoDriver:
             self.translation_field = self.altino_node.getField('translation')
             self.rotation_field = self.altino_node.getField('rotation')
         except Exception as e:
-            print(f"[PPO] ERROR: Failed to get ALTINO node: {e}")
+            print(f"[ENV] ERROR: Failed to get ALTINO node: {e}")
             self.altino_node = None
             self.translation_field = None
             self.rotation_field = None
@@ -322,7 +337,7 @@ class AltinoDriver:
             self.rotation_field.setSFRotation(start_rotation)
             self.supervisor.simulationResetPhysics()
         else:
-            print("[PPO] WARNING: Cannot reset - ALTINO node not accessible!")
+            print("[ENV] WARNING: cannot reset; ALTINO node not accessible!", flush=True)
 
 
 class RewardComputer:
@@ -419,6 +434,7 @@ class WebotsEnv:
     """Webots simulation environment for ALTINO obstacle avoidance."""
 
     def __init__(self, config: Any):
+        _report_slam_status()
         self.config = config
         self.action_dim = 2
         self.observation_size = config.lidar_sector_dim + config.pose_goal_dim + config.imu_feature_dim
@@ -463,7 +479,7 @@ class WebotsEnv:
         self.run_folder = str(_repo_root / "plots" / ts)
         os.makedirs(self.run_folder, exist_ok=True)
         self._episode_count = 0
-        print(f"[PPO] SLAM maps will be saved to: {self.run_folder}", flush=True)
+        print(f"[ENV] SLAM maps: {self.run_folder}", flush=True)
 
     def _reset_episode_state(self) -> None:
         self.current_step = 0
