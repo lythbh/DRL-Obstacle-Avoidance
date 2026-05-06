@@ -47,14 +47,14 @@ The main runtime behavior is:
 2. The controller initializes a global Webots `Supervisor`.
 3. `WebotsEnv` builds the ALTINO driver, motor controller, sensors, SLAM processor, reward computer, and observation layout.
 4. Observations default to 33 features: 16 LiDAR sector minima, 7 pose and goal-direction features, and 10 IMU features.
-5. PPO trains on complete recurrent episode trajectories and writes `best_model.pth` and `final_model.pth`.
-6. SAC trains with replay-buffer updates and writes `best_model.pth` and `final_model.pth`.
-7. `run_model.py` loads the selected checkpoint from the matching controller folder and runs deterministic inference.
+5. PPO trains on complete recurrent episode trajectories and writes `best_model.pth` into `controllers/PPO/checkpoints/<timestamp>/` and `final_model.pth` into `controllers/PPO/`.
+6. SAC trains with replay-buffer updates and writes `best_model.pth` into `controllers/SAC/checkpoints/<timestamp>/` and `final_model.pth` into `controllers/SAC/`.
+7. `run_model.py` loads the newest timestamped `best_model.pth` from the matching controller checkpoint folder and runs deterministic inference.
 
 Recent verified changes:
 
-- PPO checkpoints are saved to `controllers/PPO/` regardless of the process working directory.
-- SAC checkpoints are saved to `controllers/SAC/` regardless of the process working directory.
+- PPO best checkpoints are saved to `controllers/PPO/checkpoints/<timestamp>/` regardless of the process working directory.
+- SAC best checkpoints are saved to `controllers/SAC/checkpoints/<timestamp>/` regardless of the process working directory.
 - Checkpoint loading uses `weights_only=False` explicitly so locally generated checkpoints remain loadable across PyTorch versions.
 
 Verified locally with the `FYS5429` environment:

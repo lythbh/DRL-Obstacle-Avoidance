@@ -27,7 +27,11 @@ def _checkpoint_config(config_class: Type[Any], checkpoint: Dict[str, Any]) -> A
 
 def _default_model_path(algorithm: str) -> str:
     controller_dir = "PPO" if algorithm == "ppo" else "SAC"
-    return str(Path(__file__).resolve().parent / "controllers" / controller_dir / "best_model.pth")
+    controller_root = Path(__file__).resolve().parent / "controllers" / controller_dir
+    dated_candidates = sorted((controller_root / "checkpoints").glob("*/best_model.pth"))
+    if dated_candidates:
+        return str(dated_candidates[-1])
+    return str(controller_root / "best_model.pth")
 
 
 def _load_checkpoint(torch_module: Any, model_path: str) -> Dict[str, Any]:

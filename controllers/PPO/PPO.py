@@ -16,12 +16,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
 
-_CHECKPOINT_DIR = Path(__file__).resolve().parent
+_CONTROLLER_DIR = Path(__file__).resolve().parent
+_CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 
 
 def _checkpoint_path(filename: str) -> str:
     """Return a checkpoint path pinned to the PPO controller directory."""
-    return str(_CHECKPOINT_DIR / filename)
+    return str(_CONTROLLER_DIR / filename)
+
+
+def _dated_checkpoint_path(run_id: str, filename: str) -> str:
+    """Return a checkpoint path inside the timestamped checkpoint folder."""
+    checkpoint_dir = _CHECKPOINT_DIR / run_id
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    return str(checkpoint_dir / filename)
 
 
 def _load_checkpoint(path: str, map_location: Union[str, torch.device]) -> Dict[str, Any]:
@@ -477,6 +485,7 @@ def train(config: Optional[Config] = None) -> None:
     # Create environment and agent
     env = WebotsEnv(config)
     env.reset()
+    run_id = Path(env.run_folder).name
     obs_size = env.observation_size
     action_dim = env.action_dim
     agent = PPOAgent(obs_size, action_dim, config)
@@ -602,7 +611,7 @@ def train(config: Optional[Config] = None) -> None:
                     'config': asdict(config),
                 }
                 checkpoint.update(agent._checkpoint_metadata())
-                torch.save(checkpoint, _checkpoint_path('best_model.pth'))
+                torch.save(checkpoint, _dated_checkpoint_path(run_id, 'best_model.pth'))
                 print(f"[CKPT][PPO] goal ep={best_goal_episode:03d} r={best_goal_reward:.2f}", flush=True)
         elif best_goal_episode is None and episode_reward_sum > best_reward:
             best_reward = episode_reward_sum
@@ -617,7 +626,7 @@ def train(config: Optional[Config] = None) -> None:
                 'config': asdict(config),
             }
             checkpoint.update(agent._checkpoint_metadata())
-            torch.save(checkpoint, _checkpoint_path('best_model.pth'))
+            torch.save(checkpoint, _dated_checkpoint_path(run_id, 'best_model.pth'))
             print(f"[CKPT][PPO] best ep={episode + 1:03d} r={best_reward:.2f}", flush=True)
 
     if rollout_trajectories:
