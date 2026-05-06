@@ -138,9 +138,6 @@ class PPOAgent:
 
     def _get_device(self) -> torch.device:
         """Get appropriate device (GPU or CPU)."""
-        is_fork = multiprocessing.get_start_method(allow_none=True) == 'fork'
-        if torch.cuda.is_available() and not is_fork:
-            return torch.device("cuda:0")
         return torch.device("cpu")
 
     def get_initial_state(self, batch_size: int = 1) -> RecurrentState:

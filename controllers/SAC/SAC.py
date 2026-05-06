@@ -285,7 +285,7 @@ class SACAgent:
         print(f"[SAC] Using recurrent cell: {self.config.recurrent_cell.upper()}", flush=True)
 
     def _get_device(self) -> torch.device:
-        return torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+        return torch.device("cpu")
 
     def get_initial_state(self, batch_size: int = 1) -> Optional[Any]:
         return self.actor.get_initial_state(batch_size, self.device)

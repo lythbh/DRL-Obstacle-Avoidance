@@ -47,9 +47,6 @@ DEF ALTINO Robot {
     Lidar {
       translation 0.14 0 0
     }
-    Camera {
-      translation 0.12 0 0.06
-    }
     Pose {
       translation 0.1 0.04 0
       rotation 0 0 1 3.14159

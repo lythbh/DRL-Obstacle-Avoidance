@@ -41,7 +41,9 @@ _supervisor: Optional[Supervisor] = None
 def _init_supervisor() -> None:
     """Initialize global Supervisor instance for field access."""
     global _supervisor
-    _supervisor = Supervisor()
+    supervisor = Supervisor()
+    supervisor.simulationSetMode(Supervisor.SIMULATION_MODE_FAST)
+    _supervisor = supervisor
 
 
 class MotorController:
