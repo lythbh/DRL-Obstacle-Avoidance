@@ -16,6 +16,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
 
+_CHECKPOINT_DIR = Path(__file__).resolve().parent
+
+
+def _checkpoint_path(filename: str) -> str:
+    """Return a checkpoint path pinned to the PPO controller directory."""
+    return str(_CHECKPOINT_DIR / filename)
+
+
+def _load_checkpoint(path: str, map_location: Union[str, torch.device]) -> Dict[str, Any]:
+    """Load local controller checkpoints without relying on PyTorch's changing default."""
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=map_location)
+
 
 # ============================================================================
 # CONFIGURATION
@@ -424,7 +439,7 @@ class PPOAgent:
 
     def load_model(self, model_path: str) -> None:
         """Load saved recurrent model weights."""
-        checkpoint = torch.load(model_path, map_location=self.device)
+        checkpoint = _load_checkpoint(model_path, map_location=self.device)
         checkpoint_algorithm = str(checkpoint.get("algorithm", "ppo")).lower().strip()
         if checkpoint_algorithm != "ppo":
             raise ValueError(f"Checkpoint algorithm '{checkpoint_algorithm}' does not match PPO.")
@@ -591,7 +606,7 @@ def train(config: Optional[Config] = None) -> None:
                     'config': asdict(config),
                 }
                 checkpoint.update(agent._checkpoint_metadata())
-                torch.save(checkpoint, 'best_model.pth')
+                torch.save(checkpoint, _checkpoint_path('best_model.pth'))
                 print(f"[CKPT][PPO] goal ep={best_goal_episode:03d} r={best_goal_reward:.2f}", flush=True)
         elif best_goal_episode is None and episode_reward_sum > best_reward:
             best_reward = episode_reward_sum
@@ -606,7 +621,7 @@ def train(config: Optional[Config] = None) -> None:
                 'config': asdict(config),
             }
             checkpoint.update(agent._checkpoint_metadata())
-            torch.save(checkpoint, 'best_model.pth')
+            torch.save(checkpoint, _checkpoint_path('best_model.pth'))
             print(f"[CKPT][PPO] best ep={episode + 1:03d} r={best_reward:.2f}", flush=True)
 
     if rollout_trajectories:
@@ -624,7 +639,7 @@ def train(config: Optional[Config] = None) -> None:
         'config': asdict(config),
     }
     checkpoint.update(agent._checkpoint_metadata())
-    torch.save(checkpoint, 'final_model.pth')
+    torch.save(checkpoint, _checkpoint_path('final_model.pth'))
     elapsed = time.perf_counter() - start_time
     print(f"[TRAIN][PPO] final reward={final_reward:.2f} t={elapsed:7.1f}s", flush=True)
 

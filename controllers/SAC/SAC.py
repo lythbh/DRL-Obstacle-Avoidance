@@ -17,6 +17,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from controllers.Webots import WebotsEnv, _init_supervisor
 
+_CHECKPOINT_DIR = Path(__file__).resolve().parent
+
+
+def _checkpoint_path(filename: str) -> str:
+    """Return a checkpoint path pinned to the SAC controller directory."""
+    return str(_CHECKPOINT_DIR / filename)
+
+
+def _load_checkpoint(path: str, map_location: torch.device) -> Dict[str, Any]:
+    """Load local controller checkpoints without relying on PyTorch's changing default."""
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=map_location)
+
 
 @dataclass
 class Config:
@@ -460,7 +475,7 @@ class SACAgent:
         torch.save(self.checkpoint(episode, reward), path)
 
     def load(self, path: str) -> Dict[str, Any]:
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = _load_checkpoint(path, map_location=self.device)
         checkpoint_algorithm = str(checkpoint.get("algorithm", "sac")).lower().strip()
         if checkpoint_algorithm != "sac":
             raise ValueError(f"Checkpoint algorithm '{checkpoint_algorithm}' does not match SAC.")
@@ -561,18 +576,18 @@ def train(config: Optional[Config] = None) -> None:
                 env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward)
                 checkpoint = agent.checkpoint(best_goal_episode, best_goal_reward)
                 checkpoint["goal_episode"] = True
-                torch.save(checkpoint, "best_model.pth")
+                torch.save(checkpoint, _checkpoint_path("best_model.pth"))
                 print(f"[CKPT][SAC] goal ep={best_goal_episode:03d} r={best_goal_reward:.2f}", flush=True)
         elif best_goal_episode is None and episode_reward > best_reward:
             best_reward = episode_reward
             env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward)
             checkpoint = agent.checkpoint(episode + 1, best_reward)
             checkpoint["goal_episode"] = False
-            torch.save(checkpoint, "best_model.pth")
+            torch.save(checkpoint, _checkpoint_path("best_model.pth"))
             print(f"[CKPT][SAC] best ep={episode + 1:03d} r={best_reward:.2f}", flush=True)
 
     final_reward = best_goal_reward if best_goal_episode is not None else best_reward
-    agent.save("final_model.pth", "final", final_reward)
+    agent.save(_checkpoint_path("final_model.pth"), "final", final_reward)
     elapsed = time.perf_counter() - start_time
     print(f"[TRAIN][SAC] final reward={final_reward:.2f} t={elapsed:7.1f}s", flush=True)
 

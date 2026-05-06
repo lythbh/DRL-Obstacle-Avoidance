@@ -30,6 +30,14 @@ def _default_model_path(algorithm: str) -> str:
     return str(Path(__file__).resolve().parent / "controllers" / controller_dir / "best_model.pth")
 
 
+def _load_checkpoint(torch_module: Any, model_path: str) -> Dict[str, Any]:
+    """Load local checkpoints without relying on PyTorch's changing default."""
+    try:
+        return torch_module.load(model_path, map_location="cpu", weights_only=False)
+    except TypeError:
+        return torch_module.load(model_path, map_location="cpu")
+
+
 def run_inference(config: Optional[InferenceConfig] = None) -> None:
     """Run inference with the trained model.
 
@@ -66,7 +74,7 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
     _init_supervisor()
 
     try:
-        checkpoint = torch.load(model_path, map_location="cpu")
+        checkpoint = _load_checkpoint(torch, model_path)
     except FileNotFoundError:
         print(f"[INFER][{algorithm.upper()}] ERROR: model file not found: {model_path}")
         return
