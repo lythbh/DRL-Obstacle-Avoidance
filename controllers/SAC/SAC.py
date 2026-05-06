@@ -36,9 +36,8 @@ def _load_checkpoint(path: str, map_location: torch.device) -> Dict[str, Any]:
 @dataclass
 class Config:
     episodes: int = 500
-    batch_size: int = 256
+    batch_size: int = 64
     replay_size: int = 200_000
-    warmup_steps: int = 2_000
     update_after_steps: int = 1_000
     updates_per_step: int = 1
     gamma: float = 0.99
@@ -48,7 +47,7 @@ class Config:
     alpha_lr: float = 3e-4
     initial_alpha: float = 0.2
     auto_entropy_tuning: bool = True
-    hidden_size: int = 256
+    hidden_size: int = 128
     recurrent_cell: str = "gru"
     recurrent_hidden_size: Optional[int] = None
     recurrent_layers: int = 1
@@ -395,9 +394,6 @@ class SACAgent:
             )
         return action.squeeze(0).cpu().numpy(), next_state
 
-    def select_random_action(self) -> np.ndarray:
-        return np.random.uniform(low=self.action_low.cpu().numpy(), high=self.action_high.cpu().numpy()).astype(np.float32)
-
     def _soft_update(self, source: nn.Module, target: nn.Module) -> None:
         tau = self.config.tau
         for target_param, source_param in zip(target.parameters(), source.parameters()):
@@ -504,7 +500,7 @@ def train(config: Optional[Config] = None) -> None:
     agent = SACAgent(env.observation_size, env.action_dim, config)
 
     print(
-        f"[TRAIN][SAC] episodes={config.episodes} warmup={config.warmup_steps} "
+        f"[TRAIN][SAC] episodes={config.episodes} "
         f"obs={env.observation_size} act={env.action_dim} cell={config.recurrent_cell.upper()}",
         flush=True,
     )
@@ -525,15 +521,12 @@ def train(config: Optional[Config] = None) -> None:
         prev_done = True
 
         while not done:
-            if total_steps < config.warmup_steps:
-                action = agent.select_random_action()
-            else:
-                action, actor_state = agent.select_action(
-                    obs,
-                    recurrent_state=actor_state,
-                    done=prev_done,
-                    deterministic=False,
-                )
+            action, actor_state = agent.select_action(
+                obs,
+                recurrent_state=actor_state,
+                done=prev_done,
+                deterministic=False,
+            )
 
             next_obs, reward, terminated, truncated, info = env.step(action)
             agent.replay_buffer.add(obs, action, reward, next_obs, terminated or truncated)

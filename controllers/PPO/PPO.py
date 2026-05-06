@@ -89,7 +89,6 @@ class Config:
     start_rotation: Optional[List[float]] = None  # [x, y, z, w]
     start_position_noise: float = 0.03  # Random position jitter at reset
     start_yaw_noise: float = 0.2  # Random yaw jitter at reset
-    episode_warmup_steps: int = 12  # Random exploration steps after reset
     
     # Motor/Sensor Config
     max_speed: float = 10.0
