@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -16,13 +17,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from controllers.Webots import WebotsEnv, _init_supervisor
 
+_CHECKPOINT_DIR = Path(__file__).resolve().parent
+
+
+def _checkpoint_path(filename: str) -> str:
+    """Return a checkpoint path pinned to the SAC controller directory."""
+    return str(_CHECKPOINT_DIR / filename)
+
+
+def _load_checkpoint(path: str, map_location: torch.device) -> Dict[str, Any]:
+    """Load local controller checkpoints without relying on PyTorch's changing default."""
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=map_location)
+
 
 @dataclass
 class Config:
     episodes: int = 500
-    batch_size: int = 256
+    batch_size: int = 64
     replay_size: int = 200_000
-    warmup_steps: int = 2_000
     update_after_steps: int = 1_000
     updates_per_step: int = 1
     gamma: float = 0.99
@@ -32,7 +47,7 @@ class Config:
     alpha_lr: float = 3e-4
     initial_alpha: float = 0.2
     auto_entropy_tuning: bool = True
-    hidden_size: int = 256
+    hidden_size: int = 128
     recurrent_cell: str = "gru"
     recurrent_hidden_size: Optional[int] = None
     recurrent_layers: int = 1
@@ -270,7 +285,7 @@ class SACAgent:
         print(f"[SAC] Using recurrent cell: {self.config.recurrent_cell.upper()}", flush=True)
 
     def _get_device(self) -> torch.device:
-        return torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+        return torch.device("cpu")
 
     def get_initial_state(self, batch_size: int = 1) -> Optional[Any]:
         return self.actor.get_initial_state(batch_size, self.device)
@@ -379,9 +394,6 @@ class SACAgent:
             )
         return action.squeeze(0).cpu().numpy(), next_state
 
-    def select_random_action(self) -> np.ndarray:
-        return np.random.uniform(low=self.action_low.cpu().numpy(), high=self.action_high.cpu().numpy()).astype(np.float32)
-
     def _soft_update(self, source: nn.Module, target: nn.Module) -> None:
         tau = self.config.tau
         for target_param, source_param in zip(target.parameters(), source.parameters()):
@@ -440,6 +452,7 @@ class SACAgent:
         checkpoint = {
             "episode": episode,
             "reward": reward,
+            "algorithm": "sac",
             "actor": self.actor.state_dict(),
             "critic1": self.q1.state_dict(),
             "critic2": self.q2.state_dict(),
@@ -458,7 +471,10 @@ class SACAgent:
         torch.save(self.checkpoint(episode, reward), path)
 
     def load(self, path: str) -> Dict[str, Any]:
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = _load_checkpoint(path, map_location=self.device)
+        checkpoint_algorithm = str(checkpoint.get("algorithm", "sac")).lower().strip()
+        if checkpoint_algorithm != "sac":
+            raise ValueError(f"Checkpoint algorithm '{checkpoint_algorithm}' does not match SAC.")
         self._validate_checkpoint_metadata(checkpoint)
         self.actor.load_state_dict(checkpoint["actor"])
         self.q1.load_state_dict(checkpoint["critic1"])
@@ -483,14 +499,18 @@ def train(config: Optional[Config] = None) -> None:
     env.reset()
     agent = SACAgent(env.observation_size, env.action_dim, config)
 
-    print("[TRAIN] Algorithm: SAC", flush=True)
-    print(f"[TRAIN] Starting training: {config.episodes} episodes", flush=True)
-    print(f"[TRAIN] Observation size: {env.observation_size}, Action dims: {env.action_dim}", flush=True)
+    print(
+        f"[TRAIN][SAC] episodes={config.episodes} "
+        f"obs={env.observation_size} act={env.action_dim} cell={config.recurrent_cell.upper()}",
+        flush=True,
+    )
 
     total_steps = 0
     best_reward = float("-inf")
     best_goal_reward = float("-inf")
     best_goal_episode: Optional[int] = None
+    reward_window: List[float] = []
+    start_time = time.perf_counter()
 
     for episode in range(config.episodes):
         obs, _ = env.reset()
@@ -501,18 +521,15 @@ def train(config: Optional[Config] = None) -> None:
         prev_done = True
 
         while not done:
-            if total_steps < config.warmup_steps:
-                action = agent.select_random_action()
-            else:
-                action, actor_state = agent.select_action(
-                    obs,
-                    recurrent_state=actor_state,
-                    done=prev_done,
-                    deterministic=False,
-                )
+            action, actor_state = agent.select_action(
+                obs,
+                recurrent_state=actor_state,
+                done=prev_done,
+                deterministic=False,
+            )
 
             next_obs, reward, terminated, truncated, info = env.step(action)
-            agent.replay_buffer.add(obs, action, reward, next_obs, terminated)
+            agent.replay_buffer.add(obs, action, reward, next_obs, terminated or truncated)
 
             obs = next_obs
             episode_reward += reward
@@ -534,15 +551,16 @@ def train(config: Optional[Config] = None) -> None:
                 for _ in range(config.updates_per_step):
                     agent.update()
 
-        print(
-            f"Episode {episode + 1:2d} | "
-            f"Reward: {episode_reward:8.2f} | "
-            f"Steps: {env.current_step:4d} | "
-            f"MinDist: {env.min_episode_distance:6.2f} | "
-            f"LastDist: {env.current_distance:6.2f} | "
-            f"End: {episode_end_reason}",
-            flush=True,
-        )
+        reward_window.append(episode_reward)
+        if (episode + 1) % 10 == 0 or episode_end_reason == "goal" or episode == config.episodes - 1:
+            rolling_reward = float(np.mean(reward_window[-10:]))
+            elapsed = time.perf_counter() - start_time
+            print(
+                f"[TRAIN][SAC] ep={episode + 1:03d}/{config.episodes} "
+                f"r={episode_reward:8.2f} avg10={rolling_reward:8.2f} steps={env.current_step:4d} "
+                f"min_d={env.min_episode_distance:5.2f} end={episode_end_reason} t={elapsed:7.1f}s",
+                flush=True,
+            )
 
         if episode_end_reason == "goal":
             if episode_reward > best_goal_reward:
@@ -551,33 +569,23 @@ def train(config: Optional[Config] = None) -> None:
                 env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward)
                 checkpoint = agent.checkpoint(best_goal_episode, best_goal_reward)
                 checkpoint["goal_episode"] = True
-                torch.save(checkpoint, "best_model.pth")
-                print(
-                    f"[TRAIN] New best goal episode {best_goal_episode} "
-                    f"with reward {best_goal_reward:.2f}, model saved.",
-                    flush=True,
-                )
+                torch.save(checkpoint, _checkpoint_path("best_model.pth"))
+                print(f"[CKPT][SAC] goal ep={best_goal_episode:03d} r={best_goal_reward:.2f}", flush=True)
         elif best_goal_episode is None and episode_reward > best_reward:
             best_reward = episode_reward
             env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward)
             checkpoint = agent.checkpoint(episode + 1, best_reward)
             checkpoint["goal_episode"] = False
-            torch.save(checkpoint, "best_model.pth")
-            print(
-                f"[TRAIN] New best episode {episode + 1} with reward {best_reward:.2f} "
-                f"(no goal episode yet), model saved.",
-                flush=True,
-            )
-
-        if episode_end_reason == "goal":
-            break
+            torch.save(checkpoint, _checkpoint_path("best_model.pth"))
+            print(f"[CKPT][SAC] best ep={episode + 1:03d} r={best_reward:.2f}", flush=True)
 
     final_reward = best_goal_reward if best_goal_episode is not None else best_reward
-    agent.save("final_model.pth", "final", final_reward)
-    print("[TRAIN] Final model saved.", flush=True)
+    agent.save(_checkpoint_path("final_model.pth"), "final", final_reward)
+    elapsed = time.perf_counter() - start_time
+    print(f"[TRAIN][SAC] final reward={final_reward:.2f} t={elapsed:7.1f}s", flush=True)
 
     env.robot.motors.stop()
-    print("[TRAIN] Training complete. Robot stopped.", flush=True)
+    print("[TRAIN][SAC] done", flush=True)
 
 
 if __name__ == "__main__":

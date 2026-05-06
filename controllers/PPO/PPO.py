@@ -1,6 +1,7 @@
 """PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
 import sys
-from dataclasses import dataclass
+import time
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Tuple, List, Optional, Dict, Any, Union
 import numpy as np
@@ -14,6 +15,21 @@ RecurrentState = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
+
+_CHECKPOINT_DIR = Path(__file__).resolve().parent
+
+
+def _checkpoint_path(filename: str) -> str:
+    """Return a checkpoint path pinned to the PPO controller directory."""
+    return str(_CHECKPOINT_DIR / filename)
+
+
+def _load_checkpoint(path: str, map_location: Union[str, torch.device]) -> Dict[str, Any]:
+    """Load local controller checkpoints without relying on PyTorch's changing default."""
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=map_location)
 
 
 # ============================================================================
@@ -73,7 +89,6 @@ class Config:
     start_rotation: Optional[List[float]] = None  # [x, y, z, w]
     start_position_noise: float = 0.03  # Random position jitter at reset
     start_yaw_noise: float = 0.2  # Random yaw jitter at reset
-    episode_warmup_steps: int = 12  # Random exploration steps after reset
     
     # Motor/Sensor Config
     max_speed: float = 10.0
@@ -123,9 +138,6 @@ class PPOAgent:
 
     def _get_device(self) -> torch.device:
         """Get appropriate device (GPU or CPU)."""
-        is_fork = multiprocessing.get_start_method(allow_none=True) == 'fork'
-        if torch.cuda.is_available() and not is_fork:
-            return torch.device("cuda:0")
         return torch.device("cpu")
 
     def get_initial_state(self, batch_size: int = 1) -> RecurrentState:
@@ -423,7 +435,10 @@ class PPOAgent:
 
     def load_model(self, model_path: str) -> None:
         """Load saved recurrent model weights."""
-        checkpoint = torch.load(model_path, map_location=self.device)
+        checkpoint = _load_checkpoint(model_path, map_location=self.device)
+        checkpoint_algorithm = str(checkpoint.get("algorithm", "ppo")).lower().strip()
+        if checkpoint_algorithm != "ppo":
+            raise ValueError(f"Checkpoint algorithm '{checkpoint_algorithm}' does not match PPO.")
         if "model" not in checkpoint:
             raise ValueError(
                 "Checkpoint does not contain recurrent 'model' weights. "
@@ -466,16 +481,19 @@ def train(config: Optional[Config] = None) -> None:
     action_dim = env.action_dim
     agent = PPOAgent(obs_size, action_dim, config)
     
-    print("[TRAIN] Algorithm: PPO", flush=True)
-    print(f"[TRAIN] Starting training: {config.episodes} episodes, "
-          f"update every {config.update_every} episodes")
-    print(f"[TRAIN] Observation size: {obs_size}, Action dims: {action_dim}")
+    print(
+        f"[TRAIN][PPO] episodes={config.episodes} update_every={config.update_every} "
+        f"obs={obs_size} act={action_dim} cell={config.recurrent_cell.upper()}",
+        flush=True,
+    )
     
     # Training buffers
     rollout_trajectories: List[Dict[str, np.ndarray]] = []
     best_reward = float('-inf')
     best_goal_reward = float('-inf')
     best_goal_episode: Optional[int] = None
+    reward_window: List[float] = []
+    start_time = time.perf_counter()
     
     # Training loop
     for episode in range(config.episodes):
@@ -558,14 +576,16 @@ def train(config: Optional[Config] = None) -> None:
         
         # Logging
         episode_reward_sum = sum(episode_rewards)
-        print(
-            f"Episode {episode + 1:2d} | "
-            f"Reward: {episode_reward_sum:8.2f} | "
-            f"Steps: {env.current_step:4d} | "
-            f"MinDist: {env.min_episode_distance:6.2f} | "
-            f"LastDist: {env.current_distance:6.2f} | "
-            f"End: {episode_end_reason}"
-        )
+        reward_window.append(episode_reward_sum)
+        if (episode + 1) % 10 == 0 or episode_end_reason == "goal" or episode == config.episodes - 1:
+            rolling_reward = float(np.mean(reward_window[-10:]))
+            elapsed = time.perf_counter() - start_time
+            print(
+                f"[TRAIN][PPO] ep={episode + 1:03d}/{config.episodes} "
+                f"r={episode_reward_sum:8.2f} avg10={rolling_reward:8.2f} steps={episode_step:4d} "
+                f"min_d={env.min_episode_distance:5.2f} end={episode_end_reason} t={elapsed:7.1f}s",
+                flush=True,
+            )
         
         if episode_end_reason == "goal":
             if episode_reward_sum > best_goal_reward:
@@ -578,13 +598,12 @@ def train(config: Optional[Config] = None) -> None:
                     'episode': best_goal_episode,
                     'reward': best_goal_reward,
                     'goal_episode': True,
+                    'algorithm': 'ppo',
+                    'config': asdict(config),
                 }
                 checkpoint.update(agent._checkpoint_metadata())
-                torch.save(checkpoint, 'best_model.pth')
-                print(
-                    f"[TRAIN] New best goal episode {best_goal_episode} "
-                    f"with reward {best_goal_reward:.2f}, model saved."
-                )
+                torch.save(checkpoint, _checkpoint_path('best_model.pth'))
+                print(f"[CKPT][PPO] goal ep={best_goal_episode:03d} r={best_goal_reward:.2f}", flush=True)
         elif best_goal_episode is None and episode_reward_sum > best_reward:
             best_reward = episode_reward_sum
             env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward_sum)
@@ -594,34 +613,35 @@ def train(config: Optional[Config] = None) -> None:
                 'episode': episode + 1,
                 'reward': best_reward,
                 'goal_episode': False,
+                'algorithm': 'ppo',
+                'config': asdict(config),
             }
             checkpoint.update(agent._checkpoint_metadata())
-            torch.save(checkpoint, 'best_model.pth')
-            print(
-                f"[TRAIN] New best episode {episode + 1} with reward {best_reward:.2f} "
-                f"(no goal episode yet), model saved."
-            )
-        
-        if episode_end_reason == "goal":
-            break
+            torch.save(checkpoint, _checkpoint_path('best_model.pth'))
+            print(f"[CKPT][PPO] best ep={episode + 1:03d} r={best_reward:.2f}", flush=True)
 
     if rollout_trajectories:
         agent.update(rollout_trajectories)
     
     # Save final model
+    final_reward = best_goal_reward if best_goal_episode is not None else best_reward
     checkpoint = {
         'model': agent.model.state_dict(),
         'actor_log_std': agent.actor_log_std.detach().cpu(),
         'episode': 'final',
-        'reward': best_reward,
+        'reward': final_reward,
+        'goal_episode': best_goal_episode is not None,
+        'algorithm': 'ppo',
+        'config': asdict(config),
     }
     checkpoint.update(agent._checkpoint_metadata())
-    torch.save(checkpoint, 'final_model.pth')
-    print("[TRAIN] Final model saved.")
+    torch.save(checkpoint, _checkpoint_path('final_model.pth'))
+    elapsed = time.perf_counter() - start_time
+    print(f"[TRAIN][PPO] final reward={final_reward:.2f} t={elapsed:7.1f}s", flush=True)
 
     # Cleanup
     env.robot.motors.stop()
-    print("[TRAIN] Training complete. Robot stopped.")
+    print("[TRAIN][PPO] done", flush=True)
 
 
 if __name__ == "__main__":
