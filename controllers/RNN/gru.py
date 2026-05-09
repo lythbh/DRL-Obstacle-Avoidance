@@ -141,7 +141,12 @@ class GRUActorCritic(nn.Module):
             state_batch_size = self._state_batch_size(recurrent_state)
             if state_batch_size is not None and state_batch_size == tensor.shape[0]:
                 return tensor.shape[0], 1
-            if done_mask is not None and done_mask.ndim == 1 and done_mask.shape[0] == tensor.shape[0]:
+            if (
+                recurrent_state is not None
+                and done_mask is not None
+                and done_mask.ndim == 1
+                and done_mask.shape[0] == tensor.shape[0]
+            ):
                 return 1, tensor.shape[0]
             return tensor.shape[0], 1
         return tensor.shape[0], tensor.shape[1]
@@ -166,6 +171,32 @@ class GRUActorCritic(nn.Module):
             feature_rank=feature_rank,
         )
         return tensor.reshape(batch_size, seq_len, *tensor.shape[-feature_rank:])
+
+    def _grid_feature_rank(self, grid_tensor: torch.Tensor) -> int:
+        if self.grid_shape is None:
+            return 1
+        spatial_rank = len(self.grid_shape)
+        if grid_tensor.ndim >= spatial_rank and tuple(grid_tensor.shape[-spatial_rank:]) == self.grid_shape:
+            return spatial_rank
+        expected_flat_dim = int(np.prod(self.grid_shape))
+        if grid_tensor.shape[-1] == expected_flat_dim:
+            return 1
+        raise ValueError(
+            f"Grid observation has shape {tuple(grid_tensor.shape)} but expected trailing shape {self.grid_shape} "
+            f"or a flat vector of length {expected_flat_dim}."
+        )
+
+    def _reshape_grid_for_cnn(self, grid: torch.Tensor, batch_size: int, seq_len: int) -> torch.Tensor:
+        if self.grid_shape is None:
+            raise RuntimeError("occupancy_grid_shape must be configured before CNN grid encoding can be used.")
+        expected_flat_dim = int(np.prod(self.grid_shape))
+        grid_flat = grid.reshape(batch_size * seq_len, -1)
+        if grid_flat.shape[-1] != expected_flat_dim:
+            raise ValueError(
+                f"Grid feature size {grid_flat.shape[-1]} does not match occupancy_grid_shape {self.grid_shape} "
+                f"(expected {expected_flat_dim})."
+            )
+        return grid_flat.reshape(batch_size * seq_len, *self.grid_shape)
 
     def _split_observation(
         self,
@@ -194,7 +225,7 @@ class GRUActorCritic(nn.Module):
             if grid_input is not None:
                 grid_tensor = torch.as_tensor(grid_input, dtype=torch.float32, device=obstacle.device)
                 grid_tensor = torch.nan_to_num(grid_tensor, nan=0.0, posinf=1.0, neginf=-1.0)
-                grid_feature_rank = len(self.grid_shape) if self.grid_shape is not None else 1
+                grid_feature_rank = self._grid_feature_rank(grid_tensor)
                 grid = self._prepare_tensor_component(
                     grid_tensor,
                     recurrent_state,
@@ -234,14 +265,11 @@ class GRUActorCritic(nn.Module):
 
         if grid is not None:
             if self.grid_encoder_cnn is not None:
-                grid_flat = grid.reshape(batch_size * seq_len, *grid.shape[2:])
-                if grid_flat.ndim == 3:
-                    grid_flat = grid_flat.unsqueeze(1)
-                grid_latent = self.grid_encoder_cnn(grid_flat)
+                grid_latent = self.grid_encoder_cnn(self._reshape_grid_for_cnn(grid, batch_size, seq_len))
             elif self.grid_encoder_mlp is not None:
                 grid_latent = self.grid_encoder_mlp(grid.reshape(batch_size * seq_len, -1))
             else:
-                grid_latent = grid.reshape(batch_size * seq_len, -1)
+                raise ValueError("Grid observations were provided but no grid encoder is configured.")
             encoded_parts.append(grid_latent)
 
         latent = torch.cat(encoded_parts, dim=-1)
@@ -259,7 +287,7 @@ class GRUActorCritic(nn.Module):
             return None
         mask = torch.as_tensor(done_mask, dtype=torch.float32, device=device)
         if mask.ndim == 0:
-            mask = mask.view(1, 1)
+            mask = mask.view(1, 1).expand(batch_size, seq_len)
         elif mask.ndim == 1:
             mask = mask.view(batch_size, seq_len)
         elif mask.ndim != 2:
