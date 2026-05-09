@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import sys
 import time
+from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 import torch
@@ -48,6 +49,7 @@ class Config:
     replay_size: int = 200_000
     update_after_steps: int = 1_000
     updates_per_step: int = 1
+    save_every: int = 100
     gamma: float = 0.99
     tau: float = 0.005
     actor_lr: float = 3e-4
@@ -61,6 +63,8 @@ class Config:
     recurrent_layers: int = 1
     log_std_min: float = -5.0
     log_std_max: float = 2.0
+    sequence_length: int = 16
+    burn_in: int = 4
 
     lidar_sector_dim: int = 16
     pose_goal_dim: int = 7
@@ -100,6 +104,12 @@ class Config:
         self.recurrent_cell = self.recurrent_cell.lower().strip()
         if self.recurrent_cell not in {"ff", "gru", "lstm"}:
             raise ValueError(f"Unsupported recurrent_cell: {self.recurrent_cell}")
+        if self.sequence_length <= 0:
+            raise ValueError("sequence_length must be > 0")
+        if self.burn_in < 0:
+            raise ValueError("burn_in must be >= 0")
+        if self.burn_in >= self.sequence_length:
+            self.burn_in = max(self.sequence_length - 1, 0)
         if self.recurrent_hidden_size is None:
             self.recurrent_hidden_size = self.hidden_size
         if self.start_position is None:
@@ -112,37 +122,107 @@ class Config:
             self.reference_distance = float(np.linalg.norm(start_xy - endpoint_xy))
 
 
-class ReplayBuffer:
-    def __init__(self, obs_size: int, action_dim: int, capacity: int) -> None:
+class SequenceReplayBuffer:
+    def __init__(self, obs_size: int, action_dim: int, capacity: int, sequence_length: int) -> None:
         self.capacity = capacity
-        self.obs = np.zeros((capacity, obs_size), dtype=np.float32)
-        self.next_obs = np.zeros((capacity, obs_size), dtype=np.float32)
-        self.actions = np.zeros((capacity, action_dim), dtype=np.float32)
-        self.rewards = np.zeros((capacity, 1), dtype=np.float32)
-        self.dones = np.zeros((capacity, 1), dtype=np.float32)
-        self.index = 0
+        self.sequence_length = sequence_length
+        self.obs_size = obs_size
+        self.action_dim = action_dim
+        self.episodes: deque[Dict[str, np.ndarray]] = deque()
+        self.current_episode: List[Tuple[np.ndarray, np.ndarray, float, np.ndarray, bool]] = []
         self.size = 0
 
     def add(self, obs: np.ndarray, action: np.ndarray, reward: float, next_obs: np.ndarray, done: bool) -> None:
-        self.obs[self.index] = np.asarray(obs, dtype=np.float32)
-        self.actions[self.index] = np.asarray(action, dtype=np.float32)
-        self.rewards[self.index, 0] = float(reward)
-        self.next_obs[self.index] = np.asarray(next_obs, dtype=np.float32)
-        self.dones[self.index, 0] = 1.0 if done else 0.0
-        self.index = (self.index + 1) % self.capacity
-        self.size = min(self.size + 1, self.capacity)
+        transition = (
+            np.asarray(obs, dtype=np.float32),
+            np.asarray(action, dtype=np.float32),
+            float(reward),
+            np.asarray(next_obs, dtype=np.float32),
+            bool(done),
+        )
+        self.current_episode.append(transition)
+        if done:
+            self._commit_episode()
+
+    def _commit_episode(self) -> None:
+        if not self.current_episode:
+            return
+        obs = np.stack([t[0] for t in self.current_episode], axis=0)
+        actions = np.stack([t[1] for t in self.current_episode], axis=0)
+        rewards = np.array([t[2] for t in self.current_episode], dtype=np.float32).reshape(-1, 1)
+        next_obs = np.stack([t[3] for t in self.current_episode], axis=0)
+        dones = np.array([t[4] for t in self.current_episode], dtype=np.float32).reshape(-1, 1)
+        self.episodes.append(
+            {
+                "obs": obs,
+                "actions": actions,
+                "rewards": rewards,
+                "next_obs": next_obs,
+                "dones": dones,
+            }
+        )
+        self.size += len(obs)
+        self.current_episode = []
+        self._trim()
+
+    def _trim(self) -> None:
+        while self.size > self.capacity and self.episodes:
+            removed = self.episodes.popleft()
+            self.size -= len(removed["obs"])
 
     def __len__(self) -> int:
-        return self.size
+        return self.size + len(self.current_episode)
 
-    def sample(self, batch_size: int, device: torch.device) -> Dict[str, torch.Tensor]:
-        indices = np.random.randint(0, self.size, size=batch_size)
+    def _current_episode_dict(self) -> Optional[Dict[str, np.ndarray]]:
+        if len(self.current_episode) < self.sequence_length:
+            return None
+        obs = np.stack([t[0] for t in self.current_episode], axis=0)
+        actions = np.stack([t[1] for t in self.current_episode], axis=0)
+        rewards = np.array([t[2] for t in self.current_episode], dtype=np.float32).reshape(-1, 1)
+        next_obs = np.stack([t[3] for t in self.current_episode], axis=0)
+        dones = np.array([t[4] for t in self.current_episode], dtype=np.float32).reshape(-1, 1)
         return {
-            "obs": torch.as_tensor(self.obs[indices], dtype=torch.float32, device=device),
-            "actions": torch.as_tensor(self.actions[indices], dtype=torch.float32, device=device),
-            "rewards": torch.as_tensor(self.rewards[indices], dtype=torch.float32, device=device),
-            "next_obs": torch.as_tensor(self.next_obs[indices], dtype=torch.float32, device=device),
-            "dones": torch.as_tensor(self.dones[indices], dtype=torch.float32, device=device),
+            "obs": obs,
+            "actions": actions,
+            "rewards": rewards,
+            "next_obs": next_obs,
+            "dones": dones,
+        }
+
+    def _eligible_episodes(self) -> List[Dict[str, np.ndarray]]:
+        eligible = [ep for ep in self.episodes if len(ep["obs"]) >= self.sequence_length]
+        current = self._current_episode_dict()
+        if current is not None:
+            eligible.append(current)
+        return eligible
+
+    def sample(self, batch_size: int, device: torch.device) -> Optional[Dict[str, torch.Tensor]]:
+        eligible = self._eligible_episodes()
+        if not eligible:
+            return None
+        obs_batch: List[np.ndarray] = []
+        actions_batch: List[np.ndarray] = []
+        rewards_batch: List[np.ndarray] = []
+        next_obs_batch: List[np.ndarray] = []
+        dones_batch: List[np.ndarray] = []
+
+        for _ in range(batch_size):
+            episode = eligible[np.random.randint(0, len(eligible))]
+            ep_len = len(episode["obs"])
+            start = np.random.randint(0, ep_len - self.sequence_length + 1)
+            end = start + self.sequence_length
+            obs_batch.append(episode["obs"][start:end])
+            actions_batch.append(episode["actions"][start:end])
+            rewards_batch.append(episode["rewards"][start:end])
+            next_obs_batch.append(episode["next_obs"][start:end])
+            dones_batch.append(episode["dones"][start:end])
+
+        return {
+            "obs": torch.as_tensor(np.stack(obs_batch, axis=0), dtype=torch.float32, device=device),
+            "actions": torch.as_tensor(np.stack(actions_batch, axis=0), dtype=torch.float32, device=device),
+            "rewards": torch.as_tensor(np.stack(rewards_batch, axis=0), dtype=torch.float32, device=device),
+            "next_obs": torch.as_tensor(np.stack(next_obs_batch, axis=0), dtype=torch.float32, device=device),
+            "dones": torch.as_tensor(np.stack(dones_batch, axis=0), dtype=torch.float32, device=device),
         }
 
 
@@ -185,17 +265,23 @@ class RecurrentEncoder(nn.Module):
             return torch.zeros(shape, device=device), torch.zeros(shape, device=device)
         return torch.zeros(shape, device=device)
 
-    def _apply_done_mask(self, state: Any, done_mask: Optional[torch.Tensor]) -> Any:
-        if state is None or done_mask is None:
-            return state
-        mask = done_mask.to(dtype=torch.float32)
+    def _prepare_done_mask(
+        self,
+        done_mask: Optional[torch.Tensor],
+        batch_size: int,
+        seq_len: int,
+        device: torch.device,
+    ) -> Optional[torch.Tensor]:
+        if done_mask is None:
+            return None
+        mask = torch.as_tensor(done_mask, dtype=torch.float32, device=device)
         if mask.ndim == 0:
-            mask = mask.view(1)
-        mask = 1.0 - mask.view(1, -1, 1)
-        if self.cell == "lstm":
-            h, c = state
-            return h * mask, c * mask
-        return state * mask
+            mask = mask.view(1, 1)
+        elif mask.ndim == 1:
+            mask = mask.view(batch_size, seq_len)
+        elif mask.ndim != 2:
+            raise ValueError(f"done_mask must be scalar, [T], or [B, T], got shape {tuple(mask.shape)}")
+        return mask
 
     def forward(
         self,
@@ -214,9 +300,33 @@ class RecurrentEncoder(nn.Module):
         if self.core is None:
             return latent.squeeze(1) if seq_len == 1 else latent, None
         state = recurrent_state if recurrent_state is not None else self.get_initial_state(batch_size)
-        if done_mask is not None:
-            state = self._apply_done_mask(state, torch.as_tensor(done_mask, dtype=torch.float32, device=latent.device))
-        core_out, next_state = self.core(latent, state)
+        mask = self._prepare_done_mask(done_mask, batch_size, seq_len, latent.device)
+
+        outputs: List[torch.Tensor] = []
+        if self.cell == "lstm":
+            if not isinstance(state, tuple) or len(state) != 2:
+                state = self.get_initial_state(batch_size, device=latent.device)
+            state = cast(Tuple[torch.Tensor, torch.Tensor], state)
+            h_t, c_t = state
+            for t in range(seq_len):
+                if mask is not None:
+                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
+                    h_t = h_t * keep
+                    c_t = c_t * keep
+                step_out, (h_t, c_t) = self.core(latent[:, t : t + 1], (h_t, c_t))
+                outputs.append(step_out)
+            next_state: Any = (h_t, c_t)
+        else:
+            h_t = state
+            for t in range(seq_len):
+                if mask is not None:
+                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
+                    h_t = h_t * keep
+                step_out, h_t = self.core(latent[:, t : t + 1], h_t)
+                outputs.append(step_out)
+            next_state = h_t
+
+        core_out = torch.cat(outputs, dim=1)
         return core_out.squeeze(1) if seq_len == 1 else core_out, next_state
 
 
@@ -289,10 +399,17 @@ class SACAgent:
         self.action_center = (self.action_high + self.action_low) / 2.0
         self.action_scale = (self.action_high - self.action_low) / 2.0
 
-        self.replay_buffer = ReplayBuffer(obs_size, action_dim, config.replay_size)
+        self.replay_buffer = SequenceReplayBuffer(
+            obs_size,
+            action_dim,
+            config.replay_size,
+            config.sequence_length,
+        )
         print(f"[SAC] Using recurrent cell: {self.config.recurrent_cell.upper()}", flush=True)
 
     def _get_device(self) -> torch.device:
+        if torch.cuda.is_available():
+            return torch.device("cuda")
         return torch.device("cpu")
 
     def get_initial_state(self, batch_size: int = 1) -> Optional[Any]:
@@ -381,7 +498,9 @@ class SACAgent:
         dist = torch.distributions.Normal(mean, std)
         pre_tanh = mean if deterministic else dist.rsample()
         tanh_action = torch.tanh(pre_tanh)
-        log_prob = dist.log_prob(pre_tanh) - torch.log(1.0 - tanh_action.pow(2) + 1e-6)
+        log_prob = dist.log_prob(pre_tanh)
+        log_prob -= torch.log(self.action_scale + 1e-6)
+        log_prob -= torch.log(1.0 - tanh_action.pow(2) + 1e-6)
         log_prob = log_prob.sum(dim=-1, keepdim=True)
         return self._squash_action(tanh_action), log_prob, next_state
 
@@ -412,27 +531,60 @@ class SACAgent:
             return None
 
         batch = self.replay_buffer.sample(self.config.batch_size, self.device)
+        if batch is None:
+            return None
+
+        burn_in = min(self.config.burn_in, self.config.sequence_length - 1)
+        learn_slice = slice(burn_in, None)
+        done_flags = batch["dones"].squeeze(-1)
+        done_mask_obs = torch.zeros_like(done_flags)
+        done_mask_obs[:, 0] = 1.0
+        done_mask_obs[:, 1:] = done_flags[:, :-1]
+        done_mask_next = done_flags.clone()
+        done_mask_next[:, 0] = 1.0
+
+        def _ensure_time_dim(tensor: torch.Tensor) -> torch.Tensor:
+            return tensor.unsqueeze(1) if tensor.ndim == 2 else tensor
 
         with torch.no_grad():
-            next_action, next_log_prob, _ = self._sample_policy(batch["next_obs"], deterministic=False)
-            target_q1, _ = self.target_q1(batch["next_obs"], next_action)
-            target_q2, _ = self.target_q2(batch["next_obs"], next_action)
+            next_action, next_log_prob, _ = self._sample_policy(
+                batch["next_obs"],
+                done_mask=done_mask_next,
+                deterministic=False,
+            )
+            target_q1, _ = self.target_q1(batch["next_obs"], next_action, done_mask=done_mask_next)
+            target_q2, _ = self.target_q2(batch["next_obs"], next_action, done_mask=done_mask_next)
             target_q = torch.min(target_q1, target_q2) - self.alpha.detach() * next_log_prob
             target_q = batch["rewards"] + (1.0 - batch["dones"]) * self.config.gamma * target_q
 
-        current_q1, _ = self.q1(batch["obs"], batch["actions"])
-        current_q2, _ = self.q2(batch["obs"], batch["actions"])
-        critic_loss = F.mse_loss(current_q1, target_q) + F.mse_loss(current_q2, target_q)
+        current_q1, _ = self.q1(batch["obs"], batch["actions"], done_mask=done_mask_obs)
+        current_q2, _ = self.q2(batch["obs"], batch["actions"], done_mask=done_mask_obs)
+        target_q = _ensure_time_dim(target_q)
+        current_q1 = _ensure_time_dim(current_q1)
+        current_q2 = _ensure_time_dim(current_q2)
+
+        critic_loss = (
+            F.mse_loss(current_q1[:, learn_slice], target_q[:, learn_slice])
+            + F.mse_loss(current_q2[:, learn_slice], target_q[:, learn_slice])
+        )
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         nn.utils.clip_grad_norm_(list(self.q1.parameters()) + list(self.q2.parameters()), max_norm=1.0)
         self.critic_optimizer.step()
 
-        new_action, log_prob, _ = self._sample_policy(batch["obs"], deterministic=False)
-        q1_pi, _ = self.q1(batch["obs"], new_action)
-        q2_pi, _ = self.q2(batch["obs"], new_action)
-        actor_loss = (self.alpha.detach() * log_prob - torch.min(q1_pi, q2_pi)).mean()
+        new_action, log_prob, _ = self._sample_policy(
+            batch["obs"],
+            done_mask=done_mask_obs,
+            deterministic=False,
+        )
+        q1_pi, _ = self.q1(batch["obs"], new_action, done_mask=done_mask_obs)
+        q2_pi, _ = self.q2(batch["obs"], new_action, done_mask=done_mask_obs)
+        log_prob = _ensure_time_dim(log_prob)
+        q1_pi = _ensure_time_dim(q1_pi)
+        q2_pi = _ensure_time_dim(q2_pi)
+        actor_loss = (self.alpha.detach() * log_prob - torch.min(q1_pi, q2_pi))
+        actor_loss = actor_loss[:, learn_slice].mean()
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
@@ -441,7 +593,7 @@ class SACAgent:
 
         alpha_loss = torch.tensor(0.0, device=self.device)
         if self.config.auto_entropy_tuning:
-            alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
+            alpha_loss = -(self.log_alpha * (log_prob[:, learn_slice] + self.target_entropy).detach()).mean()
             self.alpha_optimizer.zero_grad()
             alpha_loss.backward()
             self.alpha_optimizer.step()
@@ -510,7 +662,8 @@ def train(config: Optional[Config] = None) -> None:
 
     print(
         f"[TRAIN][SAC] episodes={config.episodes} "
-        f"obs={env.observation_size} act={env.action_dim} cell={config.recurrent_cell.upper()}",
+        f"obs={env.observation_size} act={env.action_dim} cell={config.recurrent_cell.upper()} "
+        f"seq={config.sequence_length} burn_in={config.burn_in}",
         flush=True,
     )
 
@@ -587,6 +740,12 @@ def train(config: Optional[Config] = None) -> None:
             checkpoint["goal_episode"] = False
             torch.save(checkpoint, _dated_checkpoint_path(run_id, "best_model.pth"))
             print(f"[CKPT][SAC] best ep={episode + 1:03d} r={best_reward:.2f}", flush=True)
+
+        if config.save_every > 0 and (episode + 1) % config.save_every == 0:
+            latest_checkpoint = agent.checkpoint(episode + 1, episode_reward)
+            latest_checkpoint["goal_episode"] = episode_end_reason == "goal"
+            torch.save(latest_checkpoint, _dated_checkpoint_path(run_id, "latest_model.pth"))
+            print(f"[CKPT][SAC] latest ep={episode + 1:03d} r={episode_reward:.2f}", flush=True)
 
     final_reward = best_goal_reward if best_goal_episode is not None else best_reward
     agent.save(_checkpoint_path("final_model.pth"), "final", final_reward)

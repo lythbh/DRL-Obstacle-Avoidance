@@ -613,11 +613,6 @@ class WebotsEnv:
         if goal_stopped:
             terminated = True
             info["reset_reason"] = "goal"
-        elif goal_reached:
-            penalty = self.config.goal_speed_penalty * speed_norm
-            reward += penalty
-            self.episode_reward += penalty
-
         if self.episode_reward >= self.config.goal_score_threshold:
             terminated = True
             info["reset_reason"] = "goal"

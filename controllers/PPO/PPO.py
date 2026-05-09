@@ -53,6 +53,7 @@ class Config:
     update_every: int = 5  # PPO update frequency (episodes)
     epochs: int = 4  # Optimization epochs per update
     batch_size: int = 64
+    save_every: int = 100  # Save latest checkpoint every N episodes (0 disables)
     
     # PPO Agent
     gamma: float = 0.99  # Discount factor
@@ -628,6 +629,20 @@ def train(config: Optional[Config] = None) -> None:
             checkpoint.update(agent._checkpoint_metadata())
             torch.save(checkpoint, _dated_checkpoint_path(run_id, 'best_model.pth'))
             print(f"[CKPT][PPO] best ep={episode + 1:03d} r={best_reward:.2f}", flush=True)
+
+        if config.save_every > 0 and (episode + 1) % config.save_every == 0:
+            latest_checkpoint = {
+                'model': agent.model.state_dict(),
+                'actor_log_std': agent.actor_log_std.detach().cpu(),
+                'episode': episode + 1,
+                'reward': episode_reward_sum,
+                'goal_episode': episode_end_reason == "goal",
+                'algorithm': 'ppo',
+                'config': asdict(config),
+            }
+            latest_checkpoint.update(agent._checkpoint_metadata())
+            torch.save(latest_checkpoint, _dated_checkpoint_path(run_id, 'latest_model.pth'))
+            print(f"[CKPT][PPO] latest ep={episode + 1:03d} r={episode_reward_sum:.2f}", flush=True)
 
     if rollout_trajectories:
         agent.update(rollout_trajectories)
