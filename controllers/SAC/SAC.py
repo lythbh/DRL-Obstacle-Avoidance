@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -42,6 +41,7 @@ def _load_checkpoint(path: str, map_location: torch.device) -> Dict[str, Any]:
         return torch.load(path, map_location=map_location)
 
 
+# --- Configuration and checkpoint metadata ---------------------------------
 @dataclass
 class Config:
     episodes: int = 500
@@ -122,6 +122,7 @@ class Config:
             self.reference_distance = float(np.linalg.norm(start_xy - endpoint_xy))
 
 
+# --- Episode replay for recurrent off-policy updates ------------------------
 class SequenceReplayBuffer:
     def __init__(self, obs_size: int, action_dim: int, capacity: int, sequence_length: int) -> None:
         self.capacity = capacity
@@ -174,7 +175,7 @@ class SequenceReplayBuffer:
         return self.size + len(self.current_episode)
 
     def _current_episode_dict(self) -> Optional[Dict[str, np.ndarray]]:
-        if len(self.current_episode) < self.sequence_length:
+        if not self.current_episode:
             return None
         obs = np.stack([t[0] for t in self.current_episode], axis=0)
         actions = np.stack([t[1] for t in self.current_episode], axis=0)
@@ -190,42 +191,72 @@ class SequenceReplayBuffer:
         }
 
     def _eligible_episodes(self) -> List[Dict[str, np.ndarray]]:
-        eligible = [ep for ep in self.episodes if len(ep["obs"]) >= self.sequence_length]
+        eligible = [ep for ep in self.episodes if len(ep["obs"]) > 0]
         current = self._current_episode_dict()
         if current is not None:
             eligible.append(current)
         return eligible
 
+    def _window_weight(self, episode_length: int) -> int:
+        return max(1, episode_length - self.sequence_length + 1)
+
     def sample(self, batch_size: int, device: torch.device) -> Optional[Dict[str, torch.Tensor]]:
         eligible = self._eligible_episodes()
         if not eligible:
             return None
-        obs_batch: List[np.ndarray] = []
-        actions_batch: List[np.ndarray] = []
-        rewards_batch: List[np.ndarray] = []
-        next_obs_batch: List[np.ndarray] = []
-        dones_batch: List[np.ndarray] = []
+
+        weights = np.array([self._window_weight(len(episode["obs"])) for episode in eligible], dtype=np.float64)
+        probabilities = weights / weights.sum()
+
+        sampled_windows: List[Dict[str, np.ndarray]] = []
+        valid_lengths: List[int] = []
+        max_length = 0
 
         for _ in range(batch_size):
-            episode = eligible[np.random.randint(0, len(eligible))]
+            episode = eligible[int(np.random.choice(len(eligible), p=probabilities))]
             ep_len = len(episode["obs"])
-            start = np.random.randint(0, ep_len - self.sequence_length + 1)
-            end = start + self.sequence_length
-            obs_batch.append(episode["obs"][start:end])
-            actions_batch.append(episode["actions"][start:end])
-            rewards_batch.append(episode["rewards"][start:end])
-            next_obs_batch.append(episode["next_obs"][start:end])
-            dones_batch.append(episode["dones"][start:end])
+            window_length = min(self.sequence_length, ep_len)
+            start = 0 if ep_len == window_length else int(np.random.randint(0, ep_len - window_length + 1))
+            end = start + window_length
+            sampled_windows.append(
+                {
+                    "obs": episode["obs"][start:end],
+                    "actions": episode["actions"][start:end],
+                    "rewards": episode["rewards"][start:end],
+                    "next_obs": episode["next_obs"][start:end],
+                    "dones": episode["dones"][start:end],
+                }
+            )
+            valid_lengths.append(window_length)
+            max_length = max(max_length, window_length)
+
+        obs_batch = np.zeros((batch_size, max_length, self.obs_size), dtype=np.float32)
+        actions_batch = np.zeros((batch_size, max_length, self.action_dim), dtype=np.float32)
+        rewards_batch = np.zeros((batch_size, max_length, 1), dtype=np.float32)
+        next_obs_batch = np.zeros((batch_size, max_length, self.obs_size), dtype=np.float32)
+        dones_batch = np.ones((batch_size, max_length, 1), dtype=np.float32)
+        valid_mask = np.zeros((batch_size, max_length), dtype=np.float32)
+
+        for index, window in enumerate(sampled_windows):
+            length = valid_lengths[index]
+            obs_batch[index, :length] = window["obs"]
+            actions_batch[index, :length] = window["actions"]
+            rewards_batch[index, :length] = window["rewards"]
+            next_obs_batch[index, :length] = window["next_obs"]
+            dones_batch[index, :length] = window["dones"]
+            valid_mask[index, :length] = 1.0
 
         return {
-            "obs": torch.as_tensor(np.stack(obs_batch, axis=0), dtype=torch.float32, device=device),
-            "actions": torch.as_tensor(np.stack(actions_batch, axis=0), dtype=torch.float32, device=device),
-            "rewards": torch.as_tensor(np.stack(rewards_batch, axis=0), dtype=torch.float32, device=device),
-            "next_obs": torch.as_tensor(np.stack(next_obs_batch, axis=0), dtype=torch.float32, device=device),
-            "dones": torch.as_tensor(np.stack(dones_batch, axis=0), dtype=torch.float32, device=device),
+            "obs": torch.as_tensor(obs_batch, dtype=torch.float32, device=device),
+            "actions": torch.as_tensor(actions_batch, dtype=torch.float32, device=device),
+            "rewards": torch.as_tensor(rewards_batch, dtype=torch.float32, device=device),
+            "next_obs": torch.as_tensor(next_obs_batch, dtype=torch.float32, device=device),
+            "dones": torch.as_tensor(dones_batch, dtype=torch.float32, device=device),
+            "valid_mask": torch.as_tensor(valid_mask, dtype=torch.float32, device=device),
         }
 
 
+# --- Shared recurrent encoder and policy/value heads ------------------------
 class RecurrentEncoder(nn.Module):
     def __init__(self, obs_size: int, config: Config) -> None:
         super().__init__()
@@ -370,9 +401,15 @@ class QNetwork(nn.Module):
         done_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[Any]]:
         features, next_state = self.encoder(obs, recurrent_state=recurrent_state, done_mask=done_mask)
+        if features.ndim != action.ndim:
+            if features.ndim == 2 and action.ndim == 3 and action.shape[1] == 1:
+                action = action.squeeze(1)
+            elif features.ndim == 3 and action.ndim == 2:
+                action = action.unsqueeze(1)
         return self.head(torch.cat([features, action], dim=-1)), next_state
 
 
+# --- SAC agent and optimization logic --------------------------------------
 class SACAgent:
     def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
         self.config = config
@@ -526,6 +563,19 @@ class SACAgent:
         for target_param, source_param in zip(target.parameters(), source.parameters()):
             target_param.data.mul_(1.0 - tau).add_(source_param.data, alpha=tau)
 
+    @staticmethod
+    def _sequence_loss_mask(valid_mask: torch.Tensor, burn_in: int) -> torch.Tensor:
+        valid_lengths = valid_mask.sum(dim=1).to(dtype=torch.long)
+        burn_tensor = torch.full_like(valid_lengths, burn_in)
+        start_index = torch.minimum(burn_tensor, torch.clamp(valid_lengths - 1, min=0))
+        time_index = torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0)
+        return valid_mask * (time_index >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)
+
+    @staticmethod
+    def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        weight = mask.unsqueeze(-1).to(dtype=values.dtype)
+        return (values * weight).sum() / weight.sum().clamp_min(1.0)
+
     def update(self) -> Optional[Dict[str, float]]:
         if len(self.replay_buffer) < self.config.batch_size:
             return None
@@ -534,27 +584,33 @@ class SACAgent:
         if batch is None:
             return None
 
-        burn_in = min(self.config.burn_in, self.config.sequence_length - 1)
-        learn_slice = slice(burn_in, None)
+        valid_mask = batch["valid_mask"]
+        burn_in = min(self.config.burn_in, batch["obs"].shape[1] - 1)
+        learn_mask = self._sequence_loss_mask(valid_mask, burn_in)
         done_flags = batch["dones"].squeeze(-1)
         done_mask_obs = torch.zeros_like(done_flags)
         done_mask_obs[:, 0] = 1.0
-        done_mask_obs[:, 1:] = done_flags[:, :-1]
-        done_mask_next = done_flags.clone()
-        done_mask_next[:, 0] = 1.0
+        if done_flags.shape[1] > 1:
+            done_mask_obs[:, 1:] = done_flags[:, :-1]
+        done_mask_next = torch.cat([torch.ones_like(done_flags[:, :1]), done_flags], dim=1)
 
         def _ensure_time_dim(tensor: torch.Tensor) -> torch.Tensor:
             return tensor.unsqueeze(1) if tensor.ndim == 2 else tensor
 
         with torch.no_grad():
+            target_obs = torch.cat([batch["obs"][:, :1], batch["next_obs"]], dim=1)
             next_action, next_log_prob, _ = self._sample_policy(
-                batch["next_obs"],
+                target_obs,
                 done_mask=done_mask_next,
                 deterministic=False,
             )
-            target_q1, _ = self.target_q1(batch["next_obs"], next_action, done_mask=done_mask_next)
-            target_q2, _ = self.target_q2(batch["next_obs"], next_action, done_mask=done_mask_next)
-            target_q = torch.min(target_q1, target_q2) - self.alpha.detach() * next_log_prob
+            next_action = _ensure_time_dim(next_action)[:, 1:]
+            next_log_prob = _ensure_time_dim(next_log_prob)[:, 1:]
+            target_actions = torch.cat([torch.zeros_like(batch["actions"][:, :1]), next_action], dim=1)
+            target_q1, _ = self.target_q1(target_obs, target_actions, done_mask=done_mask_next)
+            target_q2, _ = self.target_q2(target_obs, target_actions, done_mask=done_mask_next)
+            target_q = torch.min(_ensure_time_dim(target_q1), _ensure_time_dim(target_q2))[:, 1:]
+            target_q = target_q - self.alpha.detach() * next_log_prob
             target_q = batch["rewards"] + (1.0 - batch["dones"]) * self.config.gamma * target_q
 
         current_q1, _ = self.q1(batch["obs"], batch["actions"], done_mask=done_mask_obs)
@@ -563,10 +619,8 @@ class SACAgent:
         current_q1 = _ensure_time_dim(current_q1)
         current_q2 = _ensure_time_dim(current_q2)
 
-        critic_loss = (
-            F.mse_loss(current_q1[:, learn_slice], target_q[:, learn_slice])
-            + F.mse_loss(current_q2[:, learn_slice], target_q[:, learn_slice])
-        )
+        critic_loss = self._masked_mean((current_q1 - target_q).pow(2), learn_mask)
+        critic_loss = critic_loss + self._masked_mean((current_q2 - target_q).pow(2), learn_mask)
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
@@ -583,8 +637,7 @@ class SACAgent:
         log_prob = _ensure_time_dim(log_prob)
         q1_pi = _ensure_time_dim(q1_pi)
         q2_pi = _ensure_time_dim(q2_pi)
-        actor_loss = (self.alpha.detach() * log_prob - torch.min(q1_pi, q2_pi))
-        actor_loss = actor_loss[:, learn_slice].mean()
+        actor_loss = self._masked_mean(self.alpha.detach() * log_prob - torch.min(q1_pi, q2_pi), learn_mask)
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
@@ -593,7 +646,7 @@ class SACAgent:
 
         alpha_loss = torch.tensor(0.0, device=self.device)
         if self.config.auto_entropy_tuning:
-            alpha_loss = -(self.log_alpha * (log_prob[:, learn_slice] + self.target_entropy).detach()).mean()
+            alpha_loss = -self._masked_mean(self.log_alpha * (log_prob + self.target_entropy).detach(), learn_mask)
             self.alpha_optimizer.zero_grad()
             alpha_loss.backward()
             self.alpha_optimizer.step()
@@ -650,6 +703,7 @@ class SACAgent:
         return checkpoint
 
 
+# --- Training entry point ---------------------------------------------------
 def train(config: Optional[Config] = None) -> None:
     if config is None:
         config = Config()
