@@ -12,7 +12,7 @@ class InferenceConfig:
     model_path: Optional[str] = None
     algorithm: str = "sac"  # "ppo" or "sac"
     episodes: int = 10  # Number of episodes to run
-    render: bool = True  # Whether to print episode info
+    show_progress: bool = True
 
 
 def _checkpoint_config(config_class: Type[Any], checkpoint: Dict[str, Any]) -> Any:
@@ -106,7 +106,6 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
         train_config.recurrent_cell = recurrent_cell
 
     env = WebotsEnv(train_config)
-    env.reset()
     obs_size = env.observation_size
     n_actions = env.action_dim
 
@@ -146,71 +145,76 @@ def run_inference(config: Optional[InferenceConfig] = None) -> None:
     goal_count = 0
     start_time = time.perf_counter()
 
-    for episode in range(config.episodes):
-        obs, _ = env.reset()
-        done = False
-        episode_reward = 0.0
-        steps = 0
-        episode_end_reason = "max_steps"
-        recurrent_state = agent.get_initial_state(batch_size=1)
-        prev_done = True
+    try:
+        for episode in range(config.episodes):
+            obs, _ = env.reset()
+            done = False
+            episode_reward = 0.0
+            steps = 0
+            episode_end_reason = "max_steps"
+            recurrent_state = agent.get_initial_state(batch_size=1)
+            prev_done = True
 
-        while not done:
-            if algorithm == "ppo":
-                action, _, _, recurrent_state = agent.select_action(
-                    obs,
-                    recurrent_state=recurrent_state,
-                    done=prev_done,
-                    deterministic=True,
+            while not done:
+                if algorithm == "ppo":
+                    action, _, _, recurrent_state = agent.select_action(
+                        obs,
+                        recurrent_state=recurrent_state,
+                        done=prev_done,
+                        deterministic=True,
+                    )
+                else:
+                    action, recurrent_state = agent.select_action(
+                        obs,
+                        recurrent_state=recurrent_state,
+                        done=prev_done,
+                        deterministic=True,
+                    )
+
+                obs_next, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
+                prev_done = done
+                episode_reward += reward
+                steps += 1
+
+                if done:
+                    if info.get("reset_reason") == "goal":
+                        episode_end_reason = "goal"
+                        goal_count += 1
+                    elif info.get("reset_reason") == "collision":
+                        episode_end_reason = "collision"
+                    elif info.get("reset_reason") == "low_score":
+                        episode_end_reason = "low_score"
+
+                obs = obs_next
+
+            total_rewards.append(episode_reward)
+
+            if config.show_progress:
+                elapsed = time.perf_counter() - start_time
+                print(
+                    f"[INFER][{algorithm.upper()}] ep={episode + 1:03d}/{config.episodes} "
+                    f"r={episode_reward:8.2f} steps={steps:4d} min_d={env.min_episode_distance:5.2f} "
+                    f"end={episode_end_reason} t={elapsed:7.1f}s",
+                    flush=True,
                 )
-            else:
-                action, recurrent_state = agent.select_action(
-                    obs,
-                    recurrent_state=recurrent_state,
-                    done=prev_done,
-                    deterministic=True,
-                )
 
-            obs_next, reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
-            prev_done = done
-            episode_reward += reward
-            steps += 1
+        avg_reward = np.mean(total_rewards)
+        std_reward = np.std(total_rewards)
+        success_rate = goal_count / config.episodes * 100
+        elapsed = time.perf_counter() - start_time
 
-            if done:
-                if info.get("reset_reason") == "goal":
-                    episode_end_reason = "goal"
-                    goal_count += 1
-                elif info.get("reset_reason") == "collision":
-                    episode_end_reason = "collision"
-                elif info.get("reset_reason") == "low_score":
-                    episode_end_reason = "low_score"
+        print(
+            f"[INFER][{algorithm.upper()}] summary avg={avg_reward:.2f} std={std_reward:.2f} "
+            f"success={success_rate:.1f}% ({goal_count}/{config.episodes}) t={elapsed:7.1f}s",
+            flush=True,
+        )
+    finally:
+        try:
+            env.robot.motors.stop()
+        except Exception:
+            pass
 
-            obs = obs_next
-
-        total_rewards.append(episode_reward)
-
-        if config.render:
-            elapsed = time.perf_counter() - start_time
-            print(
-                f"[INFER][{algorithm.upper()}] ep={episode + 1:03d}/{config.episodes} "
-                f"r={episode_reward:8.2f} steps={steps:4d} min_d={env.min_episode_distance:5.2f} "
-                f"end={episode_end_reason} t={elapsed:7.1f}s",
-                flush=True,
-            )
-
-    avg_reward = np.mean(total_rewards)
-    std_reward = np.std(total_rewards)
-    success_rate = goal_count / config.episodes * 100
-    elapsed = time.perf_counter() - start_time
-
-    print(
-        f"[INFER][{algorithm.upper()}] summary avg={avg_reward:.2f} std={std_reward:.2f} "
-        f"success={success_rate:.1f}% ({goal_count}/{config.episodes}) t={elapsed:7.1f}s",
-        flush=True,
-    )
-
-    env.robot.motors.stop()
     print(f"[INFER][{algorithm.upper()}] done", flush=True)
 
 
@@ -219,7 +223,7 @@ if __name__ == "__main__":
     parser.add_argument("--algorithm", choices=("ppo", "sac"), default=InferenceConfig.algorithm)
     parser.add_argument("--model-path", default=None)
     parser.add_argument("--episodes", type=int, default=InferenceConfig.episodes)
-    parser.add_argument("--no-render", action="store_true")
+    parser.add_argument("--quiet", "--no-render", dest="quiet", action="store_true")
     args, _ = parser.parse_known_args()
 
     run_inference(
@@ -227,6 +231,6 @@ if __name__ == "__main__":
             model_path=args.model_path,
             algorithm=args.algorithm,
             episodes=args.episodes,
-            render=not args.no_render,
+            show_progress=not args.quiet,
         )
     )
