@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Tuple, List, Optional, Dict, Any, Union
 import numpy as np
 import torch
-from torch import multiprocessing, nn
+from torch import nn
+from torch.distributions import AffineTransform, Independent, Normal, TanhTransform, TransformedDistribution
 from torch.nn.utils.rnn import pad_sequence
-from torch.distributions import Independent, Normal
 
 RecurrentState = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
 
@@ -108,6 +108,22 @@ class Config:
         self.recurrent_cell = self.recurrent_cell.lower().strip()
         if self.recurrent_cell not in {"lstm", "gru"}:
             raise ValueError(f"Unsupported recurrent_cell: {self.recurrent_cell}")
+        if self.episodes <= 0:
+            raise ValueError("episodes must be greater than 0")
+        if self.update_every <= 0:
+            raise ValueError("update_every must be greater than 0")
+        if self.epochs <= 0:
+            raise ValueError("epochs must be greater than 0")
+        if self.batch_size <= 0:
+            raise ValueError("batch_size must be greater than 0")
+        if self.max_steps <= 0:
+            raise ValueError("max_steps must be greater than 0")
+        if self.max_steering_angle <= 0.0:
+            raise ValueError("max_steering_angle must be greater than 0")
+        if self.max_speed <= self.min_speed:
+            raise ValueError("max_speed must be greater than min_speed")
+        if self.save_every < 0:
+            raise ValueError("save_every must be non-negative")
         if self.start_position is None:
             self.start_position = [-2.0, 0.0, 0.02]
         if self.start_rotation is None:
@@ -140,14 +156,13 @@ class PPOAgent:
         model_class = GRUActorCritic if recurrent_cell == "gru" else LSTMActorCritic
         self.model = model_class(self.obs_size, self.action_dim, self.config).to(self.device)
         self.actor = self.model.policy_head
-        self.critic = self.model.value_head
         self.actor_log_std = nn.Parameter(torch.full((self.action_dim,), -0.5, dtype=torch.float32, device=self.device))
         params = list(self.model.parameters()) + [self.actor_log_std]
         self.optimizer = torch.optim.Adam(params, lr=self.config.learning_rate)
 
     def _get_device(self) -> torch.device:
-        """Get appropriate device (GPU or CPU)."""
-        return torch.device("cpu")
+        """Get appropriate device (CUDA when available)."""
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def get_initial_state(self, batch_size: int = 1) -> RecurrentState:
         """Expose recurrent state initialization for rollouts."""
@@ -222,16 +237,30 @@ class PPOAgent:
         )
         return low, high
 
-    def _policy_stats(self, policy_output: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return stable mean, std, and base-distribution entropy."""
+    def _policy_stats(self, policy_output: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return numerically stable mean and standard deviation for the policy."""
         policy_output = torch.nan_to_num(policy_output, nan=0.0, posinf=1.0, neginf=-1.0)
         safe_actor_log_std = torch.nan_to_num(self.actor_log_std, nan=-0.5, posinf=2.0, neginf=-5.0)
         safe_actor_log_std = safe_actor_log_std.clamp(-5.0, 2.0)
         log_std = safe_actor_log_std.expand_as(policy_output)
         std = torch.nan_to_num(log_std.exp(), nan=1.0, posinf=7.5, neginf=1e-3).clamp_min(1e-3)
-        base_dist = Independent(Normal(policy_output, std), 1)
-        entropy = torch.nan_to_num(base_dist.entropy(), nan=0.0, posinf=0.0, neginf=0.0)
-        return policy_output, std, entropy
+        return policy_output, std
+
+    def _action_distribution(self, mean: torch.Tensor, std: torch.Tensor) -> TransformedDistribution:
+        """Construct the bounded Gaussian policy used for action selection and PPO updates."""
+        low, high = self._action_bounds()
+        center = (high + low) / 2.0
+        scale = (high - low) / 2.0
+        base_dist = Independent(Normal(mean, std), 1)
+        return TransformedDistribution(
+            base_dist,
+            [TanhTransform(cache_size=1), AffineTransform(loc=center, scale=scale)],
+        )
+
+    def _entropy_estimate(self, action_distribution: TransformedDistribution) -> torch.Tensor:
+        """Estimate the entropy of the bounded policy with a reparameterized sample."""
+        action_sample = action_distribution.rsample()
+        return -action_distribution.log_prob(action_sample)
 
     def _squash_action(self, pre_tanh_action: torch.Tensor) -> torch.Tensor:
         """Map unconstrained actions to environment action bounds."""
@@ -242,29 +271,6 @@ class PPOAgent:
         action = squashed * scale + center
         eps = 1e-5
         return torch.max(torch.min(action, high - eps), low + eps)
-
-    def _unsquash_action(self, action: torch.Tensor) -> torch.Tensor:
-        """Map bounded actions back to pre-tanh space for stable log-prob evaluation."""
-        low, high = self._action_bounds()
-        center = (high + low) / 2.0
-        scale = (high - low) / 2.0
-        normalized = (action - center) / scale.clamp_min(1e-6)
-        normalized = normalized.clamp(-1.0 + 1e-5, 1.0 - 1e-5)
-        return 0.5 * (torch.log1p(normalized) - torch.log1p(-normalized))
-
-    def _log_prob_from_action(
-        self,
-        mean: torch.Tensor,
-        std: torch.Tensor,
-        action: torch.Tensor,
-    ) -> torch.Tensor:
-        """Compute log-prob under a squashed Gaussian policy."""
-        pre_tanh_action = self._unsquash_action(action)
-        base_dist = Independent(Normal(mean, std), 1)
-        base_log_prob = base_dist.log_prob(pre_tanh_action)
-        correction = torch.log(1.0 - torch.tanh(pre_tanh_action).pow(2) + 1e-6).sum(dim=-1)
-        log_prob = base_log_prob - correction
-        return torch.nan_to_num(log_prob, nan=0.0, posinf=0.0, neginf=0.0)
 
     def select_action(
         self,
@@ -281,10 +287,10 @@ class PPOAgent:
                 recurrent_state=recurrent_state,
                 done_mask=done_mask,
             )
-            mean, std, _ = self._policy_stats(policy_output)
-            pre_tanh_action = mean if deterministic else mean + std * torch.randn_like(mean)
-            action = self._squash_action(pre_tanh_action)
-            log_prob = self._log_prob_from_action(mean, std, action)
+            mean, std = self._policy_stats(policy_output)
+            action_distribution = self._action_distribution(mean, std)
+            action = self._squash_action(mean) if deterministic else action_distribution.rsample()
+            log_prob = action_distribution.log_prob(action)
         return (
             action.squeeze(0).cpu().numpy(),
             log_prob.squeeze(0),
@@ -349,8 +355,10 @@ class PPOAgent:
             recurrent_state=self.get_initial_state(observations.shape[0]),
             done_mask=done_mask,
         )
-        mean, std, entropy = self._policy_stats(policy_output)
-        log_probs = self._log_prob_from_action(mean, std, actions)
+        mean, std = self._policy_stats(policy_output)
+        action_distribution = self._action_distribution(mean, std)
+        log_probs = action_distribution.log_prob(actions)
+        entropy = self._entropy_estimate(action_distribution)
         return log_probs, state_values, entropy
 
     def update(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
