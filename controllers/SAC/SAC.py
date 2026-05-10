@@ -15,6 +15,44 @@ from torch import nn
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from controllers.Webots import WebotsEnv, _init_supervisor
+from controllers.reward_defaults import (
+    COLLISION_THRESHOLD,
+    COLLISION_PENALTY,
+    DISTANCE_REWARD_SCALE,
+    ENABLE_SLAM,
+    ENDPOINT,
+    FORCE_CPU,
+    GOAL_HOLD_REWARD,
+    GOAL_STOP_SPEED_THRESHOLD,
+    GOAL_OVERSHOOT_PENALTY,
+    GOAL_SPEED_PENALTY,
+    GOAL_STOP_BONUS,
+    GOAL_THRESHOLD,
+    GOAL_SUCCESS_REWARD,
+    HEADING_REWARD_SCALE,
+    IMU_FEATURE_DIM,
+    LIDAR_SECTOR_DIM,
+    LOW_SCORE_THRESHOLD,
+    MAX_SPEED,
+    MAX_STEERING_ANGLE,
+    MAX_STEPS,
+    MIN_SPEED,
+    MOTION_REWARD_SCALE,
+    NEW_BEST_DISTANCE_BONUS,
+    OCCUPANCY_GRID_SHAPE,
+    POSE_GOAL_DIM,
+    PROGRESS_REWARD_SCALE,
+    PROFILE_SLAM,
+    RESET_SETTLE_STEPS,
+    SAFETY_REWARD_SCALE,
+    SAVE_SLAM_PLOTS,
+    SLAM_PROFILE_INTERVAL,
+    START_POSITION,
+    START_POSITION_NOISE,
+    START_ROTATION,
+    START_YAW_NOISE,
+    STEP_PENALTY,
+)
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
@@ -52,8 +90,10 @@ class Config:
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
     alpha_lr: float = 3e-4
-    initial_alpha: float = 0.2
+    initial_alpha: float = 0.05
     auto_entropy_tuning: bool = True
+    reward_scale: float = 0.1
+    target_entropy_scale: float = 0.5
     hidden_size: int = 128
     recurrent_cell: str = "gru"
     recurrent_hidden_size: Optional[int] = None
@@ -67,45 +107,46 @@ class Config:
     replay_batch_size: int = 32
     min_replay_sequences: int = 64
 
-    lidar_sector_dim: int = 16
-    pose_goal_dim: int = 7
-    imu_feature_dim: int = 10
-    occupancy_grid_shape: Optional[Tuple[int, ...]] = None
+    lidar_sector_dim: int = LIDAR_SECTOR_DIM
+    pose_goal_dim: int = POSE_GOAL_DIM
+    imu_feature_dim: int = IMU_FEATURE_DIM
+    occupancy_grid_shape: Optional[Tuple[int, ...]] = OCCUPANCY_GRID_SHAPE
 
-    max_steps: int = 2000
-    collision_threshold: float = 0.1
-    low_score_threshold: float = -800.0
-    collision_penalty: float = -20.0
-    progress_reward_scale: float = 3.0
-    distance_reward_scale: float = 2.0
-    heading_reward_scale: float = 0.5
-    safety_reward_scale: float = 0.2
-    motion_reward_scale: float = 0.05
-    new_best_distance_bonus: float = 1.0
-    step_penalty: float = -0.01
-    endpoint: Tuple[float, float] = (2.0, 0.0)
-    goal_threshold: float = 0.1
-    goal_stop_speed_threshold: float = 0.1
-    goal_stop_bonus: float = 120.0
-    goal_hold_reward: float = 10.0
-    goal_speed_penalty: float = -60.0
-    goal_overshoot_penalty: float = -50.0
+    max_steps: int = MAX_STEPS
+    collision_threshold: float = COLLISION_THRESHOLD
+    low_score_threshold: float = LOW_SCORE_THRESHOLD
+    collision_penalty: float = COLLISION_PENALTY
+    progress_reward_scale: float = PROGRESS_REWARD_SCALE
+    distance_reward_scale: float = DISTANCE_REWARD_SCALE
+    heading_reward_scale: float = HEADING_REWARD_SCALE
+    safety_reward_scale: float = SAFETY_REWARD_SCALE
+    motion_reward_scale: float = MOTION_REWARD_SCALE
+    new_best_distance_bonus: float = NEW_BEST_DISTANCE_BONUS
+    step_penalty: float = STEP_PENALTY
+    endpoint: Tuple[float, float] = ENDPOINT
+    goal_threshold: float = GOAL_THRESHOLD
+    goal_stop_speed_threshold: float = GOAL_STOP_SPEED_THRESHOLD
+    goal_success_reward: float = GOAL_SUCCESS_REWARD
+    goal_stop_bonus: float = GOAL_STOP_BONUS
+    goal_hold_reward: float = GOAL_HOLD_REWARD
+    goal_speed_penalty: float = GOAL_SPEED_PENALTY
+    goal_overshoot_penalty: float = GOAL_OVERSHOOT_PENALTY
     reference_distance: Optional[float] = None
 
-    enable_slam: bool = True
-    profile_slam: bool = False
-    slam_profile_interval: int = 500
-    save_slam_plots: bool = False
-    force_cpu: bool = True  # Force CPU-only training even if CUDA is available
+    enable_slam: bool = ENABLE_SLAM
+    profile_slam: bool = PROFILE_SLAM
+    slam_profile_interval: int = SLAM_PROFILE_INTERVAL
+    save_slam_plots: bool = SAVE_SLAM_PLOTS
+    force_cpu: bool = FORCE_CPU  # Force CPU-only training even if CUDA is available
 
-    max_steering_angle: float = 0.9
-    min_speed: float = 0.0
+    max_steering_angle: float = MAX_STEERING_ANGLE
+    min_speed: float = MIN_SPEED
     start_position: Optional[List[float]] = None
     start_rotation: Optional[List[float]] = None
-    start_position_noise: float = 0.03
-    start_yaw_noise: float = 0.2
-    reset_settle_steps: int = 10
-    max_speed: float = 10.0
+    start_position_noise: float = START_POSITION_NOISE
+    start_yaw_noise: float = START_YAW_NOISE
+    reset_settle_steps: int = RESET_SETTLE_STEPS
+    max_speed: float = MAX_SPEED
 
     def __post_init__(self) -> None:
         self.recurrent_cell = self.recurrent_cell.lower().strip()
@@ -127,14 +168,18 @@ class Config:
             raise ValueError("min_replay_sequences must be > 0")
         if self.recurrent_hidden_size is None:
             self.recurrent_hidden_size = self.hidden_size
+        if self.reward_scale <= 0.0:
+            raise ValueError("reward_scale must be greater than 0")
+        if self.target_entropy_scale <= 0.0:
+            raise ValueError("target_entropy_scale must be greater than 0")
         if self.goal_stop_speed_threshold <= 0.0:
             raise ValueError("goal_stop_speed_threshold must be greater than 0")
         if self.slam_profile_interval <= 0:
             raise ValueError("slam_profile_interval must be greater than 0")
         if self.start_position is None:
-            self.start_position = [-2.0, 0.0, 0.02]
+            self.start_position = list(START_POSITION)
         if self.start_rotation is None:
-            self.start_rotation = [0.0, 0.0, 1.0, 0.0]
+            self.start_rotation = list(START_ROTATION)
         if self.reference_distance is None:
             start_xy = np.array(self.start_position[:2], dtype=np.float32)
             endpoint_xy = np.array(self.endpoint, dtype=np.float32)
@@ -406,7 +451,7 @@ class SACAgent:
         self.critic_optimizer = torch.optim.Adam(list(self.q1.parameters()) + list(self.q2.parameters()), lr=config.critic_lr)
         self.log_alpha = torch.tensor(np.log(config.initial_alpha), dtype=torch.float32, device=self.device, requires_grad=True)
         self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
-        self.target_entropy = -float(action_dim)
+        self.target_entropy = -float(action_dim) * float(config.target_entropy_scale)
 
         self.action_low = torch.tensor([-config.max_steering_angle, config.min_speed], dtype=torch.float32, device=self.device)
         self.action_high = torch.tensor([config.max_steering_angle, config.max_speed], dtype=torch.float32, device=self.device)
@@ -444,6 +489,10 @@ class SACAgent:
                 "auto_entropy_tuning": self.config.auto_entropy_tuning,
                 "initial_alpha": self.config.initial_alpha,
                 "alpha_lr": self.config.alpha_lr,
+                "target_entropy_scale": self.config.target_entropy_scale,
+            },
+            "optimization": {
+                "reward_scale": self.config.reward_scale,
             },
         }
 
@@ -483,6 +532,21 @@ class SACAgent:
             if mismatches:
                 raise ValueError(
                     "Checkpoint entropy settings are incompatible with the current configuration: " + "; ".join(mismatches)
+                )
+
+        saved_optimization = checkpoint.get("optimization")
+        if isinstance(saved_optimization, dict):
+            current_optimization = self._checkpoint_metadata()["optimization"]
+            mismatches = []
+            for key, expected_value in current_optimization.items():
+                if key not in saved_optimization:
+                    continue
+                if saved_optimization[key] != expected_value:
+                    mismatches.append(f"{key}: checkpoint={saved_optimization[key]}, current={expected_value}")
+            if mismatches:
+                raise ValueError(
+                    "Checkpoint optimization settings are incompatible with the current configuration: "
+                    + "; ".join(mismatches)
                 )
 
     def _tensor_obs(self, obs: np.ndarray) -> torch.Tensor:
@@ -577,6 +641,7 @@ class SACAgent:
             return None
 
         valid_mask = batch["valid_mask"]
+        scaled_rewards = batch["rewards"] * self.config.reward_scale
         burn_in = min(self.config.burn_in, batch["obs"].shape[1] - 1)
         learn_mask = self._sequence_loss_mask(valid_mask, burn_in)
         done_flags = batch["dones"].squeeze(-1)
@@ -603,7 +668,7 @@ class SACAgent:
             target_q2, _ = self.target_q2(target_obs, target_actions, done_mask=done_mask_next)
             target_q = torch.min(_ensure_time_dim(target_q1), _ensure_time_dim(target_q2))[:, 1:]
             target_q = target_q - self.alpha.detach() * next_log_prob
-            target_q = batch["rewards"] + (1.0 - batch["dones"]) * self.config.gamma * target_q
+            target_q = scaled_rewards + (1.0 - batch["dones"]) * self.config.gamma * target_q
 
         current_q1, _ = self.q1(batch["obs"], batch["actions"], done_mask=done_mask_obs)
         current_q2, _ = self.q2(batch["obs"], batch["actions"], done_mask=done_mask_obs)

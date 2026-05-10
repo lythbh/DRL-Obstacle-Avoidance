@@ -9,6 +9,21 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
+from controllers.reward_defaults import (
+    COLLISION_PENALTY,
+    DISTANCE_REWARD_SCALE,
+    GOAL_HOLD_REWARD,
+    GOAL_OVERSHOOT_PENALTY,
+    GOAL_SPEED_PENALTY,
+    GOAL_STOP_BONUS,
+    GOAL_SUCCESS_REWARD,
+    HEADING_REWARD_SCALE,
+    MOTION_REWARD_SCALE,
+    NEW_BEST_DISTANCE_BONUS,
+    PROGRESS_REWARD_SCALE,
+    SAFETY_REWARD_SCALE,
+    STEP_PENALTY,
+)
 
 _SLAM_IMPORT_ERROR: Optional[Exception] = None
 try:
@@ -424,20 +439,21 @@ class RewardComputer:
         self,
         endpoint: np.ndarray,
         reference_distance: float,
-        collision_reward: float = -40.0,
-        progress_scale: float = 3.0,
-        distance_reward_scale: float = 2.0,
-        heading_reward_scale: float = 0.08,
-        safety_reward_scale: float = 0.2,
-        motion_reward_scale: float = 0.05,
-        new_best_distance_bonus: float = 1.0,
-        step_penalty: float = -0.01,
+        collision_reward: float = COLLISION_PENALTY,
+        progress_scale: float = PROGRESS_REWARD_SCALE,
+        distance_reward_scale: float = DISTANCE_REWARD_SCALE,
+        heading_reward_scale: float = HEADING_REWARD_SCALE,
+        safety_reward_scale: float = SAFETY_REWARD_SCALE,
+        motion_reward_scale: float = MOTION_REWARD_SCALE,
+        new_best_distance_bonus: float = NEW_BEST_DISTANCE_BONUS,
+        step_penalty: float = STEP_PENALTY,
         goal_threshold: float = 0.8,
         goal_stop_speed_threshold: float = 0.1,
-        goal_stop_bonus: float = 120.0,
-        goal_hold_reward: float = 10.0,
-        goal_speed_penalty: float = -60.0,
-        goal_overshoot_penalty: float = -50.0,
+        goal_success_reward: float = GOAL_SUCCESS_REWARD,
+        goal_stop_bonus: float = GOAL_STOP_BONUS,
+        goal_hold_reward: float = GOAL_HOLD_REWARD,
+        goal_speed_penalty: float = GOAL_SPEED_PENALTY,
+        goal_overshoot_penalty: float = GOAL_OVERSHOOT_PENALTY,
     ):
         self.endpoint = np.array(endpoint, dtype=np.float32)
         self.reference_distance = float(reference_distance)
@@ -451,6 +467,7 @@ class RewardComputer:
         self.step_penalty = step_penalty
         self.goal_threshold = float(goal_threshold)
         self.goal_stop_speed_threshold = float(goal_stop_speed_threshold)
+        self.goal_success_reward = goal_success_reward
         self.goal_stop_bonus = goal_stop_bonus
         self.goal_hold_reward = goal_hold_reward
         self.goal_speed_penalty = goal_speed_penalty
@@ -476,7 +493,7 @@ class RewardComputer:
 
         if distance_to_end < self.goal_threshold:
             if speed_norm <= self.goal_stop_speed_threshold:
-                return 200.0 + self.goal_stop_bonus + self.goal_hold_reward, distance_to_end
+                return self.goal_success_reward + self.goal_stop_bonus + self.goal_hold_reward, distance_to_end
             return self.goal_speed_penalty * speed_norm + self.goal_hold_reward, distance_to_end
 
         progress = 0.0
@@ -556,6 +573,7 @@ class WebotsEnv:
             step_penalty=config.step_penalty,
             goal_threshold=config.goal_threshold,
             goal_stop_speed_threshold=float(getattr(config, "goal_stop_speed_threshold", 0.1)),
+            goal_success_reward=config.goal_success_reward,
             goal_stop_bonus=config.goal_stop_bonus,
             goal_hold_reward=config.goal_hold_reward,
             goal_speed_penalty=config.goal_speed_penalty,

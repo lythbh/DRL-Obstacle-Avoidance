@@ -15,6 +15,44 @@ RecurrentState = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
+from controllers.reward_defaults import (
+    COLLISION_THRESHOLD,
+    COLLISION_PENALTY,
+    DISTANCE_REWARD_SCALE,
+    ENABLE_SLAM,
+    ENDPOINT,
+    FORCE_CPU,
+    GOAL_HOLD_REWARD,
+    GOAL_STOP_SPEED_THRESHOLD,
+    GOAL_OVERSHOOT_PENALTY,
+    GOAL_SPEED_PENALTY,
+    GOAL_STOP_BONUS,
+    GOAL_THRESHOLD,
+    GOAL_SUCCESS_REWARD,
+    HEADING_REWARD_SCALE,
+    IMU_FEATURE_DIM,
+    LIDAR_SECTOR_DIM,
+    LOW_SCORE_THRESHOLD,
+    MAX_SPEED,
+    MAX_STEERING_ANGLE,
+    MAX_STEPS,
+    MIN_SPEED,
+    MOTION_REWARD_SCALE,
+    NEW_BEST_DISTANCE_BONUS,
+    OCCUPANCY_GRID_SHAPE,
+    POSE_GOAL_DIM,
+    PROGRESS_REWARD_SCALE,
+    PROFILE_SLAM,
+    RESET_SETTLE_STEPS,
+    SAFETY_REWARD_SCALE,
+    SAVE_SLAM_PLOTS,
+    SLAM_PROFILE_INTERVAL,
+    START_POSITION,
+    START_POSITION_NOISE,
+    START_ROTATION,
+    START_YAW_NOISE,
+    STEP_PENALTY,
+)
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
@@ -65,49 +103,50 @@ class Config:
     lstm_hidden_size: int = 128  # Hidden size of the recurrent core
     lstm_layers: int = 1
     recurrent_cell: str = "gru" # "lstm" or "gru"
-    lidar_sector_dim: int = 16
-    pose_goal_dim: int = 7  # [x, y] + [sin/cos heading, sin/cos goal_error, norm dist]
-    imu_feature_dim: int = 10  # accel(3) + gyro(3) + quaternion(4)
-    occupancy_grid_shape: Optional[Tuple[int, ...]] = None  # Optional CNN shape, e.g. (1, 16, 16)
+    lidar_sector_dim: int = LIDAR_SECTOR_DIM
+    pose_goal_dim: int = POSE_GOAL_DIM  # [x, y] + [sin/cos heading, sin/cos goal_error, norm dist]
+    imu_feature_dim: int = IMU_FEATURE_DIM  # accel(3) + gyro(3) + quaternion(4)
+    occupancy_grid_shape: Optional[Tuple[int, ...]] = OCCUPANCY_GRID_SHAPE  # Optional CNN shape, e.g. (1, 16, 16)
     
     # Environment
-    max_steps: int = 2000  # Max steps per episode
-    collision_threshold: float = 0.1  # LiDAR distance threshold for collision
-    low_score_threshold: float = -800.0  # Episode reset threshold
-    collision_penalty: float = -20.0  # Penalty when collision happens
-    progress_reward_scale: float = 3.0  # Scale for distance-progress reward
-    distance_reward_scale: float = 2.0  # Dense reward for being closer to the goal than the start state
-    heading_reward_scale: float = 0.5  # Bonus when facing toward the goal
-    safety_reward_scale: float = 0.2  # Encourages keeping distance from obstacles
-    motion_reward_scale: float = 0.05  # Bonus for moving forward to avoid stop-policy collapse
-    new_best_distance_bonus: float = 1.0  # Bonus when reaching a new closest distance to goal
-    step_penalty: float = -0.01  # Small per-step penalty to encourage efficiency
-    endpoint: Tuple[float, float] = (2.0, 0.0)  # Goal location
-    goal_threshold: float = 0.1  # Radius around goal considered reached
-    goal_stop_speed_threshold: float = 0.1  # Speed limit for counting goal success
-    goal_stop_bonus: float = 120.0  # Extra reward for stopping at the goal
-    goal_hold_reward: float = 10.0  # Reward per timestep while inside goal threshold
-    goal_speed_penalty: float = -60.0  # Penalty for still moving inside the goal region
-    goal_overshoot_penalty: float = -50.0  # Penalty for driving past the goal region
+    max_steps: int = MAX_STEPS  # Max steps per episode
+    collision_threshold: float = COLLISION_THRESHOLD  # LiDAR distance threshold for collision
+    low_score_threshold: float = LOW_SCORE_THRESHOLD  # Episode reset threshold
+    collision_penalty: float = COLLISION_PENALTY  # Strong failure signal when collision happens
+    progress_reward_scale: float = PROGRESS_REWARD_SCALE  # Main dense signal: move toward the goal
+    distance_reward_scale: float = DISTANCE_REWARD_SCALE  # Secondary dense signal: stay closer than the start state
+    heading_reward_scale: float = HEADING_REWARD_SCALE  # Small bias toward facing the goal
+    safety_reward_scale: float = SAFETY_REWARD_SCALE  # Safety matters, but less than goal progress
+    motion_reward_scale: float = MOTION_REWARD_SCALE  # Small bias against freezing in place
+    new_best_distance_bonus: float = NEW_BEST_DISTANCE_BONUS  # Small milestone reward for new closest approach
+    step_penalty: float = STEP_PENALTY  # Encourages reaching the goal sooner
+    endpoint: Tuple[float, float] = ENDPOINT  # Goal location
+    goal_threshold: float = GOAL_THRESHOLD  # Radius around goal considered reached
+    goal_stop_speed_threshold: float = GOAL_STOP_SPEED_THRESHOLD  # Speed limit for counting goal success
+    goal_success_reward: float = GOAL_SUCCESS_REWARD  # Main sparse success reward
+    goal_stop_bonus: float = GOAL_STOP_BONUS  # Extra reward for finishing under control
+    goal_hold_reward: float = GOAL_HOLD_REWARD  # Mild reward while correctly dwelling in the goal area
+    goal_speed_penalty: float = GOAL_SPEED_PENALTY  # Discourages blasting through the goal region
+    goal_overshoot_penalty: float = GOAL_OVERSHOOT_PENALTY  # Strong penalty for driving past the goal region
     reference_distance: Optional[float] = None  # Start-to-goal distance, filled in at init
 
-    enable_slam: bool = True
-    profile_slam: bool = False
-    slam_profile_interval: int = 500
-    save_slam_plots: bool = False
-    force_cpu: bool = True  # Force CPU-only training even if CUDA is available
+    enable_slam: bool = ENABLE_SLAM
+    profile_slam: bool = PROFILE_SLAM
+    slam_profile_interval: int = SLAM_PROFILE_INTERVAL
+    save_slam_plots: bool = SAVE_SLAM_PLOTS
+    force_cpu: bool = FORCE_CPU  # Force CPU-only training even if CUDA is available
     
     # Robot Control
-    max_steering_angle: float = 0.9
-    min_speed: float = 0.0
+    max_steering_angle: float = MAX_STEERING_ANGLE
+    min_speed: float = MIN_SPEED
     start_position: Optional[List[float]] = None  # [x, y, z]
     start_rotation: Optional[List[float]] = None  # [x, y, z, w]
-    start_position_noise: float = 0.03  # Random position jitter at reset
-    start_yaw_noise: float = 0.2  # Random yaw jitter at reset
+    start_position_noise: float = START_POSITION_NOISE  # Random position jitter at reset
+    start_yaw_noise: float = START_YAW_NOISE  # Random yaw jitter at reset
     
     # Motor/Sensor Config
-    max_speed: float = 10.0
-    reset_settle_steps: int = 10  # Steps to wait for physics to settle after reset
+    max_speed: float = MAX_SPEED
+    reset_settle_steps: int = RESET_SETTLE_STEPS  # Steps to wait for physics to settle after reset
     
     def __post_init__(self) -> None:
         """Initialize defaults for mutable fields."""
@@ -135,9 +174,9 @@ class Config:
         if self.slam_profile_interval <= 0:
             raise ValueError("slam_profile_interval must be greater than 0")
         if self.start_position is None:
-            self.start_position = [-2.0, 0.0, 0.02]
+            self.start_position = list(START_POSITION)
         if self.start_rotation is None:
-            self.start_rotation = [0.0, 0.0, 1.0, 0.0]
+            self.start_rotation = list(START_ROTATION)
         if self.reference_distance is None:
             start_xy = np.array(self.start_position[:2], dtype=np.float32)
             endpoint_xy = np.array(self.endpoint, dtype=np.float32)
