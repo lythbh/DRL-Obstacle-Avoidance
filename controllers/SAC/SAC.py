@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sys
 import time
-from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, cast
@@ -44,11 +43,9 @@ def _load_checkpoint(path: str, map_location: torch.device) -> Dict[str, Any]:
 # --- Configuration and checkpoint metadata ---------------------------------
 @dataclass
 class Config:
-    episodes: int = 500
-    batch_size: int = 64
-    replay_size: int = 200_000
-    update_after_steps: int = 1_000
-    updates_per_step: int = 1
+    episodes: int = 2000
+    update_after_steps: int = 500
+    updates_per_step: int = 2
     save_every: int = 100
     gamma: float = 0.99
     tau: float = 0.005
@@ -65,13 +62,17 @@ class Config:
     log_std_max: float = 2.0
     sequence_length: int = 16
     burn_in: int = 4
+    sequence_stride: int = 8
+    replay_capacity: int = 1024
+    replay_batch_size: int = 32
+    min_replay_sequences: int = 64
 
     lidar_sector_dim: int = 16
     pose_goal_dim: int = 7
     imu_feature_dim: int = 10
     occupancy_grid_shape: Optional[Tuple[int, ...]] = None
 
-    max_steps: int = 4000
+    max_steps: int = 2000
     collision_threshold: float = 0.1
     low_score_threshold: float = -800.0
     collision_penalty: float = -20.0
@@ -84,12 +85,18 @@ class Config:
     step_penalty: float = -0.01
     endpoint: Tuple[float, float] = (2.0, 0.0)
     goal_threshold: float = 0.1
+    goal_stop_speed_threshold: float = 0.1
     goal_stop_bonus: float = 120.0
     goal_hold_reward: float = 10.0
     goal_speed_penalty: float = -60.0
     goal_overshoot_penalty: float = -50.0
-    goal_score_threshold: float = 5000.0
     reference_distance: Optional[float] = None
+
+    enable_slam: bool = True
+    profile_slam: bool = False
+    slam_profile_interval: int = 500
+    save_slam_plots: bool = False
+    force_cpu: bool = True  # Force CPU-only training even if CUDA is available
 
     max_steering_angle: float = 0.9
     min_speed: float = 0.0
@@ -102,7 +109,7 @@ class Config:
 
     def __post_init__(self) -> None:
         self.recurrent_cell = self.recurrent_cell.lower().strip()
-        if self.recurrent_cell not in {"ff", "gru", "lstm"}:
+        if self.recurrent_cell not in {"gru", "lstm"}:
             raise ValueError(f"Unsupported recurrent_cell: {self.recurrent_cell}")
         if self.sequence_length <= 0:
             raise ValueError("sequence_length must be > 0")
@@ -110,8 +117,20 @@ class Config:
             raise ValueError("burn_in must be >= 0")
         if self.burn_in >= self.sequence_length:
             self.burn_in = max(self.sequence_length - 1, 0)
+        if self.sequence_stride <= 0:
+            raise ValueError("sequence_stride must be > 0")
+        if self.replay_capacity <= 0:
+            raise ValueError("replay_capacity must be > 0")
+        if self.replay_batch_size <= 0:
+            raise ValueError("replay_batch_size must be > 0")
+        if self.min_replay_sequences <= 0:
+            raise ValueError("min_replay_sequences must be > 0")
         if self.recurrent_hidden_size is None:
             self.recurrent_hidden_size = self.hidden_size
+        if self.goal_stop_speed_threshold <= 0.0:
+            raise ValueError("goal_stop_speed_threshold must be greater than 0")
+        if self.slam_profile_interval <= 0:
+            raise ValueError("slam_profile_interval must be greater than 0")
         if self.start_position is None:
             self.start_position = [-2.0, 0.0, 0.02]
         if self.start_rotation is None:
@@ -122,139 +141,97 @@ class Config:
             self.reference_distance = float(np.linalg.norm(start_xy - endpoint_xy))
 
 
-# --- Episode replay for recurrent off-policy updates ------------------------
 class SequenceReplayBuffer:
-    def __init__(self, obs_size: int, action_dim: int, capacity: int, sequence_length: int) -> None:
-        self.capacity = capacity
-        self.sequence_length = sequence_length
-        self.obs_size = obs_size
-        self.action_dim = action_dim
-        self.episodes: deque[Dict[str, np.ndarray]] = deque()
-        self.current_episode: List[Tuple[np.ndarray, np.ndarray, float, np.ndarray, bool]] = []
+    """Small ring buffer of fixed-length recurrent windows for fast off-policy SAC updates."""
+
+    def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
+        self.capacity = config.replay_capacity
+        self.seq_len = config.sequence_length
+        self.stride = config.sequence_stride
+        self.obs = np.zeros((self.capacity, self.seq_len, obs_size), dtype=np.float32)
+        self.actions = np.zeros((self.capacity, self.seq_len, action_dim), dtype=np.float32)
+        self.rewards = np.zeros((self.capacity, self.seq_len, 1), dtype=np.float32)
+        self.next_obs = np.zeros((self.capacity, self.seq_len, obs_size), dtype=np.float32)
+        self.dones = np.zeros((self.capacity, self.seq_len, 1), dtype=np.float32)
+        self.valid_mask = np.zeros((self.capacity, self.seq_len), dtype=np.float32)
         self.size = 0
-
-    def add(self, obs: np.ndarray, action: np.ndarray, reward: float, next_obs: np.ndarray, done: bool) -> None:
-        transition = (
-            np.asarray(obs, dtype=np.float32),
-            np.asarray(action, dtype=np.float32),
-            float(reward),
-            np.asarray(next_obs, dtype=np.float32),
-            bool(done),
-        )
-        self.current_episode.append(transition)
-        if done:
-            self._commit_episode()
-
-    def _commit_episode(self) -> None:
-        if not self.current_episode:
-            return
-        obs = np.stack([t[0] for t in self.current_episode], axis=0)
-        actions = np.stack([t[1] for t in self.current_episode], axis=0)
-        rewards = np.array([t[2] for t in self.current_episode], dtype=np.float32).reshape(-1, 1)
-        next_obs = np.stack([t[3] for t in self.current_episode], axis=0)
-        dones = np.array([t[4] for t in self.current_episode], dtype=np.float32).reshape(-1, 1)
-        self.episodes.append(
-            {
-                "obs": obs,
-                "actions": actions,
-                "rewards": rewards,
-                "next_obs": next_obs,
-                "dones": dones,
-            }
-        )
-        self.size += len(obs)
-        self.current_episode = []
-        self._trim()
-
-    def _trim(self) -> None:
-        while self.size > self.capacity and self.episodes:
-            removed = self.episodes.popleft()
-            self.size -= len(removed["obs"])
+        self.pos = 0
 
     def __len__(self) -> int:
-        return self.size + len(self.current_episode)
+        return self.size
 
-    def _current_episode_dict(self) -> Optional[Dict[str, np.ndarray]]:
-        if not self.current_episode:
-            return None
-        obs = np.stack([t[0] for t in self.current_episode], axis=0)
-        actions = np.stack([t[1] for t in self.current_episode], axis=0)
-        rewards = np.array([t[2] for t in self.current_episode], dtype=np.float32).reshape(-1, 1)
-        next_obs = np.stack([t[3] for t in self.current_episode], axis=0)
-        dones = np.array([t[4] for t in self.current_episode], dtype=np.float32).reshape(-1, 1)
-        return {
-            "obs": obs,
-            "actions": actions,
-            "rewards": rewards,
-            "next_obs": next_obs,
-            "dones": dones,
-        }
+    def _store_window(
+        self,
+        obs_window: np.ndarray,
+        action_window: np.ndarray,
+        reward_window: np.ndarray,
+        next_obs_window: np.ndarray,
+        done_window: np.ndarray,
+    ) -> None:
+        length = obs_window.shape[0]
+        idx = self.pos
+        self.obs[idx].fill(0.0)
+        self.actions[idx].fill(0.0)
+        self.rewards[idx].fill(0.0)
+        self.next_obs[idx].fill(0.0)
+        self.dones[idx].fill(0.0)
+        self.valid_mask[idx].fill(0.0)
 
-    def _eligible_episodes(self) -> List[Dict[str, np.ndarray]]:
-        eligible = [ep for ep in self.episodes if len(ep["obs"]) > 0]
-        current = self._current_episode_dict()
-        if current is not None:
-            eligible.append(current)
-        return eligible
+        self.obs[idx, :length] = obs_window
+        self.actions[idx, :length] = action_window
+        self.rewards[idx, :length, 0] = reward_window
+        self.next_obs[idx, :length] = next_obs_window
+        self.dones[idx, :length, 0] = done_window.astype(np.float32)
+        self.valid_mask[idx, :length] = 1.0
 
-    def _window_weight(self, episode_length: int) -> int:
-        return max(1, episode_length - self.sequence_length + 1)
+        self.pos = (self.pos + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
 
-    def sample(self, batch_size: int, device: torch.device) -> Optional[Dict[str, torch.Tensor]]:
-        eligible = self._eligible_episodes()
-        if not eligible:
-            return None
+    def add_episode(
+        self,
+        episode_obs: List[np.ndarray],
+        episode_actions: List[np.ndarray],
+        episode_rewards: List[float],
+        episode_next_obs: List[np.ndarray],
+        episode_dones: List[bool],
+    ) -> None:
+        if not episode_obs:
+            return
 
-        weights = np.array([self._window_weight(len(episode["obs"])) for episode in eligible], dtype=np.float64)
-        probabilities = weights / weights.sum()
+        obs = np.asarray(episode_obs, dtype=np.float32)
+        actions = np.asarray(episode_actions, dtype=np.float32)
+        rewards = np.asarray(episode_rewards, dtype=np.float32)
+        next_obs = np.asarray(episode_next_obs, dtype=np.float32)
+        dones = np.asarray(episode_dones, dtype=np.bool_)
 
-        sampled_windows: List[Dict[str, np.ndarray]] = []
-        valid_lengths: List[int] = []
-        max_length = 0
-
-        for _ in range(batch_size):
-            episode = eligible[int(np.random.choice(len(eligible), p=probabilities))]
-            ep_len = len(episode["obs"])
-            window_length = min(self.sequence_length, ep_len)
-            start = 0 if ep_len == window_length else int(np.random.randint(0, ep_len - window_length + 1))
-            end = start + window_length
-            sampled_windows.append(
-                {
-                    "obs": episode["obs"][start:end],
-                    "actions": episode["actions"][start:end],
-                    "rewards": episode["rewards"][start:end],
-                    "next_obs": episode["next_obs"][start:end],
-                    "dones": episode["dones"][start:end],
-                }
+        total_len = obs.shape[0]
+        start = 0
+        while start < total_len:
+            end = min(start + self.seq_len, total_len)
+            self._store_window(
+                obs[start:end],
+                actions[start:end],
+                rewards[start:end],
+                next_obs[start:end],
+                dones[start:end],
             )
-            valid_lengths.append(window_length)
-            max_length = max(max_length, window_length)
+            if end >= total_len:
+                break
+            start += self.stride
 
-        obs_batch = np.zeros((batch_size, max_length, self.obs_size), dtype=np.float32)
-        actions_batch = np.zeros((batch_size, max_length, self.action_dim), dtype=np.float32)
-        rewards_batch = np.zeros((batch_size, max_length, 1), dtype=np.float32)
-        next_obs_batch = np.zeros((batch_size, max_length, self.obs_size), dtype=np.float32)
-        dones_batch = np.ones((batch_size, max_length, 1), dtype=np.float32)
-        valid_mask = np.zeros((batch_size, max_length), dtype=np.float32)
+    def can_sample(self, batch_size: int, min_sequences: int) -> bool:
+        return self.size >= max(batch_size, min_sequences)
 
-        for index, window in enumerate(sampled_windows):
-            length = valid_lengths[index]
-            obs_batch[index, :length] = window["obs"]
-            actions_batch[index, :length] = window["actions"]
-            rewards_batch[index, :length] = window["rewards"]
-            next_obs_batch[index, :length] = window["next_obs"]
-            dones_batch[index, :length] = window["dones"]
-            valid_mask[index, :length] = 1.0
-
+    def sample(self, batch_size: int, device: torch.device) -> Dict[str, torch.Tensor]:
+        indices = np.random.randint(0, self.size, size=batch_size)
         return {
-            "obs": torch.as_tensor(obs_batch, dtype=torch.float32, device=device),
-            "actions": torch.as_tensor(actions_batch, dtype=torch.float32, device=device),
-            "rewards": torch.as_tensor(rewards_batch, dtype=torch.float32, device=device),
-            "next_obs": torch.as_tensor(next_obs_batch, dtype=torch.float32, device=device),
-            "dones": torch.as_tensor(dones_batch, dtype=torch.float32, device=device),
-            "valid_mask": torch.as_tensor(valid_mask, dtype=torch.float32, device=device),
+            "obs": torch.as_tensor(self.obs[indices], dtype=torch.float32, device=device),
+            "actions": torch.as_tensor(self.actions[indices], dtype=torch.float32, device=device),
+            "rewards": torch.as_tensor(self.rewards[indices], dtype=torch.float32, device=device),
+            "next_obs": torch.as_tensor(self.next_obs[indices], dtype=torch.float32, device=device),
+            "dones": torch.as_tensor(self.dones[indices], dtype=torch.float32, device=device),
+            "valid_mask": torch.as_tensor(self.valid_mask[indices], dtype=torch.float32, device=device),
         }
-
 
 # --- Shared recurrent encoder and policy/value heads ------------------------
 class RecurrentEncoder(nn.Module):
@@ -284,7 +261,7 @@ class RecurrentEncoder(nn.Module):
                 batch_first=True,
             )
         else:
-            self.core = None
+            raise ValueError(f"Unsupported recurrent encoder cell: {self.cell}")
 
     def get_initial_state(self, batch_size: int, device: Optional[torch.device] = None) -> Optional[Any]:
         if self.core is None:
@@ -436,17 +413,10 @@ class SACAgent:
         self.action_center = (self.action_high + self.action_low) / 2.0
         self.action_scale = (self.action_high - self.action_low) / 2.0
 
-        self.replay_buffer = SequenceReplayBuffer(
-            obs_size,
-            action_dim,
-            config.replay_size,
-            config.sequence_length,
-        )
-
     def _get_device(self) -> torch.device:
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        return torch.device("cpu")
+        if self.config.force_cpu or not torch.cuda.is_available():
+            return torch.device("cpu")
+        return torch.device("cuda")
 
     def get_initial_state(self, batch_size: int = 1) -> Optional[Any]:
         return self.actor.get_initial_state(batch_size, self.device)
@@ -575,12 +545,35 @@ class SACAgent:
         weight = mask.unsqueeze(-1).to(dtype=values.dtype)  # [B,T] -> [B,T,1] for value weighting.
         return (values * weight).sum() / weight.sum().clamp_min(1.0)
 
-    def update(self) -> Optional[Dict[str, float]]:
-        if len(self.replay_buffer) < self.config.batch_size:
+    def _build_episode_batch(
+        self,
+        episode_obs: List[np.ndarray],
+        episode_actions: List[np.ndarray],
+        episode_rewards: List[float],
+        episode_next_obs: List[np.ndarray],
+        episode_dones: List[bool],
+    ) -> Optional[Dict[str, torch.Tensor]]:
+        if not episode_obs:
             return None
 
-        batch = self.replay_buffer.sample(self.config.batch_size, self.device)
-        if batch is None:
+        obs = np.asarray(episode_obs, dtype=np.float32)
+        actions = np.asarray(episode_actions, dtype=np.float32)
+        rewards = np.asarray(episode_rewards, dtype=np.float32).reshape(-1, 1)
+        next_obs = np.asarray(episode_next_obs, dtype=np.float32)
+        dones = np.asarray(episode_dones, dtype=np.float32).reshape(-1, 1)
+        valid_mask = np.ones((obs.shape[0],), dtype=np.float32)
+
+        return {
+            "obs": torch.as_tensor(obs[None, ...], dtype=torch.float32, device=self.device),
+            "actions": torch.as_tensor(actions[None, ...], dtype=torch.float32, device=self.device),
+            "rewards": torch.as_tensor(rewards[None, ...], dtype=torch.float32, device=self.device),
+            "next_obs": torch.as_tensor(next_obs[None, ...], dtype=torch.float32, device=self.device),
+            "dones": torch.as_tensor(dones[None, ...], dtype=torch.float32, device=self.device),
+            "valid_mask": torch.as_tensor(valid_mask[None, ...], dtype=torch.float32, device=self.device),
+        }
+
+    def update(self, batch: Dict[str, torch.Tensor]) -> Optional[Dict[str, float]]:
+        if batch["obs"].shape[1] <= 0:
             return None
 
         valid_mask = batch["valid_mask"]
@@ -712,11 +705,17 @@ def train(config: Optional[Config] = None) -> None:
     env.reset()
     run_id = Path(env.run_folder).name
     agent = SACAgent(env.observation_size, env.action_dim, config)
+    replay = SequenceReplayBuffer(env.observation_size, env.action_dim, config)
     checkpoint_dir = f"checkpoints/{run_id}"
     final_model_path = "final_model.pth"
     print(
         f"[TRAIN][SAC] rnn={config.recurrent_cell.upper()} "
         f"weights_dir={checkpoint_dir} final={final_model_path}",
+        flush=True,
+    )
+    print(
+        f"[TRAIN][SAC] replay=on cap={config.replay_capacity} seq={config.sequence_length} "
+        f"stride={config.sequence_stride} batch={config.replay_batch_size}",
         flush=True,
     )
 
@@ -725,6 +724,10 @@ def train(config: Optional[Config] = None) -> None:
     best_goal_reward = float("-inf")
     best_goal_episode: Optional[int] = None
     reward_window: List[float] = []
+    success_window: List[float] = []
+    goal_touch_window: List[float] = []
+    collision_window: List[float] = []
+    timeout_window: List[float] = []
     start_time = time.perf_counter()
 
     for episode in range(config.episodes):
@@ -732,6 +735,13 @@ def train(config: Optional[Config] = None) -> None:
         done = False
         episode_reward = 0.0
         episode_end_reason = "max_steps"
+        episode_obs: List[np.ndarray] = []
+        episode_actions: List[np.ndarray] = []
+        episode_rewards: List[float] = []
+        episode_next_obs: List[np.ndarray] = []
+        episode_dones: List[bool] = []
+        episode_goal_reached = False
+        episode_success = False
         actor_state = agent.get_initial_state(batch_size=1)
         prev_done = True
 
@@ -744,11 +754,18 @@ def train(config: Optional[Config] = None) -> None:
             )
 
             next_obs, reward, terminated, truncated, info = env.step(action)
-            agent.replay_buffer.add(obs, action, reward, next_obs, terminated or truncated)
+            transition_done = bool(terminated or truncated)
+            episode_obs.append(np.asarray(obs, dtype=np.float32))
+            episode_actions.append(np.asarray(action, dtype=np.float32))
+            episode_rewards.append(float(reward))
+            episode_next_obs.append(np.asarray(next_obs, dtype=np.float32))
+            episode_dones.append(transition_done)
 
             obs = next_obs
             episode_reward += reward
-            done = terminated or truncated
+            episode_goal_reached = episode_goal_reached or bool(info.get("goal_reached", False))
+            episode_success = bool(info.get("success", False))
+            done = transition_done
             prev_done = done
             total_steps += 1
 
@@ -762,11 +779,27 @@ def train(config: Optional[Config] = None) -> None:
                 elif truncated:
                     episode_end_reason = "max_steps"
 
-            if total_steps >= config.update_after_steps:
-                for _ in range(config.updates_per_step):
-                    agent.update()
+        replay.add_episode(
+            episode_obs,
+            episode_actions,
+            episode_rewards,
+            episode_next_obs,
+            episode_dones,
+        )
+
+        if total_steps >= config.update_after_steps and replay.can_sample(
+            config.replay_batch_size,
+            config.min_replay_sequences,
+        ):
+            for _ in range(max(1, config.updates_per_step)):
+                batch = replay.sample(config.replay_batch_size, agent.device)
+                agent.update(batch)
 
         reward_window.append(episode_reward)
+        success_window.append(1.0 if episode_success else 0.0)
+        goal_touch_window.append(1.0 if episode_goal_reached else 0.0)
+        collision_window.append(1.0 if episode_end_reason == "collision" else 0.0)
+        timeout_window.append(1.0 if episode_end_reason == "max_steps" else 0.0)
         checkpoint_flags: List[str] = []
 
         if episode_end_reason == "goal":
@@ -793,12 +826,19 @@ def train(config: Optional[Config] = None) -> None:
             checkpoint_flags.append("latest")
 
         rolling_reward = float(np.mean(reward_window[-10:]))
+        rolling_success = float(np.mean(success_window[-10:]))
+        rolling_goal_touch = float(np.mean(goal_touch_window[-10:]))
+        rolling_collision = float(np.mean(collision_window[-10:]))
+        rolling_timeout = float(np.mean(timeout_window[-10:]))
         elapsed = time.perf_counter() - start_time
         checkpoint_note = f" ckpt={'+'.join(checkpoint_flags)}" if checkpoint_flags else ""
         print(
             f"[TRAIN][SAC] ep={episode + 1:03d}/{config.episodes} "
             f"r={episode_reward:8.2f} avg10={rolling_reward:8.2f} steps={env.current_step:4d} "
-            f"min_d={env.min_episode_distance:5.2f} end={episode_end_reason} t={elapsed:7.1f}s{checkpoint_note}",
+            f"succ10={rolling_success:4.2f} touch10={rolling_goal_touch:4.2f} "
+            f"col10={rolling_collision:4.2f} to10={rolling_timeout:4.2f} "
+            f"min_d={env.min_episode_distance:5.2f} end={episode_end_reason} replay={len(replay):4d} "
+            f"t={elapsed:7.1f}s{checkpoint_note}",
             flush=True,
         )
 

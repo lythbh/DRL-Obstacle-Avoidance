@@ -1,6 +1,7 @@
 """Webots simulation stack for the ALTINO robot."""
 
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -145,6 +146,10 @@ class SLAMProcessor:
         dt: float,
         goal: Tuple[float, float] = (0.0, 0.0),
         lidar_sector_dim: int = N_SECTORS,
+        enabled: bool = True,
+        profile_enabled: bool = False,
+        profile_interval: int = 500,
+        save_episodes: bool = False,
     ) -> None:
         self._dt = dt
         self._lidar_max_range = lidar_max_range
@@ -153,10 +158,22 @@ class SLAMProcessor:
         self._lidar_angles: Optional[np.ndarray] = None
         self._goal = goal
         self.n_sectors = int(lidar_sector_dim)
+        self.enabled = bool(enabled) and _SLAM_AVAILABLE
+        self.profile_enabled = bool(profile_enabled) and self.enabled
+        self.profile_interval = max(1, int(profile_interval))
+        self.save_episodes = bool(save_episodes) and self.enabled
+        self._profile_step_count = 0
+        self._profile_process_time = 0.0
+        self._profile_keyframe_time = 0.0
+        self._profile_reset_time = 0.0
+        self._profile_save_time = 0.0
+        self._profile_keyframes_added = 0
+        self._profile_reset_calls = 0
+        self._profile_save_calls = 0
         if self.n_sectors <= 0:
             raise ValueError(f"lidar_sector_dim must be positive, got {lidar_sector_dim}.")
 
-        if _SLAM_AVAILABLE:
+        if self.enabled:
             self.imu_proc: Any = IMUProcessor(dt=dt)
             self.iekf: Any = IEKFBackend()
             self.slam_map: Any = SLAMMap(map_resolution=0.05)
@@ -165,24 +182,59 @@ class SLAMProcessor:
             self.iekf = None
             self.slam_map = None
 
-    def reset(self, init_pos: np.ndarray, init_heading: float) -> None:
-        if not _SLAM_AVAILABLE or self.imu_proc is None:
+    def _report_profile(self, label: str) -> None:
+        if not self.profile_enabled or self._profile_step_count <= 0:
             return
+        avg_process_ms = (self._profile_process_time / max(self._profile_step_count, 1)) * 1000.0
+        avg_keyframe_ms = (self._profile_keyframe_time / max(self._profile_step_count, 1)) * 1000.0
+        avg_reset_ms = (self._profile_reset_time / max(self._profile_reset_calls, 1)) * 1000.0
+        avg_save_ms = (self._profile_save_time / max(self._profile_save_calls, 1)) * 1000.0
+        print(
+            f"[SLAM][PROFILE] {label} steps={self._profile_step_count} "
+            f"avg_process={avg_process_ms:.3f}ms avg_keyframe={avg_keyframe_ms:.3f}ms "
+            f"avg_reset={avg_reset_ms:.3f}ms avg_save={avg_save_ms:.3f}ms "
+            f"keyframes={self._profile_keyframes_added} enabled={self.enabled}",
+            flush=True,
+        )
+        self._profile_step_count = 0
+        self._profile_process_time = 0.0
+        self._profile_keyframe_time = 0.0
+        self._profile_reset_time = 0.0
+        self._profile_save_time = 0.0
+        self._profile_keyframes_added = 0
+        self._profile_reset_calls = 0
+        self._profile_save_calls = 0
+
+    def reset(self, init_pos: np.ndarray, init_heading: float) -> None:
+        if not self.enabled or self.imu_proc is None:
+            return
+        start = time.perf_counter()
         self.imu_proc.reset()
         self.iekf = IEKFBackend(
             init_pos=init_pos.astype(np.float64),
             init_heading=float(init_heading),
         )
+        if self.profile_enabled:
+            self._profile_reset_time += time.perf_counter() - start
+            self._profile_reset_calls += 1
 
     def reset_map(self) -> None:
-        if _SLAM_AVAILABLE:
+        if self.enabled:
+            start = time.perf_counter()
             self.slam_map = SLAMMap(map_resolution=0.05)
+            if self.profile_enabled:
+                self._profile_reset_time += time.perf_counter() - start
+                self._profile_reset_calls += 1
 
     def save_episode(self, run_folder: str, episode: int, reward: float = 0.0) -> None:
-        if not _SLAM_AVAILABLE or self.slam_map is None:
+        if not self.save_episodes or self.slam_map is None:
             return
+        start = time.perf_counter()
         path = os.path.join(run_folder, f"episode_{episode:04d}_reward_{reward:.0f}.png")
         self.slam_map.save_plot(path, goal=self._goal)
+        if self.profile_enabled:
+            self._profile_save_time += time.perf_counter() - start
+            self._profile_save_calls += 1
 
     def sector_lidar(self, raw_ranges: np.ndarray) -> np.ndarray:
         valid = np.where((raw_ranges > 0.01) & np.isfinite(raw_ranges), raw_ranges, self._lidar_max_range)
@@ -225,9 +277,10 @@ class SLAMProcessor:
     ) -> Tuple[np.ndarray, Any]:
         lidar_sectors = self.sector_lidar(raw_ranges)
 
-        if not _SLAM_AVAILABLE or self.imu_proc is None or self.iekf is None or self.slam_map is None:
+        if not self.enabled or self.imu_proc is None or self.iekf is None or self.slam_map is None:
             return lidar_sectors, None
 
+        process_start = time.perf_counter()
         imu_state = self.imu_proc.step(gyro, accel)
         cmd_speed_ms = cmd_speed_rads * self.WHEEL_RADIUS
         self.iekf.propagate_odom(cmd_speed_ms, float(gyro[2]), self._dt)
@@ -235,9 +288,18 @@ class SLAMProcessor:
         heading = self.iekf.state.heading
         pos = gps_pos if gps_pos is not None else self.iekf.state.position
         pts_2d = self._scan_to_world(raw_ranges, pos, heading)
-        self.slam_map.try_add_keyframe(
+        keyframe_start = time.perf_counter()
+        new_keyframe = self.slam_map.try_add_keyframe(
             float(pos[0]), float(pos[1]), heading, scan_points=pts_2d
         )
+        if new_keyframe is not None:
+            self._profile_keyframes_added += 1
+        if self.profile_enabled:
+            self._profile_process_time += time.perf_counter() - process_start
+            self._profile_keyframe_time += time.perf_counter() - keyframe_start
+            self._profile_step_count += 1
+            if self._profile_step_count % self.profile_interval == 0:
+                self._report_profile(f"interval={self.profile_interval}")
 
         return lidar_sectors, imu_state
 
@@ -261,6 +323,10 @@ class AltinoDriver:
             dt=self._dt,
             goal=config.endpoint,
             lidar_sector_dim=config.lidar_sector_dim,
+            enabled=bool(getattr(config, "enable_slam", True)),
+            profile_enabled=bool(getattr(config, "profile_slam", False)),
+            profile_interval=int(getattr(config, "slam_profile_interval", 500)),
+            save_episodes=bool(getattr(config, "save_slam_plots", True)),
         )
         self._cmd_speed_rads = 0.0
 
@@ -367,6 +433,7 @@ class RewardComputer:
         new_best_distance_bonus: float = 1.0,
         step_penalty: float = -0.01,
         goal_threshold: float = 0.8,
+        goal_stop_speed_threshold: float = 0.1,
         goal_stop_bonus: float = 120.0,
         goal_hold_reward: float = 10.0,
         goal_speed_penalty: float = -60.0,
@@ -383,6 +450,7 @@ class RewardComputer:
         self.new_best_distance_bonus = new_best_distance_bonus
         self.step_penalty = step_penalty
         self.goal_threshold = float(goal_threshold)
+        self.goal_stop_speed_threshold = float(goal_stop_speed_threshold)
         self.goal_stop_bonus = goal_stop_bonus
         self.goal_hold_reward = goal_hold_reward
         self.goal_speed_penalty = goal_speed_penalty
@@ -407,7 +475,7 @@ class RewardComputer:
         distance_to_end = float(np.linalg.norm(current_pos - self.endpoint))
 
         if distance_to_end < self.goal_threshold:
-            if speed_norm <= 0.1:
+            if speed_norm <= self.goal_stop_speed_threshold:
                 return 200.0 + self.goal_stop_bonus + self.goal_hold_reward, distance_to_end
             return self.goal_speed_penalty * speed_norm + self.goal_hold_reward, distance_to_end
 
@@ -487,6 +555,7 @@ class WebotsEnv:
             new_best_distance_bonus=config.new_best_distance_bonus,
             step_penalty=config.step_penalty,
             goal_threshold=config.goal_threshold,
+            goal_stop_speed_threshold=float(getattr(config, "goal_stop_speed_threshold", 0.1)),
             goal_stop_bonus=config.goal_stop_bonus,
             goal_hold_reward=config.goal_hold_reward,
             goal_speed_penalty=config.goal_speed_penalty,
@@ -497,6 +566,7 @@ class WebotsEnv:
         self.episode_reward = 0.0
         self.current_pos = np.array([0.0, 0.0], dtype=np.float32)
         self.current_heading = 0.0
+        self.current_speed_norm = 0.0
         self.current_distance = float("inf")
         self.min_episode_distance = float("inf")
         self.collision = False
@@ -624,6 +694,7 @@ class WebotsEnv:
         self.current_pos = pos
         self.current_heading = heading
         self.collision = collision
+        self.current_speed_norm = 0.0
         self.current_distance, _ = self._goal_geometry(pos, heading)
         self.min_episode_distance = self.current_distance
 
@@ -652,6 +723,7 @@ class WebotsEnv:
 
         min_lidar_norm = float(lidar_sectors.min())
         speed_norm = float(speed / max(self.config.max_speed, 1e-6))
+        self.current_speed_norm = speed_norm
         goal_reached = self.current_distance < self.config.goal_threshold
 
         accel_for_reward = (imu_state.accel_body
@@ -680,22 +752,30 @@ class WebotsEnv:
             reward += self.config.goal_overshoot_penalty
             self.episode_reward += self.config.goal_overshoot_penalty
 
-        goal_stopped = goal_reached and speed_norm <= 0.1
+        goal_stopped = goal_reached and speed_norm <= float(getattr(self.config, "goal_stop_speed_threshold", 0.1))
         if goal_stopped:
-            terminated = True
-            info["reset_reason"] = "goal"
-        if self.episode_reward >= self.config.goal_score_threshold:
             terminated = True
             info["reset_reason"] = "goal"
 
         self.was_in_goal = goal_reached
 
+        info["goal_reached"] = goal_reached
+        info["goal_stopped"] = goal_stopped
+        info["success"] = goal_stopped
+        info["speed_norm"] = speed_norm
+        info["distance_to_goal"] = self.current_distance
+
         if collision:
             terminated = True
             info["reset_reason"] = "collision"
+            info["success"] = False
         elif self.episode_reward <= self.config.low_score_threshold:
             terminated = True
             info["reset_reason"] = "low_score"
+            info["success"] = False
+
+        if truncated:
+            info["success"] = False
 
         if terminated or truncated:
             self.robot.motors.stop()

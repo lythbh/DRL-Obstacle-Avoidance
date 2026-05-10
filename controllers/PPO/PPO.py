@@ -71,7 +71,7 @@ class Config:
     occupancy_grid_shape: Optional[Tuple[int, ...]] = None  # Optional CNN shape, e.g. (1, 16, 16)
     
     # Environment
-    max_steps: int = 4000  # Max steps per episode
+    max_steps: int = 2000  # Max steps per episode
     collision_threshold: float = 0.1  # LiDAR distance threshold for collision
     low_score_threshold: float = -800.0  # Episode reset threshold
     collision_penalty: float = -20.0  # Penalty when collision happens
@@ -84,12 +84,18 @@ class Config:
     step_penalty: float = -0.01  # Small per-step penalty to encourage efficiency
     endpoint: Tuple[float, float] = (2.0, 0.0)  # Goal location
     goal_threshold: float = 0.1  # Radius around goal considered reached
+    goal_stop_speed_threshold: float = 0.1  # Speed limit for counting goal success
     goal_stop_bonus: float = 120.0  # Extra reward for stopping at the goal
     goal_hold_reward: float = 10.0  # Reward per timestep while inside goal threshold
     goal_speed_penalty: float = -60.0  # Penalty for still moving inside the goal region
     goal_overshoot_penalty: float = -50.0  # Penalty for driving past the goal region
-    goal_score_threshold: float = 5000.0  # End episode when total reward reaches this threshold
     reference_distance: Optional[float] = None  # Start-to-goal distance, filled in at init
+
+    enable_slam: bool = True
+    profile_slam: bool = False
+    slam_profile_interval: int = 500
+    save_slam_plots: bool = False
+    force_cpu: bool = True  # Force CPU-only training even if CUDA is available
     
     # Robot Control
     max_steering_angle: float = 0.9
@@ -124,6 +130,10 @@ class Config:
             raise ValueError("max_speed must be greater than min_speed")
         if self.save_every < 0:
             raise ValueError("save_every must be non-negative")
+        if self.goal_stop_speed_threshold <= 0.0:
+            raise ValueError("goal_stop_speed_threshold must be greater than 0")
+        if self.slam_profile_interval <= 0:
+            raise ValueError("slam_profile_interval must be greater than 0")
         if self.start_position is None:
             self.start_position = [-2.0, 0.0, 0.02]
         if self.start_rotation is None:
@@ -161,8 +171,10 @@ class PPOAgent:
         self.optimizer = torch.optim.Adam(params, lr=self.config.learning_rate)
 
     def _get_device(self) -> torch.device:
-        """Get appropriate device (CUDA when available)."""
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        """Get appropriate device (CUDA when available, unless force_cpu is set)."""
+        if self.config.force_cpu or not torch.cuda.is_available():
+            return torch.device("cpu")
+        return torch.device("cuda")
 
     def get_initial_state(self, batch_size: int = 1) -> RecurrentState:
         """Expose recurrent state initialization for rollouts."""
@@ -518,6 +530,10 @@ def train(config: Optional[Config] = None) -> None:
     best_goal_reward = float('-inf')
     best_goal_episode: Optional[int] = None
     reward_window: List[float] = []
+    success_window: List[float] = []
+    goal_touch_window: List[float] = []
+    collision_window: List[float] = []
+    timeout_window: List[float] = []
     start_time = time.perf_counter()
     
     # Training loop
@@ -530,6 +546,8 @@ def train(config: Optional[Config] = None) -> None:
         episode_log_probs: List[float] = []
         episode_rewards: List[float] = []
         episode_end_reason = "max_steps"
+        episode_goal_reached = False
+        episode_success = False
         recurrent_state = agent.get_initial_state(batch_size=1)
         prev_done = True
         
@@ -547,6 +565,8 @@ def train(config: Optional[Config] = None) -> None:
             done = terminated or truncated
             prev_done = done
             episode_step += 1
+            episode_goal_reached = episode_goal_reached or bool(info.get("goal_reached", False))
+            episode_success = bool(info.get("success", False))
             
             # Track termination reason
             if done:
@@ -602,6 +622,10 @@ def train(config: Optional[Config] = None) -> None:
         # Logging metadata for one concise line per episode.
         episode_reward_sum = sum(episode_rewards)
         reward_window.append(episode_reward_sum)
+        success_window.append(1.0 if episode_success else 0.0)
+        goal_touch_window.append(1.0 if episode_goal_reached else 0.0)
+        collision_window.append(1.0 if episode_end_reason == "collision" else 0.0)
+        timeout_window.append(1.0 if episode_end_reason == "max_steps" else 0.0)
         checkpoint_flags: List[str] = []
         
         if episode_end_reason == "goal":
@@ -652,11 +676,17 @@ def train(config: Optional[Config] = None) -> None:
             checkpoint_flags.append("latest")
 
         rolling_reward = float(np.mean(reward_window[-10:]))
+        rolling_success = float(np.mean(success_window[-10:]))
+        rolling_goal_touch = float(np.mean(goal_touch_window[-10:]))
+        rolling_collision = float(np.mean(collision_window[-10:]))
+        rolling_timeout = float(np.mean(timeout_window[-10:]))
         elapsed = time.perf_counter() - start_time
         checkpoint_note = f" ckpt={'+'.join(checkpoint_flags)}" if checkpoint_flags else ""
         print(
             f"[TRAIN][PPO] ep={episode + 1:03d}/{config.episodes} "
             f"r={episode_reward_sum:8.2f} avg10={rolling_reward:8.2f} steps={episode_step:4d} "
+            f"succ10={rolling_success:4.2f} touch10={rolling_goal_touch:4.2f} "
+            f"col10={rolling_collision:4.2f} to10={rolling_timeout:4.2f} "
             f"min_d={env.min_episode_distance:5.2f} end={episode_end_reason} t={elapsed:7.1f}s{checkpoint_note}",
             flush=True,
         )
