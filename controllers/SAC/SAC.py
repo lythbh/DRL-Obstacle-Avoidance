@@ -442,7 +442,6 @@ class SACAgent:
             config.replay_size,
             config.sequence_length,
         )
-        print(f"[SAC] Using recurrent cell: {self.config.recurrent_cell.upper()}", flush=True)
 
     def _get_device(self) -> torch.device:
         if torch.cuda.is_available():
@@ -713,11 +712,11 @@ def train(config: Optional[Config] = None) -> None:
     env.reset()
     run_id = Path(env.run_folder).name
     agent = SACAgent(env.observation_size, env.action_dim, config)
-
+    checkpoint_dir = f"checkpoints/{run_id}"
+    final_model_path = "final_model.pth"
     print(
-        f"[TRAIN][SAC] episodes={config.episodes} "
-        f"obs={env.observation_size} act={env.action_dim} cell={config.recurrent_cell.upper()} "
-        f"seq={config.sequence_length} burn_in={config.burn_in}",
+        f"[TRAIN][SAC] rnn={config.recurrent_cell.upper()} "
+        f"weights_dir={checkpoint_dir} final={final_model_path}",
         flush=True,
     )
 
@@ -768,15 +767,7 @@ def train(config: Optional[Config] = None) -> None:
                     agent.update()
 
         reward_window.append(episode_reward)
-        if (episode + 1) % 10 == 0 or episode_end_reason == "goal" or episode == config.episodes - 1:
-            rolling_reward = float(np.mean(reward_window[-10:]))
-            elapsed = time.perf_counter() - start_time
-            print(
-                f"[TRAIN][SAC] ep={episode + 1:03d}/{config.episodes} "
-                f"r={episode_reward:8.2f} avg10={rolling_reward:8.2f} steps={env.current_step:4d} "
-                f"min_d={env.min_episode_distance:5.2f} end={episode_end_reason} t={elapsed:7.1f}s",
-                flush=True,
-            )
+        checkpoint_flags: List[str] = []
 
         if episode_end_reason == "goal":
             if episode_reward > best_goal_reward:
@@ -786,20 +777,30 @@ def train(config: Optional[Config] = None) -> None:
                 checkpoint = agent.checkpoint(best_goal_episode, best_goal_reward)
                 checkpoint["goal_episode"] = True
                 torch.save(checkpoint, _dated_checkpoint_path(run_id, "best_model.pth"))
-                print(f"[CKPT][SAC] goal ep={best_goal_episode:03d} r={best_goal_reward:.2f}", flush=True)
+                checkpoint_flags.append("best_goal")
         elif best_goal_episode is None and episode_reward > best_reward:
             best_reward = episode_reward
             env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward)
             checkpoint = agent.checkpoint(episode + 1, best_reward)
             checkpoint["goal_episode"] = False
             torch.save(checkpoint, _dated_checkpoint_path(run_id, "best_model.pth"))
-            print(f"[CKPT][SAC] best ep={episode + 1:03d} r={best_reward:.2f}", flush=True)
+            checkpoint_flags.append("best")
 
         if config.save_every > 0 and (episode + 1) % config.save_every == 0:
             latest_checkpoint = agent.checkpoint(episode + 1, episode_reward)
             latest_checkpoint["goal_episode"] = episode_end_reason == "goal"
             torch.save(latest_checkpoint, _dated_checkpoint_path(run_id, "latest_model.pth"))
-            print(f"[CKPT][SAC] latest ep={episode + 1:03d} r={episode_reward:.2f}", flush=True)
+            checkpoint_flags.append("latest")
+
+        rolling_reward = float(np.mean(reward_window[-10:]))
+        elapsed = time.perf_counter() - start_time
+        checkpoint_note = f" ckpt={'+'.join(checkpoint_flags)}" if checkpoint_flags else ""
+        print(
+            f"[TRAIN][SAC] ep={episode + 1:03d}/{config.episodes} "
+            f"r={episode_reward:8.2f} avg10={rolling_reward:8.2f} steps={env.current_step:4d} "
+            f"min_d={env.min_episode_distance:5.2f} end={episode_end_reason} t={elapsed:7.1f}s{checkpoint_note}",
+            flush=True,
+        )
 
     final_reward = best_goal_reward if best_goal_episode is not None else best_reward
     agent.save(_checkpoint_path("final_model.pth"), "final", final_reward)

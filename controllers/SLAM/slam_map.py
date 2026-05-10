@@ -549,7 +549,6 @@ class SLAMMap:
             plt.tight_layout()
             plt.savefig(output_path, dpi=150, bbox_inches="tight")
             plt.close(fig)
-            print(f"[SLAMMap] Plot saved → {output_path}", flush=True)
 
         except Exception as exc:
             print(f"[SLAMMap] save_plot failed: {exc}", flush=True)

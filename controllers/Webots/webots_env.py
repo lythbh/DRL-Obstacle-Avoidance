@@ -27,9 +27,7 @@ def _report_slam_status() -> None:
     if _SLAM_STATUS_REPORTED:
         return
     _SLAM_STATUS_REPORTED = True
-    if _SLAM_AVAILABLE:
-        print("[ENV] SLAM modules loaded", flush=True)
-    else:
+    if not _SLAM_AVAILABLE:
         print(
             f"[ENV] WARNING: SLAM modules unavailable ({_SLAM_IMPORT_ERROR}); using basic sensor processing.",
             flush=True,
@@ -510,7 +508,6 @@ class WebotsEnv:
         self.run_folder = str(_repo_root / "plots" / ts)
         os.makedirs(self.run_folder, exist_ok=True)
         self._episode_count = 0
-        print(f"[ENV] SLAM maps: {self.run_folder}", flush=True)
 
     @staticmethod
     def _normalize_occupancy_grid_shape(shape: Optional[Tuple[int, ...]]) -> Optional[Tuple[int, ...]]:
