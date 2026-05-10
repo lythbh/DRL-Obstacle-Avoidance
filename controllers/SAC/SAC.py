@@ -307,9 +307,9 @@ class RecurrentEncoder(nn.Module):
             return None
         mask = torch.as_tensor(done_mask, dtype=torch.float32, device=device)
         if mask.ndim == 0:
-            mask = mask.view(1, 1)
+            mask = mask.view(1, 1).expand(batch_size, seq_len)  # scalar reset flag -> [B,T].
         elif mask.ndim == 1:
-            mask = mask.view(batch_size, seq_len)
+            mask = mask.view(batch_size, seq_len)  # rollout reset vector -> [B,T].
         elif mask.ndim != 2:
             raise ValueError(f"done_mask must be scalar, [T], or [B, T], got shape {tuple(mask.shape)}")
         return mask
@@ -323,11 +323,11 @@ class RecurrentEncoder(nn.Module):
         obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=next(self.parameters()).device)
         obs_tensor = torch.nan_to_num(obs_tensor, nan=0.0, posinf=1.0, neginf=-1.0)
         if obs_tensor.ndim == 1:
-            obs_tensor = obs_tensor.view(1, 1, -1)
+            obs_tensor = obs_tensor.view(1, 1, -1)  # single env observation -> [B,T,F].
         elif obs_tensor.ndim == 2:
-            obs_tensor = obs_tensor.unsqueeze(1)
+            obs_tensor = obs_tensor.unsqueeze(1)  # batch of observations -> [B,1,F].
         batch_size, seq_len = obs_tensor.shape[:2]
-        latent = self.trunk(obs_tensor.reshape(batch_size * seq_len, -1)).reshape(batch_size, seq_len, -1)
+        latent = self.trunk(obs_tensor.reshape(batch_size * seq_len, -1)).reshape(batch_size, seq_len, -1)  # [B,T,F] -> [B,T,H].
         if self.core is None:
             return latent.squeeze(1) if seq_len == 1 else latent, None
         state = recurrent_state if recurrent_state is not None else self.get_initial_state(batch_size)
@@ -341,7 +341,7 @@ class RecurrentEncoder(nn.Module):
             h_t, c_t = state
             for t in range(seq_len):
                 if mask is not None:
-                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
+                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)  # [B] -> LSTM state gate [L,B,H].
                     h_t = h_t * keep
                     c_t = c_t * keep
                 step_out, (h_t, c_t) = self.core(latent[:, t : t + 1], (h_t, c_t))
@@ -351,7 +351,7 @@ class RecurrentEncoder(nn.Module):
             h_t = state
             for t in range(seq_len):
                 if mask is not None:
-                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
+                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)  # [B] -> GRU state gate [L,B,H].
                     h_t = h_t * keep
                 step_out, h_t = self.core(latent[:, t : t + 1], h_t)
                 outputs.append(step_out)
@@ -403,9 +403,9 @@ class QNetwork(nn.Module):
         features, next_state = self.encoder(obs, recurrent_state=recurrent_state, done_mask=done_mask)
         if features.ndim != action.ndim:
             if features.ndim == 2 and action.ndim == 3 and action.shape[1] == 1:
-                action = action.squeeze(1)
+                action = action.squeeze(1)  # [B,1,A] -> [B,A] to match single-step features.
             elif features.ndim == 3 and action.ndim == 2:
-                action = action.unsqueeze(1)
+                action = action.unsqueeze(1)  # [B,A] -> [B,1,A] to match sequence features.
         return self.head(torch.cat([features, action], dim=-1)), next_state
 
 
@@ -517,7 +517,7 @@ class SACAgent:
                 )
 
     def _tensor_obs(self, obs: np.ndarray) -> torch.Tensor:
-        return torch.as_tensor(obs, dtype=torch.float32, device=self.device).view(1, -1)
+        return torch.as_tensor(obs, dtype=torch.float32, device=self.device).view(1, -1)  # env vector -> policy batch.
 
     def _squash_action(self, action: torch.Tensor) -> torch.Tensor:
         return action * self.action_scale + self.action_center
@@ -568,12 +568,12 @@ class SACAgent:
         valid_lengths = valid_mask.sum(dim=1).to(dtype=torch.long)
         burn_tensor = torch.full_like(valid_lengths, burn_in)
         start_index = torch.minimum(burn_tensor, torch.clamp(valid_lengths - 1, min=0))
-        time_index = torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0)
-        return valid_mask * (time_index >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)
+        time_index = torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0)  # [T] -> [1,T].
+        return valid_mask * (time_index >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)  # [B] -> [B,1].
 
     @staticmethod
     def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        weight = mask.unsqueeze(-1).to(dtype=values.dtype)
+        weight = mask.unsqueeze(-1).to(dtype=values.dtype)  # [B,T] -> [B,T,1] for value weighting.
         return (values * weight).sum() / weight.sum().clamp_min(1.0)
 
     def update(self) -> Optional[Dict[str, float]]:
@@ -595,7 +595,7 @@ class SACAgent:
         done_mask_next = torch.cat([torch.ones_like(done_flags[:, :1]), done_flags], dim=1)
 
         def _ensure_time_dim(tensor: torch.Tensor) -> torch.Tensor:
-            return tensor.unsqueeze(1) if tensor.ndim == 2 else tensor
+            return tensor.unsqueeze(1) if tensor.ndim == 2 else tensor  # [B,D] -> [B,1,D] for sequence math.
 
         with torch.no_grad():
             target_obs = torch.cat([batch["obs"][:, :1], batch["next_obs"]], dim=1)

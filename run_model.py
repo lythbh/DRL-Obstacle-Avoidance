@@ -1,4 +1,34 @@
 """Inference script for running a trained PPO or SAC model in Webots."""
+
+# =============================================================================
+# Pipeline Schematic
+# =============================================================================
+# Webots sensors:
+#   LiDAR ranges, GPS xy, accelerometer, gyroscope
+#     -> SensorReader
+# SLAM / spatial preprocessing:
+#   raw LiDAR -> normalized sector minima
+#   GPS + wheel command + gyro -> IEKF pose/heading
+#   LiDAR scan points -> keyframed occupancy map
+#     -> WebotsEnv observation
+# Temporal processing:
+#   flat observation [lidar | pose-goal | IMU | optional occupancy grid]
+#     -> PPO structured GRU/LSTM branches or SAC recurrent encoder
+# Decision:
+#   recurrent policy -> action [steering angle, wheel speed]
+# Actuation:
+#   action clipping -> ALTINO steering and wheel motors -> next Webots step
+#
+# Timing contract:
+#   One env.step(action) applies one motor command, advances Webots by one
+#   basic timestep, updates SLAM once with the same dt, and emits one
+#   observation for one recurrent-policy transition.
+#
+# Normalization contract:
+#   LiDAR sectors and optional occupancy grid are [0, 1]; heading and goal
+#   bearing use sin/cos; IMU acceleration/gyro are clipped and scaled; xy
+#   position remains in world metres and must match the checkpoint contract.
+# =============================================================================
 import argparse
 import time
 from dataclasses import dataclass, fields

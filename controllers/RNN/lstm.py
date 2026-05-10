@@ -173,7 +173,7 @@ class LSTMActorCritic(nn.Module):
             done_mask,
             feature_rank=feature_rank,
         )
-        return tensor.reshape(batch_size, seq_len, *tensor.shape[-feature_rank:])
+        return tensor.reshape(batch_size, seq_len, *tensor.shape[-feature_rank:])  # component -> [B,T,features...].
 
     def _grid_feature_rank(self, grid_tensor: torch.Tensor) -> int:
         if self.grid_shape is None:
@@ -193,13 +193,16 @@ class LSTMActorCritic(nn.Module):
         if self.grid_shape is None:
             raise RuntimeError("occupancy_grid_shape must be configured before CNN grid encoding can be used.")
         expected_flat_dim = int(np.prod(self.grid_shape))
-        grid_flat = grid.reshape(batch_size * seq_len, -1)
+        grid_flat = grid.reshape(batch_size * seq_len, -1)  # collapse batch/time before restoring the grid shape.
         if grid_flat.shape[-1] != expected_flat_dim:
             raise ValueError(
                 f"Grid feature size {grid_flat.shape[-1]} does not match occupancy_grid_shape {self.grid_shape} "
                 f"(expected {expected_flat_dim})."
             )
-        return grid_flat.reshape(batch_size * seq_len, *self.grid_shape)
+        grid_cnn = grid_flat.reshape(batch_size * seq_len, *self.grid_shape)
+        if len(self.grid_shape) == 2:
+            grid_cnn = grid_cnn.unsqueeze(1)  # [B*T,H,W] -> [B*T,1,H,W] for Conv2d.
+        return grid_cnn
 
     def _split_observation(
         self,
@@ -240,7 +243,7 @@ class LSTMActorCritic(nn.Module):
         obs_tensor = torch.as_tensor(observation, dtype=torch.float32, device=next(self.parameters()).device)
         obs_tensor = torch.nan_to_num(obs_tensor, nan=0.0, posinf=1.0, neginf=-1.0)
         batch_size, seq_len = self._infer_batch_time(obs_tensor, recurrent_state, done_mask)
-        obs_tensor = obs_tensor.reshape(batch_size, seq_len, -1)
+        obs_tensor = obs_tensor.reshape(batch_size, seq_len, -1)  # flat env vector -> [B,T,F] before feature slicing.
         obstacle_end = self.obstacle_dim
         pose_goal_end = obstacle_end + self.pose_goal_dim
         imu_end = pose_goal_end + self.imu_dim
@@ -261,22 +264,22 @@ class LSTMActorCritic(nn.Module):
             recurrent_state,
             done_mask,
         )
-        obstacle_latent = self.obstacle_encoder(obstacle.reshape(batch_size * seq_len, -1))
-        pose_goal_latent = self.pose_goal_encoder(pose_goal.reshape(batch_size * seq_len, -1))
-        imu_latent = self.imu_encoder(imu.reshape(batch_size * seq_len, -1))
+        obstacle_latent = self.obstacle_encoder(obstacle.reshape(batch_size * seq_len, -1))  # [B,T,D] -> [B*T,D].
+        pose_goal_latent = self.pose_goal_encoder(pose_goal.reshape(batch_size * seq_len, -1))  # [B,T,D] -> [B*T,D].
+        imu_latent = self.imu_encoder(imu.reshape(batch_size * seq_len, -1))  # [B,T,D] -> [B*T,D].
         encoded_parts = [obstacle_latent, pose_goal_latent, imu_latent]
 
         if grid is not None:
             if self.grid_encoder_cnn is not None:
                 grid_latent = self.grid_encoder_cnn(self._reshape_grid_for_cnn(grid, batch_size, seq_len))
             elif self.grid_encoder_mlp is not None:
-                grid_latent = self.grid_encoder_mlp(grid.reshape(batch_size * seq_len, -1))
+                grid_latent = self.grid_encoder_mlp(grid.reshape(batch_size * seq_len, -1))  # [B,T,G] -> [B*T,G].
             else:
                 raise ValueError("Grid observations were provided but no grid encoder is configured.")
             encoded_parts.append(grid_latent)
 
         latent = torch.cat(encoded_parts, dim=-1)
-        latent = self.encoder(latent).reshape(batch_size, seq_len, -1)
+        latent = self.encoder(latent).reshape(batch_size, seq_len, -1)  # restore recurrent layout [B,T,L].
         return latent, batch_size, seq_len
 
     def _prepare_done_mask(
@@ -290,9 +293,9 @@ class LSTMActorCritic(nn.Module):
             return None
         mask = torch.as_tensor(done_mask, dtype=torch.float32, device=device)
         if mask.ndim == 0:
-            mask = mask.view(1, 1).expand(batch_size, seq_len)
+            mask = mask.view(1, 1).expand(batch_size, seq_len)  # scalar reset flag -> [B,T].
         elif mask.ndim == 1:
-            mask = mask.view(batch_size, seq_len)
+            mask = mask.view(batch_size, seq_len)  # rollout reset vector -> [B,T].
         elif mask.ndim != 2:
             raise ValueError(f"done_mask must be scalar, [T], or [B, T], got shape {tuple(mask.shape)}")
         return mask
@@ -312,7 +315,7 @@ class LSTMActorCritic(nn.Module):
         h_t, c_t = recurrent_state
         if mask is None or not bool((mask[:, 1:] > 0).any().item()):
             if mask is not None:
-                keep = (1.0 - mask[:, 0]).view(1, batch_size, 1)
+                keep = (1.0 - mask[:, 0]).view(1, batch_size, 1)  # [B] -> LSTM state gate [L,B,H].
                 h_t = h_t * keep
                 c_t = c_t * keep
             recurrent_features, (h_t, c_t) = self.lstm(latent, (h_t, c_t))
@@ -320,7 +323,7 @@ class LSTMActorCritic(nn.Module):
             outputs: List[torch.Tensor] = []
             for t in range(seq_len):
                 if mask is not None:
-                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
+                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)  # [B] -> LSTM state gate [L,B,H].
                     h_t = h_t * keep
                     c_t = c_t * keep
                 step_output, (h_t, c_t) = self.lstm(latent[:, t : t + 1], (h_t, c_t))

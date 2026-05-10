@@ -140,13 +140,23 @@ class SLAMProcessor:
     WHEEL_RADIUS: float = 0.033
     N_SECTORS: int = 16
 
-    def __init__(self, lidar_max_range: float, lidar_fov: float, dt: float, goal: Tuple[float, float] = (0.0, 0.0)) -> None:
+    def __init__(
+        self,
+        lidar_max_range: float,
+        lidar_fov: float,
+        dt: float,
+        goal: Tuple[float, float] = (0.0, 0.0),
+        lidar_sector_dim: int = N_SECTORS,
+    ) -> None:
         self._dt = dt
         self._lidar_max_range = lidar_max_range
         self._lidar_max_range_inv = 1.0 / max(lidar_max_range, 1e-6)
         self._lidar_fov = lidar_fov
         self._lidar_angles: Optional[np.ndarray] = None
         self._goal = goal
+        self.n_sectors = int(lidar_sector_dim)
+        if self.n_sectors <= 0:
+            raise ValueError(f"lidar_sector_dim must be positive, got {lidar_sector_dim}.")
 
         if _SLAM_AVAILABLE:
             self.imu_proc: Any = IMUProcessor(dt=dt)
@@ -178,12 +188,12 @@ class SLAMProcessor:
 
     def sector_lidar(self, raw_ranges: np.ndarray) -> np.ndarray:
         valid = np.where((raw_ranges > 0.01) & np.isfinite(raw_ranges), raw_ranges, self._lidar_max_range)
-        remainder = len(valid) % self.N_SECTORS
+        remainder = len(valid) % self.n_sectors
         if remainder:
             valid = np.concatenate(
-                [valid, np.full(self.N_SECTORS - remainder, self._lidar_max_range, dtype=np.float32)]
+                [valid, np.full(self.n_sectors - remainder, self._lidar_max_range, dtype=np.float32)]
             )
-        sectors = valid.reshape(self.N_SECTORS, -1).min(axis=1)
+        sectors = valid.reshape(self.n_sectors, -1).min(axis=1)
         return np.clip(sectors * self._lidar_max_range_inv, 0.0, 1.0).astype(np.float32)
 
     def _scan_to_world(self, raw_ranges: np.ndarray, pos: np.ndarray, heading: float) -> np.ndarray:
@@ -252,6 +262,7 @@ class AltinoDriver:
             lidar_fov=self.sensors.lidar.getFov(),
             dt=self._dt,
             goal=config.endpoint,
+            lidar_sector_dim=config.lidar_sector_dim,
         )
         self._cmd_speed_rads = 0.0
 
@@ -439,7 +450,25 @@ class WebotsEnv:
         _report_slam_status()
         self.config = config
         self.action_dim = 2
-        self.observation_size = config.lidar_sector_dim + config.pose_goal_dim + config.imu_feature_dim
+        self._lidar_sector_dim = int(config.lidar_sector_dim)
+        self._pose_goal_dim = int(config.pose_goal_dim)
+        self._imu_feature_dim = int(config.imu_feature_dim)
+        if self._lidar_sector_dim <= 0:
+            raise ValueError(f"lidar_sector_dim must be positive, got {config.lidar_sector_dim}.")
+        if self._pose_goal_dim != 7:
+            raise ValueError(f"pose_goal_dim must be 7 for the active observation schema, got {config.pose_goal_dim}.")
+        if self._imu_feature_dim != 10:
+            raise ValueError(f"imu_feature_dim must be 10 for the active observation schema, got {config.imu_feature_dim}.")
+        self._occupancy_grid_shape = self._normalize_occupancy_grid_shape(config.occupancy_grid_shape)
+        self._occupancy_grid_size = (
+            int(np.prod(self._occupancy_grid_shape)) if self._occupancy_grid_shape is not None else 0
+        )
+        self.observation_size = (
+            self._lidar_sector_dim
+            + self._pose_goal_dim
+            + self._imu_feature_dim
+            + self._occupancy_grid_size
+        )
         self._endpoint = np.array(config.endpoint, dtype=np.float32)
         self._reference_distance = float(config.reference_distance if config.reference_distance is not None else 1.0)
         self.robot = AltinoDriver(config)
@@ -483,6 +512,19 @@ class WebotsEnv:
         self._episode_count = 0
         print(f"[ENV] SLAM maps: {self.run_folder}", flush=True)
 
+    @staticmethod
+    def _normalize_occupancy_grid_shape(shape: Optional[Tuple[int, ...]]) -> Optional[Tuple[int, ...]]:
+        if shape is None:
+            return None
+        grid_shape = tuple(int(dim) for dim in shape)
+        if len(grid_shape) not in {2, 3}:
+            raise ValueError("occupancy_grid_shape must be (H, W) or (1, H, W).")
+        if any(dim <= 0 for dim in grid_shape):
+            raise ValueError(f"occupancy_grid_shape dimensions must be positive, got {shape}.")
+        if len(grid_shape) == 3 and grid_shape[0] != 1:
+            raise ValueError("WebotsEnv emits a single occupancy channel; use shape (1, H, W).")
+        return grid_shape
+
     def _reset_episode_state(self) -> None:
         self.current_step = 0
         self.prev_distance = None
@@ -499,6 +541,32 @@ class WebotsEnv:
         goal_direction = float(np.arctan2(goal_vec[1], goal_vec[0]))
         goal_error = float(np.arctan2(np.sin(goal_direction - heading), np.cos(goal_direction - heading)))
         return goal_distance, goal_error
+
+    def _occupancy_grid_observation(self) -> np.ndarray:
+        if self._occupancy_grid_shape is None:
+            return np.empty((0,), dtype=np.float32)
+
+        if len(self._occupancy_grid_shape) == 2:
+            height, width = self._occupancy_grid_shape
+        else:
+            _, height, width = self._occupancy_grid_shape
+
+        log_odds: Optional[np.ndarray] = None
+        if _SLAM_AVAILABLE and self.robot.slam.slam_map is not None:
+            log_odds = self.robot.slam.slam_map.occ_map.log_odds
+
+        if log_odds is None:
+            grid_2d = np.full((height, width), 0.5, dtype=np.float32)
+        else:
+            row_idx = np.linspace(0, log_odds.shape[0] - 1, height).astype(np.int64)
+            col_idx = np.linspace(0, log_odds.shape[1] - 1, width).astype(np.int64)
+            sampled_log_odds = log_odds[np.ix_(row_idx, col_idx)]
+            grid_2d = (1.0 / (1.0 + np.exp(-sampled_log_odds))).astype(np.float32)
+
+        grid_2d = np.nan_to_num(np.clip(grid_2d, 0.0, 1.0), nan=0.5, posinf=1.0, neginf=0.0)
+        if len(self._occupancy_grid_shape) == 3:
+            return grid_2d.reshape(1, height, width).reshape(-1)  # [1,H,W] -> flat grid tail for the RNN.
+        return grid_2d.reshape(-1)  # [H,W] -> flat grid tail for the RNN.
 
     def _build_observation(
         self,
@@ -527,6 +595,7 @@ class WebotsEnv:
             gyro_norm = np.zeros(3, dtype=np.float32)
             quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
 
+        grid_features = self._occupancy_grid_observation()
         observation = np.concatenate([
             lidar_sectors,
             pos,
@@ -534,7 +603,12 @@ class WebotsEnv:
             accel_norm,
             gyro_norm,
             quat,
+            grid_features,
         ]).astype(np.float32)
+        if observation.size != self.observation_size:
+            raise RuntimeError(
+                f"Observation size {observation.size} does not match configured size {self.observation_size}."
+            )
         return np.nan_to_num(observation, nan=0.0, posinf=1.0, neginf=-1.0)
 
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
