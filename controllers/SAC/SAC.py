@@ -15,7 +15,7 @@ from torch import nn
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from controllers.Webots import WebotsEnv, _init_supervisor
-from controllers.reward_defaults import (
+from controllers.common.reward_defaults import (
     COLLISION_THRESHOLD,
     COLLISION_PENALTY,
     DISTANCE_REWARD_SCALE,
@@ -54,7 +54,7 @@ from controllers.reward_defaults import (
     START_YAW_NOISE,
     STEP_PENALTY,
 )
-from controllers.training_defaults import RecurrentDefaults, SACDefaults
+from controllers.common.training_defaults import RecurrentDefaults, SACDefaults
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"

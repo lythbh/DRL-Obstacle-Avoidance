@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
-from controllers.reward_defaults import (
+from controllers.common.reward_defaults import (
     COLLISION_PENALTY,
     DISTANCE_REWARD_SCALE,
     GOAL_HOLD_REWARD,

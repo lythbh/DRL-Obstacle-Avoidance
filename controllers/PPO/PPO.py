@@ -15,7 +15,7 @@ RecurrentState = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
-from controllers.reward_defaults import (
+from controllers.common.reward_defaults import (
     COLLISION_THRESHOLD,
     COLLISION_PENALTY,
     DISTANCE_REWARD_SCALE,
@@ -54,7 +54,7 @@ from controllers.reward_defaults import (
     START_YAW_NOISE,
     STEP_PENALTY,
 )
-from controllers.training_defaults import PPODefaults, RecurrentDefaults
+from controllers.common.training_defaults import PPODefaults, RecurrentDefaults
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
