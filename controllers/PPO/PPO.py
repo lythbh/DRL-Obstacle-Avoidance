@@ -89,16 +89,24 @@ def _load_checkpoint(path: str, map_location: Union[str, torch.device]) -> Dict[
 # CONFIGURATION
 # ============================================================================
 
+
 """
 Sections:
- - Config: dataclass encapsulating hyperparameters for environment and optimizer
- - PPOAgent: recurrent actor-critic model wrapper with action sampling and update logic
- - train(): high-level training loop that interacts with Webots and checkpoints models
+ - Config: Training and environment hyperparameters
+ - PPOAgent: Recurrent actor-critic model with policy and value updates
+ - train(): Main training loop integrating environment, rollout, and optimization
 """
 
 @dataclass
 class Config:
-    """Training and environment hyperparameters."""
+    """
+    Training and environment hyperparameters for PPO.
+    
+    Consolidates all hyperparameters for the actor-critic optimization algorithm
+    (learning rates, batch size, epochs, entropy coefficient) and environment
+    configuration (reward shaping, action bounds, episode setup). Validation in
+    __post_init__ ensures internal consistency.
+    """
     
     episodes: int = PPODefaults.episodes
     update_every: int = PPODefaults.update_every
@@ -206,11 +214,26 @@ class Config:
 
 
 # ============================================================================
-# PPO AGENT
+# PROXIMAL POLICY OPTIMIZATION AGENT
 # ============================================================================
 
+
 class PPOAgent:
-    """Proximal Policy Optimization agent with a recurrent actor-critic core."""
+    """
+    Proximal Policy Optimization (PPO) agent with recurrent actor-critic network.
+    
+    Maintains a shared recurrent feature encoder with separate policy and value heads.
+    Optimizes the policy using the PPO algorithm: clipped surrogate objective for stability
+    and shared critic loss for value estimation. Entropy regularization encourages exploration.
+    
+    Sections:
+    - Model construction and device management
+    - Checkpoint metadata and validation
+    - Action bounds and policy distribution
+    - Action sampling for rollouts
+    - Trajectory processing and advantage computation
+    - Policy evaluation and optimization
+    """
 
     def __init__(self, obs_size: int, action_dim: int, config: Config):
         self.config = config
@@ -309,7 +332,12 @@ class PPOAgent:
         return low, high
 
     def _policy_stats(self, policy_output: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Return numerically stable mean and standard deviation for the policy."""
+        """
+        Extract mean and log-standard deviation from policy network output.
+        
+        Includes numerical stability measures: clamping log-std to valid bounds
+        and replacing NaN/inf values with defaults.
+        """
         policy_output = torch.nan_to_num(policy_output, nan=0.0, posinf=1.0, neginf=-1.0)
         safe_actor_log_std = torch.nan_to_num(self.actor_log_std, nan=-0.5, posinf=2.0, neginf=-5.0)
         safe_actor_log_std = safe_actor_log_std.clamp(-5.0, 2.0)
@@ -318,7 +346,12 @@ class PPOAgent:
         return policy_output, std
 
     def _action_distribution(self, mean: torch.Tensor, std: torch.Tensor) -> TransformedDistribution:
-        """Construct the bounded Gaussian policy used for action selection and PPO updates."""
+        """
+        Construct the policy distribution with bounded action space.
+        
+        Uses a tanh squashing transformation to map unbounded Gaussian samples to the
+        environment action bounds via affine transformation.
+        """
         low, high = self._action_bounds()
         center = (high + low) / 2.0
         scale = (high - low) / 2.0
@@ -329,12 +362,12 @@ class PPOAgent:
         )
 
     def _entropy_estimate(self, action_distribution: TransformedDistribution) -> torch.Tensor:
-        """Estimate the entropy of the bounded policy with a reparameterized sample."""
+        """Estimate policy entropy by sampling and computing log probability."""
         action_sample = action_distribution.rsample()
         return -action_distribution.log_prob(action_sample)
 
     def _squash_action(self, pre_tanh_action: torch.Tensor) -> torch.Tensor:
-        """Map unconstrained actions to environment action bounds."""
+        """Rescale action from [-1, 1] to environment action bounds."""
         low, high = self._action_bounds()
         center = (high + low) / 2.0
         scale = (high - low) / 2.0
@@ -350,7 +383,12 @@ class PPOAgent:
         done: bool = False,
         deterministic: bool = False,
     ) -> Tuple[np.ndarray, torch.Tensor, torch.Tensor, RecurrentState]:
-        """Sample a single action and advance the recurrent state."""
+        """
+        Sample an action from the policy for environment interaction.
+        
+        Returns action as numpy array and state value for advantage estimation,
+        along with log probability for policy gradient computation.
+        """
         done_mask = torch.tensor([float(done)], dtype=torch.float32, device=self.device)
         with torch.no_grad():
             policy_output, state_value, next_state = self.model(
@@ -370,7 +408,7 @@ class PPOAgent:
         )
 
     def calculate_returns(self, rewards: np.ndarray, bootstrap_value: float = 0.0) -> np.ndarray:
-        """Calculate cumulative discounted returns."""
+        """Compute discounted cumulative returns for advantage calculation."""
         returns = np.zeros(len(rewards), dtype=np.float32)
         discounted_return = float(bootstrap_value)
         for t in reversed(range(len(rewards))):
@@ -382,7 +420,12 @@ class PPOAgent:
         self,
         trajectories: List[Dict[str, np.ndarray]],
     ) -> Dict[str, torch.Tensor]:
-        """Pad variable-length episode trajectories to a batch of sequences."""
+        """
+        Pad variable-length trajectories into a fixed-size batch for GPU computation.
+        
+        Converts numpy arrays to tensors and pads sequences to the maximum length in the batch,
+        with masks indicating valid (non-padded) elements.
+        """
         obs_tensors = [torch.as_tensor(t["observations"], dtype=torch.float32, device=self.device) for t in trajectories]
         act_tensors = [torch.as_tensor(t["actions"], dtype=torch.float32, device=self.device) for t in trajectories]
         logp_tensors = [torch.as_tensor(t["log_probs"], dtype=torch.float32, device=self.device) for t in trajectories]
@@ -415,7 +458,12 @@ class PPOAgent:
         }
 
     def _split_trajectories(self, trajectories: List[Dict[str, np.ndarray]]) -> List[Dict[str, np.ndarray]]:
-        """Split full episodes into short recurrent windows for PPO updates."""
+        """
+        Split full episodes into overlapping shorter sequences for recurrent network updates.
+        
+        Uses a sliding window with configured stride to create training sequences,
+        allowing the recurrent network to maintain state continuity.
+        """
         chunked_trajectories: List[Dict[str, np.ndarray]] = []
         chunk_length = self.config.sequence_length
         chunk_stride = self.config.sequence_stride
@@ -431,6 +479,7 @@ class PPOAgent:
         return chunked_trajectories
 
     def _sanitize_trajectories(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
+        """Replace NaN and inf values in trajectory data with safe defaults."""
         for trajectory in trajectories:
             trajectory["observations"] = np.nan_to_num(
                 trajectory["observations"], nan=0.0, posinf=1.0, neginf=-1.0
@@ -449,6 +498,7 @@ class PPOAgent:
             ).astype(np.float32)
 
     def _normalize_advantages(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
+        """Normalize advantages across all trajectories to zero mean and unit variance."""
         all_advantages = np.concatenate([t["advantages"] for t in trajectories], axis=0)
         adv_mean = float(all_advantages.mean())
         adv_std = float(all_advantages.std() + 1e-8)
@@ -456,6 +506,12 @@ class PPOAgent:
             trajectory["advantages"] = ((trajectory["advantages"] - adv_mean) / adv_std).astype(np.float32)
 
     def _update_batch(self, batch: Dict[str, torch.Tensor]) -> None:
+        """
+        Perform a single PPO policy gradient update on one batch of data.
+        
+        Computes clipped surrogate objective for policy, smooth L1 loss for value estimation,
+        and entropy regularization. Applies gradient clipping for stability.
+        """
         log_probs_new, values, entropy = self.evaluate_sequences(
             batch["observations"],
             batch["actions"],
@@ -514,7 +570,11 @@ class PPOAgent:
         actions: torch.Tensor,
         done_mask: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Evaluate PPO quantities over full recurrent sequences."""
+        """
+        Evaluate policy log probabilities, state values, and entropy over full sequences.
+        
+        Used during policy updates to compute the policy gradient and critic loss.
+        """
         policy_output, state_values, _ = self.model(
             observations,
             recurrent_state=self.get_initial_state(observations.shape[0]),
@@ -527,7 +587,12 @@ class PPOAgent:
         return log_probs, state_values, entropy
 
     def update(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
-        """Update the recurrent PPO policy from complete episodes."""
+        """
+        Update policy from a collection of complete episodes.
+        
+        Processes trajectories through sanitization, advantage normalization, and splitting
+        into sequences. Then performs multiple epochs of SGD with batch updates.
+        """
         if not trajectories:
             return
 
@@ -547,7 +612,11 @@ class PPOAgent:
                 self._update_batch(batch)
 
     def load_model(self, model_path: str) -> None:
-        """Load saved recurrent model weights."""
+        """
+        Load a saved PPO checkpoint and restore the recurrent model.
+        
+        Validates checkpoint metadata and rebuilds the recurrent cell if needed.
+        """
         checkpoint = _load_checkpoint(model_path, map_location=self.device)
         checkpoint_algorithm = str(checkpoint.get("algorithm", "ppo")).lower().strip()
         if checkpoint_algorithm != "ppo":
@@ -572,11 +641,17 @@ class PPOAgent:
 
 
 # ============================================================================
-# TRAINING
+# TRAINING LOOP
 # ============================================================================
 
+
 def train(config: Optional[Config] = None) -> None:
-    """Run PPO training loop.
+    """
+    Main training loop integrating environment interaction, rollout collection, and policy updates.
+    
+    Collects on-policy experience by rolling out the current policy in the Webots simulator,
+    accumulates returns and advantages, and performs periodic PPO updates. Maintains metrics
+    for progress tracking and saves checkpoints of the best models.
     
     Args:
         config: Configuration object (uses defaults if None)

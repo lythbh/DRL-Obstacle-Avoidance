@@ -85,17 +85,21 @@ def _load_checkpoint(path: str, map_location: torch.device) -> Dict[str, Any]:
         return torch.load(path, map_location=map_location)
 
 
-# --- Configuration and checkpoint metadata ---------------------------------
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
 
-"""
-Sections:
- - Config: dataclass holding SAC hyperparameters and runtime defaults
- - Networks: recurrent encoder, Gaussian actor and Q-networks
- - SACAgent: training logic, checkpointing and policy sampling
- - train(): top-level loop integrating environment, replay buffer, and optimization
-"""
+
 @dataclass
 class Config:
+    """
+    Training and environment hyperparameters for SAC.
+    
+    This dataclass consolidates all tunable parameters for the algorithm
+    (learning rates, entropy tuning, network architecture) and the environment
+    (reward shaping, action bounds, episode configuration). Validation in
+    __post_init__ ensures consistency across interdependent parameters.
+    """
     episodes: int = SACDefaults.episodes
     update_after_steps: int = SACDefaults.update_after_steps
     updates_per_step: int = SACDefaults.updates_per_step
@@ -199,7 +203,15 @@ class Config:
 
 
 class SequenceReplayBuffer:
-    """Small ring buffer of fixed-length recurrent windows for fast off-policy SAC updates."""
+    """
+    Fixed-length recurrent replay buffer for efficient SAC off-policy updates.
+    
+    Stores variable-length episodes as overlapping fixed-size windows using a ring buffer.
+    This approach enables efficient recurrent network processing by pre-allocating storage
+    for sequences of observation-action pairs. Each episode is split into windows of
+    length sequence_length with stride sequence_stride, allowing the recurrent network
+    to maintain state continuity during learning.
+    """
 
     def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
         self.capacity = config.replay_capacity
@@ -290,8 +302,20 @@ class SequenceReplayBuffer:
             "valid_mask": torch.as_tensor(self.valid_mask[indices], dtype=torch.float32, device=device),
         }
 
-# --- Shared recurrent encoder and policy/value heads ------------------------
+# ============================================================================
+# RECURRENT ENCODER AND POLICY/VALUE NETWORKS
+# ============================================================================
+
+
 class RecurrentEncoder(nn.Module):
+    """
+    Shared recurrent feature encoder for actor and critic networks.
+    
+    Processes observations through a trunk of dense layers followed by either GRU or LSTM.
+    The recurrent core maintains hidden state across time, enabling the network to learn
+    temporal patterns in the observation sequence. Episode boundaries (indicated by
+    done_mask) reset the hidden state to prevent information leakage between episodes.
+    """
     def __init__(self, obs_size: int, config: Config) -> None:
         super().__init__()
         self.cell = config.recurrent_cell
@@ -337,13 +361,19 @@ class RecurrentEncoder(nn.Module):
         seq_len: int,
         device: torch.device,
     ) -> Optional[torch.Tensor]:
+        """
+        Convert done_mask to a standard [B, T] tensor for state reset across batches and sequences.
+        
+        Handles three input formats: scalar (broadcast), [T] (apply to all batches), or [B, T].
+        When a done flag is true, the recurrent state is reset at that timestep.
+        """
         if done_mask is None:
             return None
         mask = torch.as_tensor(done_mask, dtype=torch.float32, device=device)
         if mask.ndim == 0:
-            mask = mask.view(1, 1).expand(batch_size, seq_len)  # scalar reset flag -> [B,T].
+            mask = mask.view(1, 1).expand(batch_size, seq_len)
         elif mask.ndim == 1:
-            mask = mask.view(batch_size, seq_len)  # rollout reset vector -> [B,T].
+            mask = mask.view(batch_size, seq_len)
         elif mask.ndim != 2:
             raise ValueError(f"done_mask must be scalar, [T], or [B, T], got shape {tuple(mask.shape)}")
         return mask
@@ -357,11 +387,11 @@ class RecurrentEncoder(nn.Module):
         obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=next(self.parameters()).device)
         obs_tensor = torch.nan_to_num(obs_tensor, nan=0.0, posinf=1.0, neginf=-1.0)
         if obs_tensor.ndim == 1:
-            obs_tensor = obs_tensor.view(1, 1, -1)  # single env observation -> [B,T,F].
+            obs_tensor = obs_tensor.view(1, 1, -1)
         elif obs_tensor.ndim == 2:
-            obs_tensor = obs_tensor.unsqueeze(1)  # batch of observations -> [B,1,F].
+            obs_tensor = obs_tensor.unsqueeze(1)
         batch_size, seq_len = obs_tensor.shape[:2]
-        latent = self.trunk(obs_tensor.reshape(batch_size * seq_len, -1)).reshape(batch_size, seq_len, -1)  # [B,T,F] -> [B,T,H].
+        latent = self.trunk(obs_tensor.reshape(batch_size * seq_len, -1)).reshape(batch_size, seq_len, -1)
         if self.core is None:
             return latent.squeeze(1) if seq_len == 1 else latent, None
         state = recurrent_state if recurrent_state is not None else self.get_initial_state(batch_size)
@@ -375,7 +405,7 @@ class RecurrentEncoder(nn.Module):
             h_t, c_t = state
             for t in range(seq_len):
                 if mask is not None:
-                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)  # [B] -> LSTM state gate [L,B,H].
+                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
                     h_t = h_t * keep
                     c_t = c_t * keep
                 step_out, (h_t, c_t) = self.core(latent[:, t : t + 1], (h_t, c_t))
@@ -385,7 +415,7 @@ class RecurrentEncoder(nn.Module):
             h_t = state
             for t in range(seq_len):
                 if mask is not None:
-                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)  # [B] -> GRU state gate [L,B,H].
+                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
                     h_t = h_t * keep
                 step_out, h_t = self.core(latent[:, t : t + 1], h_t)
                 outputs.append(step_out)
@@ -396,6 +426,14 @@ class RecurrentEncoder(nn.Module):
 
 
 class GaussianActor(nn.Module):
+    """
+    Stochastic policy network parameterized as a Gaussian distribution.
+    
+    Outputs mean and log-standard-deviation of an action distribution.
+    The actual action is sampled via reparameterization and then squashed to
+    environment action bounds using tanh. This enables gradient-based optimization
+    of the policy through differentiable sampling.
+    """
     def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
         super().__init__()
         self.encoder = RecurrentEncoder(obs_size, config)
@@ -416,6 +454,13 @@ class GaussianActor(nn.Module):
 
 
 class QNetwork(nn.Module):
+    """
+    Critic network that estimates state-action value (Q-function).
+    
+    Concatenates encoded recurrent features with the action vector and passes
+    through dense layers to produce a scalar Q-value estimate. SAC maintains
+    two independent Q-networks to stabilize learning via double Q-learning.
+    """
     def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
         super().__init__()
         self.encoder = RecurrentEncoder(obs_size, config)
@@ -443,8 +488,29 @@ class QNetwork(nn.Module):
         return self.head(torch.cat([features, action], dim=-1)), next_state
 
 
-# --- SAC agent and optimization logic --------------------------------------
+# ============================================================================
+# SOFT ACTOR-CRITIC AGENT
+# ============================================================================
+
+
 class SACAgent:
+    """
+    Soft Actor-Critic implementation for continuous control in recurrent settings.
+    
+    Maintains separate networks for the stochastic policy (actor) and value estimation
+    (critics Q1, Q2, and targets). The algorithm optimizes the policy to maximize
+    expected return while maintaining entropy regularization for exploration. Entropy
+    coefficient alpha is either fixed or automatically tuned via automatic entropy
+    temperature adjustment.
+    
+    Sections:
+    - Device and network initialization
+    - State management
+    - Checkpoint metadata and validation
+    - Action sampling and squashing
+    - Policy updates (actor and critics)
+    - Soft target updates
+    """
     def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
         self.config = config
         self.device = self._get_device()
@@ -562,9 +628,11 @@ class SACAgent:
                 )
 
     def _tensor_obs(self, obs: np.ndarray) -> torch.Tensor:
-        return torch.as_tensor(obs, dtype=torch.float32, device=self.device).view(1, -1)  # env vector -> policy batch.
+        """Convert environment observation to batched tensor format for policy network."""
+        return torch.as_tensor(obs, dtype=torch.float32, device=self.device).view(1, -1)
 
     def _squash_action(self, action: torch.Tensor) -> torch.Tensor:
+        """Rescale action from [-1, 1] to environment bounds."""
         return action * self.action_scale + self.action_center
 
     def _sample_policy(
@@ -574,6 +642,12 @@ class SACAgent:
         done_mask: Optional[torch.Tensor] = None,
         deterministic: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[Any]]:
+        """
+        Sample action from the policy and compute its log probability.
+        
+        When deterministic=False, samples via reparameterization. Log probability is adjusted
+        for the tanh squashing using the Jacobian correction to account for the bounded action space.
+        """
         mean, log_std, next_state = self.actor(obs, recurrent_state=recurrent_state, done_mask=done_mask)
         log_std = log_std.clamp(self.config.log_std_min, self.config.log_std_max)
         std = log_std.exp()
@@ -593,6 +667,12 @@ class SACAgent:
         done: bool = False,
         deterministic: bool = False,
     ) -> Tuple[np.ndarray, Optional[Any]]:
+        """
+        Select a single action for environment interaction.
+        
+        Wraps numpy observation as a batch tensor, queries the policy, and returns
+        action as numpy along with the updated recurrent state.
+        """
         done_mask = torch.tensor([float(done)], dtype=torch.float32, device=self.device)
         with torch.no_grad():
             action, _, next_state = self._sample_policy(
@@ -604,21 +684,29 @@ class SACAgent:
         return action.squeeze(0).cpu().numpy(), next_state
 
     def _soft_update(self, source: nn.Module, target: nn.Module) -> None:
+        """Update target network via exponential moving average with the source network."""
         tau = self.config.tau
         for target_param, source_param in zip(target.parameters(), source.parameters()):
             target_param.data.mul_(1.0 - tau).add_(source_param.data, alpha=tau)
 
     @staticmethod
     def _sequence_loss_mask(valid_mask: torch.Tensor, burn_in: int) -> torch.Tensor:
+        """
+        Create a mask for loss computation, zeroing out burn-in steps in each sequence.
+        
+        Burn-in allows the recurrent network to warm up its hidden state before learning
+        begins. The mask respects sequence boundaries (where valid_mask indicates valid timesteps).
+        """
         valid_lengths = valid_mask.sum(dim=1).to(dtype=torch.long)
         burn_tensor = torch.full_like(valid_lengths, burn_in)
         start_index = torch.minimum(burn_tensor, torch.clamp(valid_lengths - 1, min=0))
-        time_index = torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0)  # [T] -> [1,T].
-        return valid_mask * (time_index >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)  # [B] -> [B,1].
+        time_index = torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0)
+        return valid_mask * (time_index >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)
 
     @staticmethod
     def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        weight = mask.unsqueeze(-1).to(dtype=values.dtype)  # [B,T] -> [B,T,1] for value weighting.
+        """Compute mean of values over valid (masked) elements."""
+        weight = mask.unsqueeze(-1).to(dtype=values.dtype)
         return (values * weight).sum() / weight.sum().clamp_min(1.0)
 
     def _build_episode_batch(
@@ -629,6 +717,12 @@ class SACAgent:
         episode_next_obs: List[np.ndarray],
         episode_dones: List[bool],
     ) -> Optional[Dict[str, torch.Tensor]]:
+        """
+        Convert a complete episode to a tensor batch suitable for network forward pass.
+        
+        Adds a batch dimension and converts all numpy arrays to torch tensors.
+        Returns None if the episode is empty.
+        """
         if not episode_obs:
             return None
 
@@ -649,6 +743,14 @@ class SACAgent:
         }
 
     def _build_update_masks(self, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Construct masks for loss computation and recurrent state resets.
+        
+        Returns:
+        - learn_mask: Mask for computing loss (zeros out burn-in steps)
+        - done_mask_obs: Reset mask for current observations
+        - done_mask_next: Reset mask for next observations
+        """
         valid_mask = batch["valid_mask"]
         burn_in = min(self.config.burn_in, batch["obs"].shape[1] - 1)
         learn_mask = self._sequence_loss_mask(valid_mask, burn_in)
@@ -667,6 +769,13 @@ class SACAgent:
         done_mask_obs: torch.Tensor,
         done_mask_next: torch.Tensor,
     ) -> torch.Tensor:
+        """
+        Compute critic loss and update Q-networks via temporal difference (TD) error.
+        
+        Computes the target Q-value using the target networks and next action samples,
+        then minimizes MSE between current Q-estimates and the target. Entropy is included
+        in the target to encourage exploration.
+        """
         scaled_rewards = batch["rewards"] * REWARD_SCALE
 
         def _ensure_time_dim(tensor: torch.Tensor) -> torch.Tensor:
@@ -699,6 +808,13 @@ class SACAgent:
         learn_mask: torch.Tensor,
         done_mask_obs: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Update policy (actor) and entropy temperature (alpha).
+        
+        Actor loss encourages the policy to take actions that maximize Q-values
+        while maintaining controlled entropy. Alpha is tuned to keep actual entropy
+        near the target entropy via automatic entropy temperature adjustment.
+        """
         new_action, log_prob, _ = self._sample_policy(batch["obs"], done_mask=done_mask_obs, deterministic=False)
         q1_pi, _ = self.q1(batch["obs"], new_action, done_mask=done_mask_obs)
         q2_pi, _ = self.q2(batch["obs"], new_action, done_mask=done_mask_obs)
@@ -718,6 +834,12 @@ class SACAgent:
         return actor_loss, alpha_loss
 
     def update(self, batch: Dict[str, torch.Tensor]) -> Optional[Dict[str, float]]:
+        """
+        Perform a complete SAC update step: update both critics and the actor.
+        
+        Applies gradient clipping and soft target network updates. Returns a dictionary
+        of logged metrics (losses and entropy coefficient) or None if the batch is empty.
+        """
         if batch["obs"].shape[1] <= 0:
             return None
 
@@ -752,7 +874,8 @@ class SACAgent:
         }
 
     def checkpoint(self, episode: Any, reward: float) -> Dict[str, Any]:
-        checkpoint = {
+        """Create a checkpoint dictionary containing all model and optimizer state."""
+        checkpoint = {    
             "episode": episode,
             "reward": reward,
             "algorithm": "sac",
@@ -771,9 +894,11 @@ class SACAgent:
         return checkpoint
 
     def save(self, path: str, episode: Any, reward: float) -> None:
+        """Save checkpoint to disk."""
         torch.save(self.checkpoint(episode, reward), path)
 
     def load(self, path: str) -> Dict[str, Any]:
+        """Load checkpoint from disk and restore all model and optimizer state."""
         checkpoint = _load_checkpoint(path, map_location=self.device)
         checkpoint_algorithm = str(checkpoint.get("algorithm", "sac")).lower().strip()
         if checkpoint_algorithm != "sac":
@@ -793,8 +918,19 @@ class SACAgent:
         return checkpoint
 
 
-# --- Training entry point ---------------------------------------------------
+# ============================================================================
+# TRAINING LOOP
+# ============================================================================
+
+
 def train(config: Optional[Config] = None) -> None:
+    """
+    Main training loop integrating environment interaction, replay buffer, and optimization.
+    
+    Collects experience by rolling out the current policy in the Webots simulator,
+    stores transitions in the replay buffer, and performs off-policy SAC updates.
+    Maintains metrics for progress tracking and saves checkpoints for model evaluation.
+    """
     if config is None:
         config = Config()
 
