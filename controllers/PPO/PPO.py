@@ -59,30 +59,36 @@ from controllers.training_defaults import PPODefaults, RecurrentDefaults
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 
+# Use shared checkpoint helpers to avoid duplication across controllers.
+from controllers.common.checkpoints import (
+    checkpoint_path as _shared_checkpoint_path,
+    run_checkpoint_dir as _shared_run_checkpoint_dir,
+    run_checkpoint_path as _shared_run_checkpoint_path,
+    load_checkpoint as _shared_load_checkpoint,
+    make_checkpoint_header as _make_checkpoint_header,
+    save_checkpoint_file as _save_checkpoint_file,
+)
+
 
 def _checkpoint_path(filename: str) -> str:
-    """Return a checkpoint path pinned to the PPO controller directory."""
-    return str(_CONTROLLER_DIR / filename)
+    """Controller-local wrapper around shared `checkpoint_path` helper."""
+    return _shared_checkpoint_path(_CONTROLLER_DIR, filename)
 
 
 def _run_checkpoint_dir(run_id: str) -> Path:
-    """Return the checkpoint folder for a training run."""
-    checkpoint_dir = _CHECKPOINT_DIR / run_id
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    return checkpoint_dir
+    """Controller-local wrapper around shared `run_checkpoint_dir` helper."""
+    return _shared_run_checkpoint_dir(_CHECKPOINT_DIR, run_id)
 
 
 def _run_checkpoint_path(run_id: str, prefix: str, extension: str = "pth") -> str:
-    """Return a timestamped checkpoint file path inside the run folder."""
-    return str(_run_checkpoint_dir(run_id) / f"{prefix}_{run_id}.{extension}")
+    """Controller-local wrapper around shared `run_checkpoint_path` helper."""
+    return _shared_run_checkpoint_path(_CHECKPOINT_DIR, run_id, prefix, extension)
 
 
 def _load_checkpoint(path: str, map_location: Union[str, torch.device]) -> Dict[str, Any]:
-    """Load local controller checkpoints without relying on PyTorch's changing default."""
-    try:
-        return torch.load(path, map_location=map_location, weights_only=False)
-    except TypeError:
-        return torch.load(path, map_location=map_location)
+    """Controller-local wrapper around shared `load_checkpoint` helper."""
+    return _shared_load_checkpoint(path, map_location)
+
 
 
 # ============================================================================
@@ -796,46 +802,25 @@ def train(config: Optional[Config] = None) -> None:
                 best_goal_reward = episode_reward_sum
                 best_goal_episode = episode + 1
                 env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward_sum)
-                checkpoint = {
-                    'model': agent.model.state_dict(),
-                    'actor_log_std': agent.actor_log_std.detach().cpu(),
-                    'episode': best_goal_episode,
-                    'reward': best_goal_reward,
-                    'goal_episode': True,
-                    'algorithm': 'ppo',
-                    'config': asdict(config),
-                }
-                checkpoint.update(agent._checkpoint_metadata())
-                torch.save(checkpoint, _run_checkpoint_path(run_id, 'best'))
+                header = _make_checkpoint_header(best_goal_episode, best_goal_reward, True, 'ppo', asdict(config))
+                header.update(agent._checkpoint_metadata())
+                header.update({'model': agent.model.state_dict(), 'actor_log_std': agent.actor_log_std.detach().cpu()})
+                _save_checkpoint_file(_CHECKPOINT_DIR, run_id, 'best', header)
                 checkpoint_flags.append("best_goal")
         elif best_goal_episode is None and episode_reward_sum > best_reward:
             best_reward = episode_reward_sum
             env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward_sum)
-            checkpoint = {
-                'model': agent.model.state_dict(),
-                'actor_log_std': agent.actor_log_std.detach().cpu(),
-                'episode': episode + 1,
-                'reward': best_reward,
-                'goal_episode': False,
-                'algorithm': 'ppo',
-                'config': asdict(config),
-            }
-            checkpoint.update(agent._checkpoint_metadata())
-            torch.save(checkpoint, _run_checkpoint_path(run_id, 'best'))
+            header = _make_checkpoint_header(episode + 1, best_reward, False, 'ppo', asdict(config))
+            header.update(agent._checkpoint_metadata())
+            header.update({'model': agent.model.state_dict(), 'actor_log_std': agent.actor_log_std.detach().cpu()})
+            _save_checkpoint_file(_CHECKPOINT_DIR, run_id, 'best', header)
             checkpoint_flags.append("best")
 
         if config.save_every > 0 and (episode + 1) % config.save_every == 0:
-            latest_checkpoint = {
-                'model': agent.model.state_dict(),
-                'actor_log_std': agent.actor_log_std.detach().cpu(),
-                'episode': episode + 1,
-                'reward': episode_reward_sum,
-                'goal_episode': episode_end_reason == "goal",
-                'algorithm': 'ppo',
-                'config': asdict(config),
-            }
-            latest_checkpoint.update(agent._checkpoint_metadata())
-            torch.save(latest_checkpoint, _run_checkpoint_path(run_id, 'checkpoint'))
+            latest = _make_checkpoint_header(episode + 1, episode_reward_sum, episode_end_reason == "goal", 'ppo', asdict(config))
+            latest.update(agent._checkpoint_metadata())
+            latest.update({'model': agent.model.state_dict(), 'actor_log_std': agent.actor_log_std.detach().cpu()})
+            _save_checkpoint_file(_CHECKPOINT_DIR, run_id, 'checkpoint', latest)
             checkpoint_flags.append("latest")
 
         rolling_reward = float(np.mean(reward_window[-10:]))
@@ -859,17 +844,10 @@ def train(config: Optional[Config] = None) -> None:
     
     # Save final model
     final_reward = best_goal_reward if best_goal_episode is not None else best_reward
-    checkpoint = {
-        'model': agent.model.state_dict(),
-        'actor_log_std': agent.actor_log_std.detach().cpu(),
-        'episode': 'final',
-        'reward': final_reward,
-        'goal_episode': best_goal_episode is not None,
-        'algorithm': 'ppo',
-        'config': asdict(config),
-    }
-    checkpoint.update(agent._checkpoint_metadata())
-    torch.save(checkpoint, final_model_path)
+    header = _make_checkpoint_header('final', final_reward, best_goal_episode is not None, 'ppo', asdict(config))
+    header.update(agent._checkpoint_metadata())
+    header.update({'model': agent.model.state_dict(), 'actor_log_std': agent.actor_log_std.detach().cpu()})
+    _save_checkpoint_file(_CHECKPOINT_DIR, run_id, 'final', header)
     elapsed = time.perf_counter() - start_time
     print(f"[TRAIN][PPO] final reward={final_reward:.2f} t={elapsed:7.1f}s", flush=True)
 

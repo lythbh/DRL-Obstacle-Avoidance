@@ -59,30 +59,34 @@ from controllers.training_defaults import RecurrentDefaults, SACDefaults
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 
+# Use shared checkpoint helpers to avoid duplication across controllers.
+from controllers.common.checkpoints import (
+    checkpoint_path as _shared_checkpoint_path,
+    run_checkpoint_dir as _shared_run_checkpoint_dir,
+    run_checkpoint_path as _shared_run_checkpoint_path,
+    load_checkpoint as _shared_load_checkpoint,
+    save_checkpoint_file as _save_checkpoint_file,
+)
+
 
 def _checkpoint_path(filename: str) -> str:
-    """Return a checkpoint path pinned to the SAC controller directory."""
-    return str(_CONTROLLER_DIR / filename)
+    """Controller-local wrapper around shared `checkpoint_path` helper."""
+    return _shared_checkpoint_path(_CONTROLLER_DIR, filename)
 
 
 def _run_checkpoint_dir(run_id: str) -> Path:
-    """Return the checkpoint folder for a training run."""
-    checkpoint_dir = _CHECKPOINT_DIR / run_id
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    return checkpoint_dir
+    """Controller-local wrapper around shared `run_checkpoint_dir` helper."""
+    return _shared_run_checkpoint_dir(_CHECKPOINT_DIR, run_id)
 
 
 def _run_checkpoint_path(run_id: str, prefix: str, extension: str = "pth") -> str:
-    """Return a timestamped checkpoint file path inside the run folder."""
-    return str(_run_checkpoint_dir(run_id) / f"{prefix}_{run_id}.{extension}")
+    """Controller-local wrapper around shared `run_checkpoint_path` helper."""
+    return _shared_run_checkpoint_path(_CHECKPOINT_DIR, run_id, prefix, extension)
 
 
 def _load_checkpoint(path: str, map_location: torch.device) -> Dict[str, Any]:
-    """Load local controller checkpoints without relying on PyTorch's changing default."""
-    try:
-        return torch.load(path, map_location=map_location, weights_only=False)
-    except TypeError:
-        return torch.load(path, map_location=map_location)
+    """Controller-local wrapper around shared `load_checkpoint` helper."""
+    return _shared_load_checkpoint(path, map_location)
 
 
 # ============================================================================
@@ -1044,20 +1048,20 @@ def train(config: Optional[Config] = None) -> None:
                 env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward)
                 checkpoint = agent.checkpoint(best_goal_episode, best_goal_reward)
                 checkpoint["goal_episode"] = True
-                torch.save(checkpoint, _run_checkpoint_path(run_id, "best"))
+                _save_checkpoint_file(_CHECKPOINT_DIR, run_id, "best", checkpoint)
                 checkpoint_flags.append("best_goal")
         elif best_goal_episode is None and episode_reward > best_reward:
             best_reward = episode_reward
             env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward)
             checkpoint = agent.checkpoint(episode + 1, best_reward)
             checkpoint["goal_episode"] = False
-            torch.save(checkpoint, _run_checkpoint_path(run_id, "best"))
+            _save_checkpoint_file(_CHECKPOINT_DIR, run_id, "best", checkpoint)
             checkpoint_flags.append("best")
 
         if config.save_every > 0 and (episode + 1) % config.save_every == 0:
             latest_checkpoint = agent.checkpoint(episode + 1, episode_reward)
             latest_checkpoint["goal_episode"] = episode_end_reason == "goal"
-            torch.save(latest_checkpoint, _run_checkpoint_path(run_id, "checkpoint"))
+            _save_checkpoint_file(_CHECKPOINT_DIR, run_id, "checkpoint", latest_checkpoint)
             checkpoint_flags.append("latest")
 
         rolling_reward = float(np.mean(reward_window[-10:]))
