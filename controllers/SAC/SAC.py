@@ -65,11 +65,16 @@ def _checkpoint_path(filename: str) -> str:
     return str(_CONTROLLER_DIR / filename)
 
 
-def _dated_checkpoint_path(run_id: str, filename: str) -> str:
-    """Return a checkpoint path inside the timestamped checkpoint folder."""
+def _run_checkpoint_dir(run_id: str) -> Path:
+    """Return the checkpoint folder for a training run."""
     checkpoint_dir = _CHECKPOINT_DIR / run_id
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    return str(checkpoint_dir / filename)
+    return checkpoint_dir
+
+
+def _run_checkpoint_path(run_id: str, prefix: str, extension: str = "pth") -> str:
+    """Return a timestamped checkpoint file path inside the run folder."""
+    return str(_run_checkpoint_dir(run_id) / f"{prefix}_{run_id}.{extension}")
 
 
 def _load_checkpoint(path: str, map_location: torch.device) -> Dict[str, Any]:
@@ -799,8 +804,8 @@ def train(config: Optional[Config] = None) -> None:
     run_id = Path(env.run_folder).name
     agent = SACAgent(env.observation_size, env.action_dim, config)
     replay = SequenceReplayBuffer(env.observation_size, env.action_dim, config)
-    checkpoint_dir = f"checkpoints/{run_id}"
-    final_model_path = "final_model.pth"
+    checkpoint_dir = _run_checkpoint_dir(run_id)
+    final_model_path = _run_checkpoint_path(run_id, "final")
     print(
         f"[TRAIN][SAC] rnn={config.recurrent_cell.upper()} "
         f"weights_dir={checkpoint_dir} final={final_model_path}",
@@ -903,20 +908,20 @@ def train(config: Optional[Config] = None) -> None:
                 env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward)
                 checkpoint = agent.checkpoint(best_goal_episode, best_goal_reward)
                 checkpoint["goal_episode"] = True
-                torch.save(checkpoint, _dated_checkpoint_path(run_id, "best_model.pth"))
+                torch.save(checkpoint, _run_checkpoint_path(run_id, "best"))
                 checkpoint_flags.append("best_goal")
         elif best_goal_episode is None and episode_reward > best_reward:
             best_reward = episode_reward
             env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward)
             checkpoint = agent.checkpoint(episode + 1, best_reward)
             checkpoint["goal_episode"] = False
-            torch.save(checkpoint, _dated_checkpoint_path(run_id, "best_model.pth"))
+            torch.save(checkpoint, _run_checkpoint_path(run_id, "best"))
             checkpoint_flags.append("best")
 
         if config.save_every > 0 and (episode + 1) % config.save_every == 0:
             latest_checkpoint = agent.checkpoint(episode + 1, episode_reward)
             latest_checkpoint["goal_episode"] = episode_end_reason == "goal"
-            torch.save(latest_checkpoint, _dated_checkpoint_path(run_id, "latest_model.pth"))
+            torch.save(latest_checkpoint, _run_checkpoint_path(run_id, "checkpoint"))
             checkpoint_flags.append("latest")
 
         rolling_reward = float(np.mean(reward_window[-10:]))
@@ -937,7 +942,7 @@ def train(config: Optional[Config] = None) -> None:
         )
 
     final_reward = best_goal_reward if best_goal_episode is not None else best_reward
-    agent.save(_checkpoint_path("final_model.pth"), "final", final_reward)
+    agent.save(final_model_path, "final", final_reward)
     elapsed = time.perf_counter() - start_time
     print(f"[TRAIN][SAC] final reward={final_reward:.2f} t={elapsed:7.1f}s", flush=True)
 

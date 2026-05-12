@@ -65,11 +65,16 @@ def _checkpoint_path(filename: str) -> str:
     return str(_CONTROLLER_DIR / filename)
 
 
-def _dated_checkpoint_path(run_id: str, filename: str) -> str:
-    """Return a checkpoint path inside the timestamped checkpoint folder."""
+def _run_checkpoint_dir(run_id: str) -> Path:
+    """Return the checkpoint folder for a training run."""
     checkpoint_dir = _CHECKPOINT_DIR / run_id
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    return str(checkpoint_dir / filename)
+    return checkpoint_dir
+
+
+def _run_checkpoint_path(run_id: str, prefix: str, extension: str = "pth") -> str:
+    """Return a timestamped checkpoint file path inside the run folder."""
+    return str(_run_checkpoint_dir(run_id) / f"{prefix}_{run_id}.{extension}")
 
 
 def _load_checkpoint(path: str, map_location: Union[str, torch.device]) -> Dict[str, Any]:
@@ -587,8 +592,8 @@ def train(config: Optional[Config] = None) -> None:
     obs_size = env.observation_size
     action_dim = env.action_dim
     agent = PPOAgent(obs_size, action_dim, config)
-    checkpoint_dir = f"checkpoints/{run_id}"
-    final_model_path = "final_model.pth"
+    checkpoint_dir = _run_checkpoint_dir(run_id)
+    final_model_path = _run_checkpoint_path(run_id, "final")
     print(
         f"[TRAIN][PPO] rnn={config.recurrent_cell.upper()} "
         f"weights_dir={checkpoint_dir} final={final_model_path}",
@@ -726,7 +731,7 @@ def train(config: Optional[Config] = None) -> None:
                     'config': asdict(config),
                 }
                 checkpoint.update(agent._checkpoint_metadata())
-                torch.save(checkpoint, _dated_checkpoint_path(run_id, 'best_model.pth'))
+                torch.save(checkpoint, _run_checkpoint_path(run_id, 'best'))
                 checkpoint_flags.append("best_goal")
         elif best_goal_episode is None and episode_reward_sum > best_reward:
             best_reward = episode_reward_sum
@@ -741,7 +746,7 @@ def train(config: Optional[Config] = None) -> None:
                 'config': asdict(config),
             }
             checkpoint.update(agent._checkpoint_metadata())
-            torch.save(checkpoint, _dated_checkpoint_path(run_id, 'best_model.pth'))
+            torch.save(checkpoint, _run_checkpoint_path(run_id, 'best'))
             checkpoint_flags.append("best")
 
         if config.save_every > 0 and (episode + 1) % config.save_every == 0:
@@ -755,7 +760,7 @@ def train(config: Optional[Config] = None) -> None:
                 'config': asdict(config),
             }
             latest_checkpoint.update(agent._checkpoint_metadata())
-            torch.save(latest_checkpoint, _dated_checkpoint_path(run_id, 'latest_model.pth'))
+            torch.save(latest_checkpoint, _run_checkpoint_path(run_id, 'checkpoint'))
             checkpoint_flags.append("latest")
 
         rolling_reward = float(np.mean(reward_window[-10:]))
@@ -789,7 +794,7 @@ def train(config: Optional[Config] = None) -> None:
         'config': asdict(config),
     }
     checkpoint.update(agent._checkpoint_metadata())
-    torch.save(checkpoint, _checkpoint_path('final_model.pth'))
+    torch.save(checkpoint, final_model_path)
     elapsed = time.perf_counter() - start_time
     print(f"[TRAIN][PPO] final reward={final_reward:.2f} t={elapsed:7.1f}s", flush=True)
 

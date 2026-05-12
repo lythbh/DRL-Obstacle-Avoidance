@@ -58,7 +58,13 @@ def _checkpoint_config(config_class: Type[Any], checkpoint: Dict[str, Any]) -> A
 def _default_model_path(algorithm: str) -> str:
     controller_dir = "PPO" if algorithm == "ppo" else "SAC"
     controller_root = Path(__file__).resolve().parent / "controllers" / controller_dir
-    dated_candidates = sorted((controller_root / "checkpoints").glob("*/best_model.pth"))
+    checkpoint_root = controller_root / "checkpoints"
+    dated_candidates = sorted(
+        list(checkpoint_root.glob("*/best_*.pth"))
+        + list(checkpoint_root.glob("*/checkpoint_*.pth"))
+        + list(checkpoint_root.glob("*/best_model.pth"))
+        + list(checkpoint_root.glob("*/latest_model.pth"))
+    )
     if dated_candidates:
         return str(dated_candidates[-1])
     return str(controller_root / "best_model.pth")
