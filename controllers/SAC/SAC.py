@@ -44,6 +44,7 @@ from controllers.reward_defaults import (
     PROGRESS_REWARD_SCALE,
     PROFILE_SLAM,
     RESET_SETTLE_STEPS,
+    REWARD_SCALE,
     SAFETY_REWARD_SCALE,
     SAVE_SLAM_PLOTS,
     SLAM_PROFILE_INTERVAL,
@@ -53,6 +54,7 @@ from controllers.reward_defaults import (
     START_YAW_NOISE,
     STEP_PENALTY,
 )
+from controllers.training_defaults import RecurrentDefaults, SACDefaults
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
@@ -81,31 +83,30 @@ def _load_checkpoint(path: str, map_location: torch.device) -> Dict[str, Any]:
 # --- Configuration and checkpoint metadata ---------------------------------
 @dataclass
 class Config:
-    episodes: int = 2000
-    update_after_steps: int = 500
-    updates_per_step: int = 2
-    save_every: int = 100
-    gamma: float = 0.99
-    tau: float = 0.005
-    actor_lr: float = 3e-4
-    critic_lr: float = 3e-4
-    alpha_lr: float = 3e-4
-    initial_alpha: float = 0.05
-    auto_entropy_tuning: bool = True
-    reward_scale: float = 0.1
-    target_entropy_scale: float = 0.5
-    hidden_size: int = 128
-    recurrent_cell: str = "gru"
-    recurrent_hidden_size: Optional[int] = None
-    recurrent_layers: int = 1
-    log_std_min: float = -5.0
-    log_std_max: float = 2.0
-    sequence_length: int = 16
-    burn_in: int = 4
-    sequence_stride: int = 8
-    replay_capacity: int = 1024
-    replay_batch_size: int = 32
-    min_replay_sequences: int = 64
+    episodes: int = SACDefaults.episodes
+    update_after_steps: int = SACDefaults.update_after_steps
+    updates_per_step: int = SACDefaults.updates_per_step
+    save_every: int = SACDefaults.save_every
+    gamma: float = SACDefaults.gamma
+    tau: float = SACDefaults.tau
+    actor_lr: float = SACDefaults.actor_lr
+    critic_lr: float = SACDefaults.critic_lr
+    alpha_lr: float = SACDefaults.alpha_lr
+    initial_alpha: float = SACDefaults.initial_alpha
+    auto_entropy_tuning: bool = SACDefaults.auto_entropy_tuning
+    target_entropy_scale: float = SACDefaults.target_entropy_scale
+    hidden_size: int = SACDefaults.hidden_size
+    recurrent_cell: str = SACDefaults.recurrent_cell
+    recurrent_hidden_size: Optional[int] = SACDefaults.recurrent_hidden_size
+    recurrent_layers: int = SACDefaults.recurrent_layers
+    log_std_min: float = SACDefaults.log_std_min
+    log_std_max: float = SACDefaults.log_std_max
+    sequence_length: int = RecurrentDefaults.sequence_length
+    burn_in: int = RecurrentDefaults.burn_in
+    sequence_stride: int = RecurrentDefaults.sequence_stride
+    replay_capacity: int = SACDefaults.replay_capacity
+    replay_batch_size: int = SACDefaults.replay_batch_size
+    min_replay_sequences: int = SACDefaults.min_replay_sequences
 
     lidar_sector_dim: int = LIDAR_SECTOR_DIM
     pose_goal_dim: int = POSE_GOAL_DIM
@@ -168,8 +169,6 @@ class Config:
             raise ValueError("min_replay_sequences must be > 0")
         if self.recurrent_hidden_size is None:
             self.recurrent_hidden_size = self.hidden_size
-        if self.reward_scale <= 0.0:
-            raise ValueError("reward_scale must be greater than 0")
         if self.target_entropy_scale <= 0.0:
             raise ValueError("target_entropy_scale must be greater than 0")
         if self.goal_stop_speed_threshold <= 0.0:
@@ -492,7 +491,7 @@ class SACAgent:
                 "target_entropy_scale": self.config.target_entropy_scale,
             },
             "optimization": {
-                "reward_scale": self.config.reward_scale,
+                "reward_scale": REWARD_SCALE,
             },
         }
 
@@ -641,7 +640,7 @@ class SACAgent:
             return None
 
         valid_mask = batch["valid_mask"]
-        scaled_rewards = batch["rewards"] * self.config.reward_scale
+        scaled_rewards = batch["rewards"] * REWARD_SCALE
         burn_in = min(self.config.burn_in, batch["obs"].shape[1] - 1)
         learn_mask = self._sequence_loss_mask(valid_mask, burn_in)
         done_flags = batch["dones"].squeeze(-1)
@@ -819,7 +818,7 @@ def train(config: Optional[Config] = None) -> None:
             )
 
             next_obs, reward, terminated, truncated, info = env.step(action)
-            transition_done = bool(terminated or truncated)
+            transition_done = bool(terminated)
             episode_obs.append(np.asarray(obs, dtype=np.float32))
             episode_actions.append(np.asarray(action, dtype=np.float32))
             episode_rewards.append(float(reward))
@@ -856,7 +855,8 @@ def train(config: Optional[Config] = None) -> None:
             config.replay_batch_size,
             config.min_replay_sequences,
         ):
-            for _ in range(max(1, config.updates_per_step)):
+            num_updates = max(1, len(replay) // config.replay_batch_size) * max(1, config.updates_per_step)
+            for _ in range(num_updates):
                 batch = replay.sample(config.replay_batch_size, agent.device)
                 agent.update(batch)
 

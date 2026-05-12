@@ -44,6 +44,7 @@ from controllers.reward_defaults import (
     PROGRESS_REWARD_SCALE,
     PROFILE_SLAM,
     RESET_SETTLE_STEPS,
+    REWARD_SCALE,
     SAFETY_REWARD_SCALE,
     SAVE_SLAM_PLOTS,
     SLAM_PROFILE_INTERVAL,
@@ -53,6 +54,7 @@ from controllers.reward_defaults import (
     START_YAW_NOISE,
     STEP_PENALTY,
 )
+from controllers.training_defaults import PPODefaults, RecurrentDefaults
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
@@ -87,22 +89,25 @@ class Config:
     """Training and environment hyperparameters."""
     
     # Training
-    episodes: int = 500
-    update_every: int = 5  # PPO update frequency (episodes)
-    epochs: int = 4  # Optimization epochs per update
-    batch_size: int = 64
-    save_every: int = 100  # Save latest checkpoint every N episodes (0 disables)
+    episodes: int = PPODefaults.episodes
+    update_every: int = PPODefaults.update_every  # PPO update frequency (episodes)
+    epochs: int = PPODefaults.epochs  # Optimization epochs per update
+    batch_size: int = PPODefaults.batch_size
+    save_every: int = PPODefaults.save_every  # Save latest checkpoint every N episodes (0 disables)
     
     # PPO Agent
     gamma: float = 0.99  # Discount factor
     epsilon: float = 0.2  # PPO clip parameter
-    learning_rate: float = 1e-4
-    entropy_coef: float = 0.02  # Entropy regularization
-    hidden_size: int = 128  # Network hidden layer size
-    latent_size: int = 128  # Encoder output size before the recurrent core
-    lstm_hidden_size: int = 128  # Hidden size of the recurrent core
-    lstm_layers: int = 1
-    recurrent_cell: str = "gru" # "lstm" or "gru"
+    learning_rate: float = PPODefaults.learning_rate
+    entropy_coef: float = PPODefaults.entropy_coef  # Entropy regularization
+    hidden_size: int = PPODefaults.hidden_size  # Network hidden layer size
+    latent_size: int = PPODefaults.latent_size  # Encoder output size before the recurrent core
+    lstm_hidden_size: int = PPODefaults.lstm_hidden_size  # Hidden size of the recurrent core
+    lstm_layers: int = PPODefaults.lstm_layers
+    recurrent_cell: str = PPODefaults.recurrent_cell # "lstm" or "gru"
+    sequence_length: int = RecurrentDefaults.sequence_length  # Truncated recurrent window length for PPO updates
+    burn_in: int = RecurrentDefaults.burn_in  # Context steps excluded from PPO loss
+    sequence_stride: int = RecurrentDefaults.sequence_stride  # Overlap between PPO training windows
     lidar_sector_dim: int = LIDAR_SECTOR_DIM
     pose_goal_dim: int = POSE_GOAL_DIM  # [x, y] + [sin/cos heading, sin/cos goal_error, norm dist]
     imu_feature_dim: int = IMU_FEATURE_DIM  # accel(3) + gyro(3) + quaternion(4)
@@ -161,6 +166,14 @@ class Config:
             raise ValueError("epochs must be greater than 0")
         if self.batch_size <= 0:
             raise ValueError("batch_size must be greater than 0")
+        if self.sequence_length <= 0:
+            raise ValueError("sequence_length must be greater than 0")
+        if self.burn_in < 0:
+            raise ValueError("burn_in must be non-negative")
+        if self.burn_in >= self.sequence_length:
+            raise ValueError("burn_in must be smaller than sequence_length")
+        if self.sequence_stride <= 0:
+            raise ValueError("sequence_stride must be greater than 0")
         if self.max_steps <= 0:
             raise ValueError("max_steps must be greater than 0")
         if self.max_steering_angle <= 0.0:
@@ -349,10 +362,10 @@ class PPOAgent:
             next_state,
         )
 
-    def calculate_returns(self, rewards: np.ndarray) -> np.ndarray:
+    def calculate_returns(self, rewards: np.ndarray, bootstrap_value: float = 0.0) -> np.ndarray:
         """Calculate cumulative discounted returns."""
         returns = np.zeros(len(rewards), dtype=np.float32)
-        discounted_return = 0.0
+        discounted_return = float(bootstrap_value)
         for t in reversed(range(len(rewards))):
             discounted_return = rewards[t] + self.config.gamma * discounted_return
             returns[t] = discounted_return
@@ -393,6 +406,22 @@ class PPOAgent:
             "valid_mask": pad_sequence(valid_masks, batch_first=True),
             "done_mask": pad_sequence(reset_masks, batch_first=True),
         }
+
+    def _split_trajectories(self, trajectories: List[Dict[str, np.ndarray]]) -> List[Dict[str, np.ndarray]]:
+        """Split full episodes into short recurrent windows for PPO updates."""
+        chunked_trajectories: List[Dict[str, np.ndarray]] = []
+        chunk_length = self.config.sequence_length
+        chunk_stride = self.config.sequence_stride
+        for trajectory in trajectories:
+            total_length = len(trajectory["returns"])
+            for start in range(0, total_length, chunk_stride):
+                end = min(start + chunk_length, total_length)
+                if end <= start:
+                    continue
+                chunked_trajectories.append({key: value[start:end] for key, value in trajectory.items()})
+                if end >= total_length:
+                    break
+        return chunked_trajectories
 
     def evaluate_sequences(
         self,
@@ -440,6 +469,10 @@ class PPOAgent:
         for trajectory in trajectories:
             trajectory["advantages"] = ((trajectory["advantages"] - adv_mean) / adv_std).astype(np.float32)
 
+        trajectories = self._split_trajectories(trajectories)
+        if not trajectories:
+            return
+
         num_episodes = len(trajectories)
         for _ in range(self.config.epochs):
             indices = torch.randperm(num_episodes).tolist()
@@ -470,7 +503,7 @@ class PPOAgent:
                 surrogate = torch.min(surrogate1, surrogate2)
                 surrogate = torch.where(mask_bool, surrogate, torch.zeros_like(surrogate))
 
-                value_error = (values - batch["returns"]) ** 2
+                value_error = nn.functional.smooth_l1_loss(values, batch["returns"], reduction="none")
                 value_error = torch.where(mask_bool, value_error, torch.zeros_like(value_error))
 
                 entropy = torch.where(mask_bool, entropy, torch.zeros_like(entropy))
@@ -559,7 +592,8 @@ def train(config: Optional[Config] = None) -> None:
     
     print(
         f"[TRAIN][PPO] episodes={config.episodes} update_every={config.update_every} "
-        f"obs={obs_size} act={action_dim} cell={config.recurrent_cell.upper()}",
+        f"obs={obs_size} act={action_dim} cell={config.recurrent_cell.upper()} "
+        f"seq={config.sequence_length} burn_in={config.burn_in}",
         flush=True,
     )
     
@@ -628,7 +662,20 @@ def train(config: Optional[Config] = None) -> None:
         
         # Build returns and advantages per episode so reward signals do not
         # leak across episode boundaries.
-        episode_returns = agent.calculate_returns(np.array(episode_rewards, dtype=np.float32))
+        bootstrap_value = 0.0
+        if episode_end_reason == "max_steps":
+            with torch.no_grad():
+                _, bootstrap_state_value, _ = agent.model(
+                    np.asarray(obs, dtype=np.float32),
+                    recurrent_state=recurrent_state,
+                    done_mask=np.array([0.0], dtype=np.float32),
+                )
+            bootstrap_value = float(bootstrap_state_value.squeeze(0).item())
+
+        episode_returns = agent.calculate_returns(
+            np.array(episode_rewards, dtype=np.float32) * REWARD_SCALE,
+            bootstrap_value=bootstrap_value,
+        )
         episode_obs_array = np.array(episode_observations, dtype=np.float32)
         with torch.no_grad():
             _, episode_values, _ = agent.model(

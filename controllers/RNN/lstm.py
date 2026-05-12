@@ -21,12 +21,10 @@ class LSTMActorCritic(nn.Module):
         obs_size: int,
         action_dim: int,
         config: "Config",
-        action_space: str = "continuous",
     ) -> None:
         super().__init__()
         self.obs_size = obs_size
         self.action_dim = action_dim
-        self.action_space = action_space
         self.grid_shape = config.occupancy_grid_shape
         self.obstacle_dim = config.lidar_sector_dim
         self.pose_goal_dim = config.pose_goal_dim
