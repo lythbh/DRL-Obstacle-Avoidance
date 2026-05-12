@@ -84,74 +84,76 @@ def _load_checkpoint(path: str, map_location: Union[str, torch.device]) -> Dict[
 # CONFIGURATION
 # ============================================================================
 
+"""
+Sections:
+ - Config: dataclass encapsulating hyperparameters for environment and optimizer
+ - PPOAgent: recurrent actor-critic model wrapper with action sampling and update logic
+ - train(): high-level training loop that interacts with Webots and checkpoints models
+"""
+
 @dataclass
 class Config:
     """Training and environment hyperparameters."""
     
-    # Training
     episodes: int = PPODefaults.episodes
-    update_every: int = PPODefaults.update_every  # PPO update frequency (episodes)
-    epochs: int = PPODefaults.epochs  # Optimization epochs per update
+    update_every: int = PPODefaults.update_every
+    epochs: int = PPODefaults.epochs
     batch_size: int = PPODefaults.batch_size
-    save_every: int = PPODefaults.save_every  # Save latest checkpoint every N episodes (0 disables)
+    save_every: int = PPODefaults.save_every
     
-    # PPO Agent
-    gamma: float = 0.99  # Discount factor
-    epsilon: float = 0.2  # PPO clip parameter
+    gamma: float = 0.99
+    epsilon: float = 0.2
     learning_rate: float = PPODefaults.learning_rate
-    entropy_coef: float = PPODefaults.entropy_coef  # Entropy regularization
-    hidden_size: int = PPODefaults.hidden_size  # Network hidden layer size
-    latent_size: int = PPODefaults.latent_size  # Encoder output size before the recurrent core
-    lstm_hidden_size: int = PPODefaults.lstm_hidden_size  # Hidden size of the recurrent core
+    entropy_coef: float = PPODefaults.entropy_coef
+    hidden_size: int = PPODefaults.hidden_size
+    latent_size: int = PPODefaults.latent_size
+    lstm_hidden_size: int = PPODefaults.lstm_hidden_size
     lstm_layers: int = PPODefaults.lstm_layers
-    recurrent_cell: str = PPODefaults.recurrent_cell # "lstm" or "gru"
-    sequence_length: int = RecurrentDefaults.sequence_length  # Truncated recurrent window length for PPO updates
-    burn_in: int = RecurrentDefaults.burn_in  # Context steps excluded from PPO loss
-    sequence_stride: int = RecurrentDefaults.sequence_stride  # Overlap between PPO training windows
+    recurrent_cell: str = PPODefaults.recurrent_cell
+    sequence_length: int = RecurrentDefaults.sequence_length
+    burn_in: int = RecurrentDefaults.burn_in
+    sequence_stride: int = RecurrentDefaults.sequence_stride
     lidar_sector_dim: int = LIDAR_SECTOR_DIM
-    pose_goal_dim: int = POSE_GOAL_DIM  # [x, y] + [sin/cos heading, sin/cos goal_error, norm dist]
-    imu_feature_dim: int = IMU_FEATURE_DIM  # accel(3) + gyro(3) + quaternion(4)
-    occupancy_grid_shape: Optional[Tuple[int, ...]] = OCCUPANCY_GRID_SHAPE  # Optional CNN shape, e.g. (1, 16, 16)
+    pose_goal_dim: int = POSE_GOAL_DIM
+    imu_feature_dim: int = IMU_FEATURE_DIM
+    occupancy_grid_shape: Optional[Tuple[int, ...]] = OCCUPANCY_GRID_SHAPE
     
-    # Environment
-    max_steps: int = MAX_STEPS  # Max steps per episode
-    collision_threshold: float = COLLISION_THRESHOLD  # LiDAR distance threshold for collision
-    low_score_threshold: float = LOW_SCORE_THRESHOLD  # Episode reset threshold
-    collision_penalty: float = COLLISION_PENALTY  # Strong failure signal when collision happens
-    progress_reward_scale: float = PROGRESS_REWARD_SCALE  # Main dense signal: move toward the goal
-    distance_reward_scale: float = DISTANCE_REWARD_SCALE  # Secondary dense signal: stay closer than the start state
-    heading_reward_scale: float = HEADING_REWARD_SCALE  # Small bias toward facing the goal
-    safety_reward_scale: float = SAFETY_REWARD_SCALE  # Safety matters, but less than goal progress
-    motion_reward_scale: float = MOTION_REWARD_SCALE  # Small bias against freezing in place
-    new_best_distance_bonus: float = NEW_BEST_DISTANCE_BONUS  # Small milestone reward for new closest approach
-    step_penalty: float = STEP_PENALTY  # Encourages reaching the goal sooner
-    endpoint: Tuple[float, float] = ENDPOINT  # Goal location
-    goal_threshold: float = GOAL_THRESHOLD  # Radius around goal considered reached
-    goal_stop_speed_threshold: float = GOAL_STOP_SPEED_THRESHOLD  # Speed limit for counting goal success
-    goal_success_reward: float = GOAL_SUCCESS_REWARD  # Main sparse success reward
-    goal_stop_bonus: float = GOAL_STOP_BONUS  # Extra reward for finishing under control
-    goal_hold_reward: float = GOAL_HOLD_REWARD  # Mild reward while correctly dwelling in the goal area
-    goal_speed_penalty: float = GOAL_SPEED_PENALTY  # Discourages blasting through the goal region
-    goal_overshoot_penalty: float = GOAL_OVERSHOOT_PENALTY  # Strong penalty for driving past the goal region
-    reference_distance: Optional[float] = None  # Start-to-goal distance, filled in at init
+    max_steps: int = MAX_STEPS
+    collision_threshold: float = COLLISION_THRESHOLD
+    low_score_threshold: float = LOW_SCORE_THRESHOLD
+    collision_penalty: float = COLLISION_PENALTY
+    progress_reward_scale: float = PROGRESS_REWARD_SCALE
+    distance_reward_scale: float = DISTANCE_REWARD_SCALE
+    heading_reward_scale: float = HEADING_REWARD_SCALE
+    safety_reward_scale: float = SAFETY_REWARD_SCALE
+    motion_reward_scale: float = MOTION_REWARD_SCALE
+    new_best_distance_bonus: float = NEW_BEST_DISTANCE_BONUS
+    step_penalty: float = STEP_PENALTY
+    endpoint: Tuple[float, float] = ENDPOINT
+    goal_threshold: float = GOAL_THRESHOLD
+    goal_stop_speed_threshold: float = GOAL_STOP_SPEED_THRESHOLD
+    goal_success_reward: float = GOAL_SUCCESS_REWARD
+    goal_stop_bonus: float = GOAL_STOP_BONUS
+    goal_hold_reward: float = GOAL_HOLD_REWARD
+    goal_speed_penalty: float = GOAL_SPEED_PENALTY
+    goal_overshoot_penalty: float = GOAL_OVERSHOOT_PENALTY
+    reference_distance: Optional[float] = None
 
     enable_slam: bool = ENABLE_SLAM
     profile_slam: bool = PROFILE_SLAM
     slam_profile_interval: int = SLAM_PROFILE_INTERVAL
     save_slam_plots: bool = SAVE_SLAM_PLOTS
-    force_cpu: bool = FORCE_CPU  # Force CPU-only training even if CUDA is available
+    force_cpu: bool = FORCE_CPU
     
-    # Robot Control
     max_steering_angle: float = MAX_STEERING_ANGLE
     min_speed: float = MIN_SPEED
-    start_position: Optional[List[float]] = None  # [x, y, z]
-    start_rotation: Optional[List[float]] = None  # [x, y, z, w]
-    start_position_noise: float = START_POSITION_NOISE  # Random position jitter at reset
-    start_yaw_noise: float = START_YAW_NOISE  # Random yaw jitter at reset
+    start_position: Optional[List[float]] = None
+    start_rotation: Optional[List[float]] = None
+    start_position_noise: float = START_POSITION_NOISE
+    start_yaw_noise: float = START_YAW_NOISE
     
-    # Motor/Sensor Config
     max_speed: float = MAX_SPEED
-    reset_settle_steps: int = RESET_SETTLE_STEPS  # Steps to wait for physics to settle after reset
+    reset_settle_steps: int = RESET_SETTLE_STEPS
     
     def __post_init__(self) -> None:
         """Initialize defaults for mutable fields."""
@@ -423,6 +425,84 @@ class PPOAgent:
                     break
         return chunked_trajectories
 
+    def _sanitize_trajectories(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
+        for trajectory in trajectories:
+            trajectory["observations"] = np.nan_to_num(
+                trajectory["observations"], nan=0.0, posinf=1.0, neginf=-1.0
+            ).astype(np.float32)
+            trajectory["actions"] = np.nan_to_num(
+                trajectory["actions"], nan=0.0, posinf=0.0, neginf=0.0
+            ).astype(np.float32)
+            trajectory["log_probs"] = np.nan_to_num(
+                trajectory["log_probs"], nan=0.0, posinf=0.0, neginf=0.0
+            ).astype(np.float32)
+            trajectory["returns"] = np.nan_to_num(
+                trajectory["returns"], nan=0.0, posinf=0.0, neginf=0.0
+            ).astype(np.float32)
+            trajectory["advantages"] = np.nan_to_num(
+                trajectory["advantages"], nan=0.0, posinf=0.0, neginf=0.0
+            ).astype(np.float32)
+
+    def _normalize_advantages(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
+        all_advantages = np.concatenate([t["advantages"] for t in trajectories], axis=0)
+        adv_mean = float(all_advantages.mean())
+        adv_std = float(all_advantages.std() + 1e-8)
+        for trajectory in trajectories:
+            trajectory["advantages"] = ((trajectory["advantages"] - adv_mean) / adv_std).astype(np.float32)
+
+    def _update_batch(self, batch: Dict[str, torch.Tensor]) -> None:
+        log_probs_new, values, entropy = self.evaluate_sequences(
+            batch["observations"],
+            batch["actions"],
+            batch["done_mask"],
+        )
+
+        valid_mask = batch["valid_mask"]
+        mask_bool = valid_mask > 0
+        log_ratio = torch.nan_to_num(
+            log_probs_new - batch["log_probs"],
+            nan=0.0,
+            posinf=20.0,
+            neginf=-20.0,
+        ).clamp(-20.0, 20.0)
+        ratio = torch.exp(log_ratio)
+        surrogate1 = ratio * batch["advantages"]
+        surrogate2 = torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon) * batch["advantages"]
+        surrogate = torch.where(mask_bool, torch.min(surrogate1, surrogate2), torch.zeros_like(surrogate1))
+
+        value_error = nn.functional.smooth_l1_loss(values, batch["returns"], reduction="none")
+        value_error = torch.where(mask_bool, value_error, torch.zeros_like(value_error))
+        entropy = torch.where(mask_bool, entropy, torch.zeros_like(entropy))
+
+        valid_count = valid_mask.sum().clamp_min(1.0)
+        policy_loss = -surrogate.sum() / valid_count
+        value_loss = value_error.sum() / valid_count
+        entropy_bonus = entropy.sum() / valid_count
+        loss = policy_loss + 0.5 * value_loss - self.config.entropy_coef * entropy_bonus
+
+        if not torch.isfinite(loss):
+            print("[PPO] WARNING: Skipping update batch due to non-finite loss.", flush=True)
+            return
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        gradients_finite = True
+        for parameter in list(self.model.parameters()) + [self.actor_log_std]:
+            if parameter.grad is not None and not torch.isfinite(parameter.grad).all():
+                gradients_finite = False
+                break
+        if not gradients_finite:
+            print("[PPO] WARNING: Skipping update batch due to non-finite gradients.", flush=True)
+            self.optimizer.zero_grad()
+            return
+
+        nn.utils.clip_grad_norm_(list(self.model.parameters()) + [self.actor_log_std], max_norm=1.0)
+        self.optimizer.step()
+        with torch.no_grad():
+            self.actor_log_std.data.copy_(
+                torch.nan_to_num(self.actor_log_std.data, nan=-0.5, posinf=2.0, neginf=-5.0).clamp(-5.0, 2.0)
+            )
+
     def evaluate_sequences(
         self,
         observations: torch.Tensor,
@@ -446,28 +526,8 @@ class PPOAgent:
         if not trajectories:
             return
 
-        for trajectory in trajectories:
-            trajectory["observations"] = np.nan_to_num(
-                trajectory["observations"], nan=0.0, posinf=1.0, neginf=-1.0
-            ).astype(np.float32)
-            trajectory["actions"] = np.nan_to_num(
-                trajectory["actions"], nan=0.0, posinf=0.0, neginf=0.0
-            ).astype(np.float32)
-            trajectory["log_probs"] = np.nan_to_num(
-                trajectory["log_probs"], nan=0.0, posinf=0.0, neginf=0.0
-            ).astype(np.float32)
-            trajectory["returns"] = np.nan_to_num(
-                trajectory["returns"], nan=0.0, posinf=0.0, neginf=0.0
-            ).astype(np.float32)
-            trajectory["advantages"] = np.nan_to_num(
-                trajectory["advantages"], nan=0.0, posinf=0.0, neginf=0.0
-            ).astype(np.float32)
-
-        all_advantages = np.concatenate([t["advantages"] for t in trajectories], axis=0)
-        adv_mean = float(all_advantages.mean())
-        adv_std = float(all_advantages.std() + 1e-8)
-        for trajectory in trajectories:
-            trajectory["advantages"] = ((trajectory["advantages"] - adv_mean) / adv_std).astype(np.float32)
+        self._sanitize_trajectories(trajectories)
+        self._normalize_advantages(trajectories)
 
         trajectories = self._split_trajectories(trajectories)
         if not trajectories:
@@ -479,60 +539,7 @@ class PPOAgent:
             for start in range(0, num_episodes, self.config.batch_size):
                 batch_indices = indices[start : start + self.config.batch_size]
                 batch = self._prepare_batch([trajectories[idx] for idx in batch_indices])
-
-                log_probs_new, values, entropy = self.evaluate_sequences(
-                    batch["observations"],
-                    batch["actions"],
-                    batch["done_mask"],
-                )
-
-                valid_mask = batch["valid_mask"]
-                mask_bool = valid_mask > 0
-                log_ratio = torch.nan_to_num(
-                    log_probs_new - batch["log_probs"],
-                    nan=0.0,
-                    posinf=20.0,
-                    neginf=-20.0,
-                ).clamp(-20.0, 20.0)
-                ratio = torch.exp(log_ratio)
-                surrogate1 = ratio * batch["advantages"]
-                surrogate2 = (
-                    torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon)
-                    * batch["advantages"]
-                )
-                surrogate = torch.min(surrogate1, surrogate2)
-                surrogate = torch.where(mask_bool, surrogate, torch.zeros_like(surrogate))
-
-                value_error = nn.functional.smooth_l1_loss(values, batch["returns"], reduction="none")
-                value_error = torch.where(mask_bool, value_error, torch.zeros_like(value_error))
-
-                entropy = torch.where(mask_bool, entropy, torch.zeros_like(entropy))
-                valid_count = valid_mask.sum().clamp_min(1.0)
-                policy_loss = -surrogate.sum() / valid_count
-                value_loss = value_error.sum() / valid_count
-                entropy_bonus = entropy.sum() / valid_count
-
-                loss = policy_loss + 0.5 * value_loss - self.config.entropy_coef * entropy_bonus
-                if not torch.isfinite(loss):
-                    print("[PPO] WARNING: Skipping update batch due to non-finite loss.", flush=True)
-                    continue
-                self.optimizer.zero_grad()
-                loss.backward()
-                gradients_finite = True
-                for parameter in list(self.model.parameters()) + [self.actor_log_std]:
-                    if parameter.grad is not None and not torch.isfinite(parameter.grad).all():
-                        gradients_finite = False
-                        break
-                if not gradients_finite:
-                    print("[PPO] WARNING: Skipping update batch due to non-finite gradients.", flush=True)
-                    self.optimizer.zero_grad()
-                    continue
-                nn.utils.clip_grad_norm_(list(self.model.parameters()) + [self.actor_log_std], max_norm=1.0)
-                self.optimizer.step()
-                with torch.no_grad():
-                    self.actor_log_std.data.copy_(
-                        torch.nan_to_num(self.actor_log_std.data, nan=-0.5, posinf=2.0, neginf=-5.0).clamp(-5.0, 2.0)
-                    )
+                self._update_batch(batch)
 
     def load_model(self, model_path: str) -> None:
         """Load saved recurrent model weights."""
@@ -572,10 +579,8 @@ def train(config: Optional[Config] = None) -> None:
     if config is None:
         config = Config()
     
-    # Initialize Webots supervisor
     _init_supervisor()
     
-    # Create environment and agent
     env = WebotsEnv(config)
     env.reset()
     run_id = Path(env.run_folder).name
@@ -597,7 +602,6 @@ def train(config: Optional[Config] = None) -> None:
         flush=True,
     )
     
-    # Training buffers
     rollout_trajectories: List[Dict[str, np.ndarray]] = []
     best_reward = float('-inf')
     best_goal_reward = float('-inf')
@@ -609,7 +613,6 @@ def train(config: Optional[Config] = None) -> None:
     timeout_window: List[float] = []
     start_time = time.perf_counter()
     
-    # Training loop
     for episode in range(config.episodes):
         obs, _ = env.reset()
         done = False
@@ -625,15 +628,12 @@ def train(config: Optional[Config] = None) -> None:
         prev_done = True
         
         while not done:
-            # Select action from the current policy for every transition so the
-            # rollout stays on-policy for PPO updates.
             action, log_prob, _, recurrent_state = agent.select_action(
                 obs,
                 recurrent_state=recurrent_state,
                 done=prev_done,
             )
             
-            # Step environment
             obs_next, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             prev_done = done
@@ -641,7 +641,6 @@ def train(config: Optional[Config] = None) -> None:
             episode_goal_reached = episode_goal_reached or bool(info.get("goal_reached", False))
             episode_success = bool(info.get("success", False))
             
-            # Track termination reason
             if done:
                 if info.get("reset_reason") == "low_score":
                     episode_end_reason = "low_score"
@@ -652,7 +651,6 @@ def train(config: Optional[Config] = None) -> None:
                 elif truncated:
                     episode_end_reason = "max_steps"
             
-            # Accumulate
             episode_observations.append(obs)
             episode_actions.append(action)
             episode_log_probs.append(float(log_prob.item()))
@@ -660,8 +658,7 @@ def train(config: Optional[Config] = None) -> None:
             
             obs = obs_next
         
-        # Build returns and advantages per episode so reward signals do not
-        # leak across episode boundaries.
+        # Build returns and advantages per episode.
         bootstrap_value = 0.0
         if episode_end_reason == "max_steps":
             with torch.no_grad():

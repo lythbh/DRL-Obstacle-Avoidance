@@ -8,7 +8,7 @@ class RecurrentDefaults:
 
 
 class PPODefaults:
-    episodes = 500
+    episodes = 2500
     update_every = 5
     epochs = 4
     batch_size = 64
@@ -23,7 +23,7 @@ class PPODefaults:
 
 
 class SACDefaults:
-    episodes = 10000
+    episodes = 2500
     update_after_steps = 500
     updates_per_step = 2
     save_every = 100

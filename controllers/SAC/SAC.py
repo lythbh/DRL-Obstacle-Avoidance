@@ -81,6 +81,14 @@ def _load_checkpoint(path: str, map_location: torch.device) -> Dict[str, Any]:
 
 
 # --- Configuration and checkpoint metadata ---------------------------------
+
+"""
+Sections:
+ - Config: dataclass holding SAC hyperparameters and runtime defaults
+ - Networks: recurrent encoder, Gaussian actor and Q-networks
+ - SACAgent: training logic, checkpointing and policy sampling
+ - train(): top-level loop integrating environment, replay buffer, and optimization
+"""
 @dataclass
 class Config:
     episodes: int = SACDefaults.episodes
@@ -138,7 +146,7 @@ class Config:
     profile_slam: bool = PROFILE_SLAM
     slam_profile_interval: int = SLAM_PROFILE_INTERVAL
     save_slam_plots: bool = SAVE_SLAM_PLOTS
-    force_cpu: bool = FORCE_CPU  # Force CPU-only training even if CUDA is available
+    force_cpu: bool = FORCE_CPU
 
     max_steering_angle: float = MAX_STEERING_ANGLE
     min_speed: float = MIN_SPEED
@@ -635,12 +643,8 @@ class SACAgent:
             "valid_mask": torch.as_tensor(valid_mask[None, ...], dtype=torch.float32, device=self.device),
         }
 
-    def update(self, batch: Dict[str, torch.Tensor]) -> Optional[Dict[str, float]]:
-        if batch["obs"].shape[1] <= 0:
-            return None
-
+    def _build_update_masks(self, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         valid_mask = batch["valid_mask"]
-        scaled_rewards = batch["rewards"] * REWARD_SCALE
         burn_in = min(self.config.burn_in, batch["obs"].shape[1] - 1)
         learn_mask = self._sequence_loss_mask(valid_mask, burn_in)
         done_flags = batch["dones"].squeeze(-1)
@@ -649,17 +653,23 @@ class SACAgent:
         if done_flags.shape[1] > 1:
             done_mask_obs[:, 1:] = done_flags[:, :-1]
         done_mask_next = torch.cat([torch.ones_like(done_flags[:, :1]), done_flags], dim=1)
+        return learn_mask, done_mask_obs, done_mask_next
+
+    def _update_critics(
+        self,
+        batch: Dict[str, torch.Tensor],
+        learn_mask: torch.Tensor,
+        done_mask_obs: torch.Tensor,
+        done_mask_next: torch.Tensor,
+    ) -> torch.Tensor:
+        scaled_rewards = batch["rewards"] * REWARD_SCALE
 
         def _ensure_time_dim(tensor: torch.Tensor) -> torch.Tensor:
-            return tensor.unsqueeze(1) if tensor.ndim == 2 else tensor  # [B,D] -> [B,1,D] for sequence math.
+            return tensor.unsqueeze(1) if tensor.ndim == 2 else tensor
 
         with torch.no_grad():
             target_obs = torch.cat([batch["obs"][:, :1], batch["next_obs"]], dim=1)
-            next_action, next_log_prob, _ = self._sample_policy(
-                target_obs,
-                done_mask=done_mask_next,
-                deterministic=False,
-            )
+            next_action, next_log_prob, _ = self._sample_policy(target_obs, done_mask=done_mask_next, deterministic=False)
             next_action = _ensure_time_dim(next_action)[:, 1:]
             next_log_prob = _ensure_time_dim(next_log_prob)[:, 1:]
             target_actions = torch.cat([torch.zeros_like(batch["actions"][:, :1]), next_action], dim=1)
@@ -676,33 +686,52 @@ class SACAgent:
         current_q2 = _ensure_time_dim(current_q2)
 
         critic_loss = self._masked_mean((current_q1 - target_q).pow(2), learn_mask)
-        critic_loss = critic_loss + self._masked_mean((current_q2 - target_q).pow(2), learn_mask)
+        return critic_loss + self._masked_mean((current_q2 - target_q).pow(2), learn_mask)
+
+    def _update_actor_and_alpha(
+        self,
+        batch: Dict[str, torch.Tensor],
+        learn_mask: torch.Tensor,
+        done_mask_obs: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        new_action, log_prob, _ = self._sample_policy(batch["obs"], done_mask=done_mask_obs, deterministic=False)
+        q1_pi, _ = self.q1(batch["obs"], new_action, done_mask=done_mask_obs)
+        q2_pi, _ = self.q2(batch["obs"], new_action, done_mask=done_mask_obs)
+
+        def _ensure_time_dim(tensor: torch.Tensor) -> torch.Tensor:
+            return tensor.unsqueeze(1) if tensor.ndim == 2 else tensor
+
+        log_prob = _ensure_time_dim(log_prob)
+        q1_pi = _ensure_time_dim(q1_pi)
+        q2_pi = _ensure_time_dim(q2_pi)
+        actor_loss = self._masked_mean(self.alpha.detach() * log_prob - torch.min(q1_pi, q2_pi), learn_mask)
+
+        alpha_loss = torch.tensor(0.0, device=self.device)
+        if self.config.auto_entropy_tuning:
+            alpha_loss = -self._masked_mean(self.log_alpha * (log_prob + self.target_entropy).detach(), learn_mask)
+
+        return actor_loss, alpha_loss
+
+    def update(self, batch: Dict[str, torch.Tensor]) -> Optional[Dict[str, float]]:
+        if batch["obs"].shape[1] <= 0:
+            return None
+
+        learn_mask, done_mask_obs, done_mask_next = self._build_update_masks(batch)
+        critic_loss = self._update_critics(batch, learn_mask, done_mask_obs, done_mask_next)
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         nn.utils.clip_grad_norm_(list(self.q1.parameters()) + list(self.q2.parameters()), max_norm=1.0)
         self.critic_optimizer.step()
 
-        new_action, log_prob, _ = self._sample_policy(
-            batch["obs"],
-            done_mask=done_mask_obs,
-            deterministic=False,
-        )
-        q1_pi, _ = self.q1(batch["obs"], new_action, done_mask=done_mask_obs)
-        q2_pi, _ = self.q2(batch["obs"], new_action, done_mask=done_mask_obs)
-        log_prob = _ensure_time_dim(log_prob)
-        q1_pi = _ensure_time_dim(q1_pi)
-        q2_pi = _ensure_time_dim(q2_pi)
-        actor_loss = self._masked_mean(self.alpha.detach() * log_prob - torch.min(q1_pi, q2_pi), learn_mask)
+        actor_loss, alpha_loss = self._update_actor_and_alpha(batch, learn_mask, done_mask_obs)
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
         self.actor_optimizer.step()
 
-        alpha_loss = torch.tensor(0.0, device=self.device)
         if self.config.auto_entropy_tuning:
-            alpha_loss = -self._masked_mean(self.log_alpha * (log_prob + self.target_entropy).detach(), learn_mask)
             self.alpha_optimizer.zero_grad()
             alpha_loss.backward()
             self.alpha_optimizer.step()
