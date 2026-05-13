@@ -801,8 +801,7 @@ class WebotsEnv:
             info["reset_reason"] = "low_score"
             info["success"] = False
 
-        if truncated:
-            # Make non-success timeouts clearly worse than goal completion.
+        if truncated and not terminated:
             distance_ratio = float(np.clip(self.current_distance / max(self._reference_distance, 1e-6), 0.0, 2.0))
             timeout_penalty = -10.0 - 20.0 * distance_ratio
             reward += timeout_penalty
