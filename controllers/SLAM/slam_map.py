@@ -91,11 +91,6 @@ def _wrap_angle(a: float) -> float:
     return float((a + np.pi) % (2 * np.pi) - np.pi)
 
 
-def _rot2(theta: float) -> np.ndarray:
-    c, s = np.cos(theta), np.sin(theta)
-    return np.array([[c, -s], [s, c]])
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Pose-graph optimiser (Levenberg-Marquardt)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -121,7 +116,7 @@ class PoseGraphOptimizer:
         converge_thr: float = 1e-4,
     ) -> None:
         self.max_iter = max_iter
-        self.lm_lambda = lm_lambda_init
+        self.lm_lambda_init = lm_lambda_init
         self.lm_factor = lm_lambda_factor
         self.converge_thr = converge_thr
 
@@ -148,6 +143,7 @@ class PoseGraphOptimizer:
         node_idx = {n.id: i for i, n in enumerate(nodes)}
 
         prev_cost = self._total_cost(nodes, edges, node_idx)
+        lm_lambda = self.lm_lambda_init
 
         for iteration in range(self.max_iter):
             n_poses = len(nodes)
@@ -187,7 +183,7 @@ class PoseGraphOptimizer:
             b_vec[:3] = 0.0
 
             # ── Levenberg-Marquardt damping ──────────────────────────────────
-            H_damp = H_mat + self.lm_lambda * np.eye(dim)
+            H_damp = H_mat + lm_lambda * np.eye(dim)
 
             # ── Solve linear system ──────────────────────────────────────────
             try:
@@ -207,10 +203,10 @@ class PoseGraphOptimizer:
             # ── Adjust damping ───────────────────────────────────────────────
             if new_cost < prev_cost:
                 nodes = new_nodes
-                self.lm_lambda /= self.lm_factor
+                lm_lambda /= self.lm_factor
                 prev_cost = new_cost
             else:
-                self.lm_lambda *= self.lm_factor
+                lm_lambda *= self.lm_factor
 
             if np.linalg.norm(delta) < self.converge_thr:
                 break
@@ -553,7 +549,6 @@ class SLAMMap:
             plt.tight_layout()
             plt.savefig(output_path, dpi=150, bbox_inches="tight")
             plt.close(fig)
-            print(f"[SLAMMap] Plot saved → {output_path}", flush=True)
 
         except Exception as exc:
             print(f"[SLAMMap] save_plot failed: {exc}", flush=True)

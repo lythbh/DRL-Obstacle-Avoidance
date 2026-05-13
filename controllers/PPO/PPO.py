@@ -6,111 +6,211 @@ from pathlib import Path
 from typing import Tuple, List, Optional, Dict, Any, Union
 import numpy as np
 import torch
-from torch import multiprocessing, nn
+from torch import nn
+from torch.distributions import Normal
 from torch.nn.utils.rnn import pad_sequence
-from torch.distributions import Independent, Normal
 
 RecurrentState = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
+from controllers.common.reward_defaults import (
+    COLLISION_THRESHOLD,
+    COLLISION_PENALTY,
+    DISTANCE_REWARD_SCALE,
+    ENABLE_SLAM,
+    ENDPOINT,
+    FORCE_CPU,
+    GOAL_HOLD_REWARD,
+    GOAL_STOP_SPEED_THRESHOLD,
+    GOAL_OVERSHOOT_PENALTY,
+    GOAL_SPEED_PENALTY,
+    GOAL_STOP_BONUS,
+    GOAL_THRESHOLD,
+    GOAL_SUCCESS_REWARD,
+    HEADING_REWARD_SCALE,
+    IMU_FEATURE_DIM,
+    LIDAR_SECTOR_DIM,
+    LOW_SCORE_THRESHOLD,
+    MAX_SPEED,
+    MAX_STEERING_ANGLE,
+    MAX_STEPS,
+    MIN_SPEED,
+    MOTION_REWARD_SCALE,
+    NEW_BEST_DISTANCE_BONUS,
+    OCCUPANCY_GRID_SHAPE,
+    POSE_GOAL_DIM,
+    PROGRESS_REWARD_SCALE,
+    PROFILE_SLAM,
+    RESET_SETTLE_STEPS,
+    REWARD_SCALE,
+    SAFETY_REWARD_SCALE,
+    SAVE_SLAM_PLOTS,
+    SLAM_PROFILE_INTERVAL,
+    START_POSITION,
+    START_POSITION_NOISE,
+    START_ROTATION,
+    START_YAW_NOISE,
+    STEP_PENALTY,
+)
+from controllers.common.training_defaults import PPODefaults, RecurrentDefaults
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 
+# Use shared checkpoint helpers to avoid duplication across controllers.
+from controllers.common.checkpoints import (
+    checkpoint_path as _shared_checkpoint_path,
+    run_checkpoint_dir as _shared_run_checkpoint_dir,
+    run_checkpoint_path as _shared_run_checkpoint_path,
+    load_checkpoint as _shared_load_checkpoint,
+    make_checkpoint_header as _make_checkpoint_header,
+    save_checkpoint_file as _save_checkpoint_file,
+)
+
 
 def _checkpoint_path(filename: str) -> str:
-    """Return a checkpoint path pinned to the PPO controller directory."""
-    return str(_CONTROLLER_DIR / filename)
+    """Controller-local wrapper around shared `checkpoint_path` helper."""
+    return _shared_checkpoint_path(_CONTROLLER_DIR, filename)
 
 
-def _dated_checkpoint_path(run_id: str, filename: str) -> str:
-    """Return a checkpoint path inside the timestamped checkpoint folder."""
-    checkpoint_dir = _CHECKPOINT_DIR / run_id
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    return str(checkpoint_dir / filename)
+def _run_checkpoint_dir(run_id: str) -> Path:
+    """Controller-local wrapper around shared `run_checkpoint_dir` helper."""
+    return _shared_run_checkpoint_dir(_CHECKPOINT_DIR, run_id)
+
+
+def _run_checkpoint_path(run_id: str, prefix: str, extension: str = "pth") -> str:
+    """Controller-local wrapper around shared `run_checkpoint_path` helper."""
+    return _shared_run_checkpoint_path(_CHECKPOINT_DIR, run_id, prefix, extension)
 
 
 def _load_checkpoint(path: str, map_location: Union[str, torch.device]) -> Dict[str, Any]:
-    """Load local controller checkpoints without relying on PyTorch's changing default."""
-    try:
-        return torch.load(path, map_location=map_location, weights_only=False)
-    except TypeError:
-        return torch.load(path, map_location=map_location)
+    """Controller-local wrapper around shared `load_checkpoint` helper."""
+    return _shared_load_checkpoint(path, map_location)
+
 
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
+
+"""
+Sections:
+ - Config: Training and environment hyperparameters
+ - PPOAgent: Recurrent actor-critic model with policy and value updates
+ - train(): Main training loop integrating environment, rollout, and optimization
+"""
+
 @dataclass
 class Config:
-    """Training and environment hyperparameters."""
+    """
+    Training and environment hyperparameters for PPO.
     
-    # Training
-    episodes: int = 500
-    update_every: int = 5  # PPO update frequency (episodes)
-    epochs: int = 4  # Optimization epochs per update
-    batch_size: int = 64
+    Consolidates all hyperparameters for the actor-critic optimization algorithm
+    (learning rates, batch size, epochs, entropy coefficient) and environment
+    configuration (reward shaping, action bounds, episode setup). Validation in
+    __post_init__ ensures internal consistency.
+    """
     
-    # PPO Agent
-    gamma: float = 0.99  # Discount factor
-    epsilon: float = 0.2  # PPO clip parameter
-    learning_rate: float = 1e-4
-    entropy_coef: float = 0.02  # Entropy regularization
-    hidden_size: int = 128  # Network hidden layer size
-    latent_size: int = 128  # Encoder output size before the recurrent core
-    lstm_hidden_size: int = 128  # Hidden size of the recurrent core
-    lstm_layers: int = 1
-    recurrent_cell: str = "gru" # "lstm" or "gru"
-    lidar_sector_dim: int = 16
-    pose_goal_dim: int = 7  # [x, y] + [sin/cos heading, sin/cos goal_error, norm dist]
-    imu_feature_dim: int = 10  # accel(3) + gyro(3) + quaternion(4)
-    occupancy_grid_shape: Optional[Tuple[int, ...]] = None  # Optional CNN shape, e.g. (1, 16, 16)
+    episodes: int = PPODefaults.episodes
+    update_every: int = PPODefaults.update_every
+    epochs: int = PPODefaults.epochs
+    batch_size: int = PPODefaults.batch_size
+    save_every: int = PPODefaults.save_every
     
-    # Environment
-    max_steps: int = 4000  # Max steps per episode
-    collision_threshold: float = 0.1  # LiDAR distance threshold for collision
-    low_score_threshold: float = -800.0  # Episode reset threshold
-    collision_penalty: float = -20.0  # Penalty when collision happens
-    progress_reward_scale: float = 3.0  # Scale for distance-progress reward
-    distance_reward_scale: float = 2.0  # Dense reward for being closer to the goal than the start state
-    heading_reward_scale: float = 0.5  # Bonus when facing toward the goal
-    safety_reward_scale: float = 0.2  # Encourages keeping distance from obstacles
-    motion_reward_scale: float = 0.05  # Bonus for moving forward to avoid stop-policy collapse
-    new_best_distance_bonus: float = 1.0  # Bonus when reaching a new closest distance to goal
-    step_penalty: float = -0.01  # Small per-step penalty to encourage efficiency
-    endpoint: Tuple[float, float] = (2.0, 0.0)  # Goal location
-    goal_threshold: float = 0.1  # Radius around goal considered reached
-    goal_stop_bonus: float = 120.0  # Extra reward for stopping at the goal
-    goal_hold_reward: float = 10.0  # Reward per timestep while inside goal threshold
-    goal_speed_penalty: float = -60.0  # Penalty for still moving inside the goal region
-    goal_overshoot_penalty: float = -50.0  # Penalty for driving past the goal region
-    goal_score_threshold: float = 5000.0  # End episode when total reward reaches this threshold
-    reference_distance: Optional[float] = None  # Start-to-goal distance, filled in at init
+    gamma: float = 0.99
+    epsilon: float = 0.2
+    learning_rate: float = PPODefaults.learning_rate
+    entropy_coef: float = PPODefaults.entropy_coef
+    hidden_size: int = PPODefaults.hidden_size
+    latent_size: int = PPODefaults.latent_size
+    lstm_hidden_size: int = PPODefaults.lstm_hidden_size
+    lstm_layers: int = PPODefaults.lstm_layers
+    recurrent_cell: str = PPODefaults.recurrent_cell
+    sequence_length: int = RecurrentDefaults.sequence_length
+    burn_in: int = RecurrentDefaults.burn_in
+    sequence_stride: int = RecurrentDefaults.sequence_stride
+    lidar_sector_dim: int = LIDAR_SECTOR_DIM
+    pose_goal_dim: int = POSE_GOAL_DIM
+    imu_feature_dim: int = IMU_FEATURE_DIM
+    occupancy_grid_shape: Optional[Tuple[int, ...]] = OCCUPANCY_GRID_SHAPE
     
-    # Robot Control
-    max_steering_angle: float = 0.9
-    min_speed: float = 0.0
-    start_position: Optional[List[float]] = None  # [x, y, z]
-    start_rotation: Optional[List[float]] = None  # [x, y, z, w]
-    start_position_noise: float = 0.03  # Random position jitter at reset
-    start_yaw_noise: float = 0.2  # Random yaw jitter at reset
+    max_steps: int = MAX_STEPS
+    collision_threshold: float = COLLISION_THRESHOLD
+    low_score_threshold: float = LOW_SCORE_THRESHOLD
+    collision_penalty: float = COLLISION_PENALTY
+    progress_reward_scale: float = PROGRESS_REWARD_SCALE
+    distance_reward_scale: float = DISTANCE_REWARD_SCALE
+    heading_reward_scale: float = HEADING_REWARD_SCALE
+    safety_reward_scale: float = SAFETY_REWARD_SCALE
+    motion_reward_scale: float = MOTION_REWARD_SCALE
+    new_best_distance_bonus: float = NEW_BEST_DISTANCE_BONUS
+    step_penalty: float = STEP_PENALTY
+    endpoint: Tuple[float, float] = ENDPOINT
+    goal_threshold: float = GOAL_THRESHOLD
+    goal_stop_speed_threshold: float = GOAL_STOP_SPEED_THRESHOLD
+    goal_success_reward: float = GOAL_SUCCESS_REWARD
+    goal_stop_bonus: float = GOAL_STOP_BONUS
+    goal_hold_reward: float = GOAL_HOLD_REWARD
+    goal_speed_penalty: float = GOAL_SPEED_PENALTY
+    goal_overshoot_penalty: float = GOAL_OVERSHOOT_PENALTY
+    reference_distance: Optional[float] = None
+
+    enable_slam: bool = ENABLE_SLAM
+    profile_slam: bool = PROFILE_SLAM
+    slam_profile_interval: int = SLAM_PROFILE_INTERVAL
+    save_slam_plots: bool = SAVE_SLAM_PLOTS
+    force_cpu: bool = FORCE_CPU
     
-    # Motor/Sensor Config
-    max_speed: float = 10.0
-    reset_settle_steps: int = 10  # Steps to wait for physics to settle after reset
+    max_steering_angle: float = MAX_STEERING_ANGLE
+    min_speed: float = MIN_SPEED
+    start_position: Optional[List[float]] = None
+    start_rotation: Optional[List[float]] = None
+    start_position_noise: float = START_POSITION_NOISE
+    start_yaw_noise: float = START_YAW_NOISE
+    
+    max_speed: float = MAX_SPEED
+    reset_settle_steps: int = RESET_SETTLE_STEPS
     
     def __post_init__(self) -> None:
         """Initialize defaults for mutable fields."""
         self.recurrent_cell = self.recurrent_cell.lower().strip()
         if self.recurrent_cell not in {"lstm", "gru"}:
             raise ValueError(f"Unsupported recurrent_cell: {self.recurrent_cell}")
+        if self.episodes <= 0:
+            raise ValueError("episodes must be greater than 0")
+        if self.update_every <= 0:
+            raise ValueError("update_every must be greater than 0")
+        if self.epochs <= 0:
+            raise ValueError("epochs must be greater than 0")
+        if self.batch_size <= 0:
+            raise ValueError("batch_size must be greater than 0")
+        if self.sequence_length <= 0:
+            raise ValueError("sequence_length must be greater than 0")
+        if self.burn_in < 0:
+            raise ValueError("burn_in must be non-negative")
+        if self.burn_in >= self.sequence_length:
+            raise ValueError("burn_in must be smaller than sequence_length")
+        if self.sequence_stride <= 0:
+            raise ValueError("sequence_stride must be greater than 0")
+        if self.max_steps <= 0:
+            raise ValueError("max_steps must be greater than 0")
+        if self.max_steering_angle <= 0.0:
+            raise ValueError("max_steering_angle must be greater than 0")
+        if self.max_speed <= self.min_speed:
+            raise ValueError("max_speed must be greater than min_speed")
+        if self.save_every < 0:
+            raise ValueError("save_every must be non-negative")
+        if self.goal_stop_speed_threshold <= 0.0:
+            raise ValueError("goal_stop_speed_threshold must be greater than 0")
+        if self.slam_profile_interval <= 0:
+            raise ValueError("slam_profile_interval must be greater than 0")
         if self.start_position is None:
-            self.start_position = [-2.0, 0.0, 0.02]
+            self.start_position = list(START_POSITION)
         if self.start_rotation is None:
-            self.start_rotation = [0.0, 0.0, 1.0, 0.0]
+            self.start_rotation = list(START_ROTATION)
         if self.reference_distance is None:
             start_xy = np.array(self.start_position[:2], dtype=np.float32)
             endpoint_xy = np.array(self.endpoint, dtype=np.float32)
@@ -120,11 +220,26 @@ class Config:
 
 
 # ============================================================================
-# PPO AGENT
+# PROXIMAL POLICY OPTIMIZATION AGENT
 # ============================================================================
 
+
 class PPOAgent:
-    """Proximal Policy Optimization agent with a recurrent actor-critic core."""
+    """
+    Proximal Policy Optimization (PPO) agent with recurrent actor-critic network.
+    
+    Maintains a shared recurrent feature encoder with separate policy and value heads.
+    Optimizes the policy using the PPO algorithm: clipped surrogate objective for stability
+    and shared critic loss for value estimation. Entropy regularization encourages exploration.
+    
+    Sections:
+    - Model construction and device management
+    - Checkpoint metadata and validation
+    - Action bounds and policy distribution
+    - Action sampling for rollouts
+    - Trajectory processing and advantage computation
+    - Policy evaluation and optimization
+    """
 
     def __init__(self, obs_size: int, action_dim: int, config: Config):
         self.config = config
@@ -139,14 +254,19 @@ class PPOAgent:
         model_class = GRUActorCritic if recurrent_cell == "gru" else LSTMActorCritic
         self.model = model_class(self.obs_size, self.action_dim, self.config).to(self.device)
         self.actor = self.model.policy_head
-        self.critic = self.model.value_head
+        with torch.no_grad():
+            if self.actor.bias is not None and self.action_dim > 1:
+                # Mild low-speed bias: keep early rollouts controllable without freezing motion.
+                self.actor.bias[1] = -0.8
         self.actor_log_std = nn.Parameter(torch.full((self.action_dim,), -0.5, dtype=torch.float32, device=self.device))
         params = list(self.model.parameters()) + [self.actor_log_std]
         self.optimizer = torch.optim.Adam(params, lr=self.config.learning_rate)
 
     def _get_device(self) -> torch.device:
-        """Get appropriate device (GPU or CPU)."""
-        return torch.device("cpu")
+        """Get appropriate device (CUDA when available, unless force_cpu is set)."""
+        if self.config.force_cpu or not torch.cuda.is_available():
+            return torch.device("cpu")
+        return torch.device("cuda")
 
     def get_initial_state(self, batch_size: int = 1) -> RecurrentState:
         """Expose recurrent state initialization for rollouts."""
@@ -221,49 +341,77 @@ class PPOAgent:
         )
         return low, high
 
-    def _policy_stats(self, policy_output: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return stable mean, std, and base-distribution entropy."""
+    def _action_affine(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Get action bounds and affine transform parameters."""
+        low, high = self._action_bounds()
+        center = (high + low) / 2.0
+        scale = (high - low) / 2.0
+        return low, high, center, scale
+
+    def _policy_stats(self, policy_output: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Extract mean and log-standard deviation from policy network output.
+        
+        Includes numerical stability measures: clamping log-std to valid bounds
+        and replacing NaN/inf values with defaults.
+        """
         policy_output = torch.nan_to_num(policy_output, nan=0.0, posinf=1.0, neginf=-1.0)
         safe_actor_log_std = torch.nan_to_num(self.actor_log_std, nan=-0.5, posinf=2.0, neginf=-5.0)
         safe_actor_log_std = safe_actor_log_std.clamp(-5.0, 2.0)
         log_std = safe_actor_log_std.expand_as(policy_output)
         std = torch.nan_to_num(log_std.exp(), nan=1.0, posinf=7.5, neginf=1e-3).clamp_min(1e-3)
-        base_dist = Independent(Normal(policy_output, std), 1)
-        entropy = torch.nan_to_num(base_dist.entropy(), nan=0.0, posinf=0.0, neginf=0.0)
-        return policy_output, std, entropy
+        return policy_output, std
 
-    def _squash_action(self, pre_tanh_action: torch.Tensor) -> torch.Tensor:
-        """Map unconstrained actions to environment action bounds."""
-        low, high = self._action_bounds()
-        center = (high + low) / 2.0
-        scale = (high - low) / 2.0
+    def _squash_action(self, pre_tanh_action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Map pre-tanh actions to bounded environment actions."""
+        low, high, center, scale = self._action_affine()
         squashed = torch.tanh(pre_tanh_action)
         action = squashed * scale + center
         eps = 1e-5
-        return torch.max(torch.min(action, high - eps), low + eps)
+        action = torch.max(torch.min(action, high - eps), low + eps)
+        return action, squashed
 
-    def _unsquash_action(self, action: torch.Tensor) -> torch.Tensor:
-        """Map bounded actions back to pre-tanh space for stable log-prob evaluation."""
-        low, high = self._action_bounds()
-        center = (high + low) / 2.0
-        scale = (high - low) / 2.0
-        normalized = (action - center) / scale.clamp_min(1e-6)
-        normalized = normalized.clamp(-1.0 + 1e-5, 1.0 - 1e-5)
-        return 0.5 * (torch.log1p(normalized) - torch.log1p(-normalized))
-
-    def _log_prob_from_action(
+    def _log_prob_from_pre_tanh(
         self,
         mean: torch.Tensor,
         std: torch.Tensor,
-        action: torch.Tensor,
+        pre_tanh_action: torch.Tensor,
+        squashed_action: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        """Compute log-prob under a squashed Gaussian policy."""
-        pre_tanh_action = self._unsquash_action(action)
-        base_dist = Independent(Normal(mean, std), 1)
-        base_log_prob = base_dist.log_prob(pre_tanh_action)
-        correction = torch.log(1.0 - torch.tanh(pre_tanh_action).pow(2) + 1e-6).sum(dim=-1)
-        log_prob = base_log_prob - correction
+        """Compute stable log-probability for tanh-squashed Gaussian actions."""
+        if squashed_action is None:
+            squashed_action = torch.tanh(pre_tanh_action)
+        _, _, _, scale = self._action_affine()
+        eps = 1e-6
+        dist = Normal(mean, std)
+        log_prob = dist.log_prob(pre_tanh_action)
+        log_prob -= torch.log(scale + eps)
+        log_prob -= torch.log(1.0 - squashed_action.pow(2) + eps)
+        log_prob = log_prob.sum(dim=-1)
         return torch.nan_to_num(log_prob, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _inverse_squash_action(self, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Convert bounded actions back to pre-tanh space with safe clipping."""
+        low, high, center, scale = self._action_affine()
+        eps = 1e-6
+        safe_action = torch.max(torch.min(action, high - 1e-5), low + 1e-5)
+        squashed = ((safe_action - center) / (scale + eps)).clamp(-1.0 + eps, 1.0 - eps)
+        pre_tanh = 0.5 * (torch.log1p(squashed) - torch.log1p(-squashed))
+        pre_tanh = torch.nan_to_num(pre_tanh, nan=0.0, posinf=5.0, neginf=-5.0)
+        return pre_tanh, squashed
+
+    def _sample_action_and_log_prob(
+        self,
+        mean: torch.Tensor,
+        std: torch.Tensor,
+        deterministic: bool,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Sample bounded action and compute its stable log probability."""
+        dist = Normal(mean, std)
+        pre_tanh = mean if deterministic else dist.rsample()
+        action, squashed = self._squash_action(pre_tanh)
+        log_prob = self._log_prob_from_pre_tanh(mean, std, pre_tanh, squashed_action=squashed)
+        return action, log_prob
 
     def select_action(
         self,
@@ -272,7 +420,12 @@ class PPOAgent:
         done: bool = False,
         deterministic: bool = False,
     ) -> Tuple[np.ndarray, torch.Tensor, torch.Tensor, RecurrentState]:
-        """Sample a single action and advance the recurrent state."""
+        """
+        Sample an action from the policy for environment interaction.
+        
+        Returns action as numpy array and state value for advantage estimation,
+        along with log probability for policy gradient computation.
+        """
         done_mask = torch.tensor([float(done)], dtype=torch.float32, device=self.device)
         with torch.no_grad():
             policy_output, state_value, next_state = self.model(
@@ -280,10 +433,8 @@ class PPOAgent:
                 recurrent_state=recurrent_state,
                 done_mask=done_mask,
             )
-            mean, std, _ = self._policy_stats(policy_output)
-            pre_tanh_action = mean if deterministic else mean + std * torch.randn_like(mean)
-            action = self._squash_action(pre_tanh_action)
-            log_prob = self._log_prob_from_action(mean, std, action)
+            mean, std = self._policy_stats(policy_output)
+            action, log_prob = self._sample_action_and_log_prob(mean, std, deterministic=deterministic)
         return (
             action.squeeze(0).cpu().numpy(),
             log_prob.squeeze(0),
@@ -291,10 +442,10 @@ class PPOAgent:
             next_state,
         )
 
-    def calculate_returns(self, rewards: np.ndarray) -> np.ndarray:
-        """Calculate cumulative discounted returns."""
+    def calculate_returns(self, rewards: np.ndarray, bootstrap_value: float = 0.0) -> np.ndarray:
+        """Compute discounted cumulative returns for advantage calculation."""
         returns = np.zeros(len(rewards), dtype=np.float32)
-        discounted_return = 0.0
+        discounted_return = float(bootstrap_value)
         for t in reversed(range(len(rewards))):
             discounted_return = rewards[t] + self.config.gamma * discounted_return
             returns[t] = discounted_return
@@ -304,7 +455,12 @@ class PPOAgent:
         self,
         trajectories: List[Dict[str, np.ndarray]],
     ) -> Dict[str, torch.Tensor]:
-        """Pad variable-length episode trajectories to a batch of sequences."""
+        """
+        Pad variable-length trajectories into a fixed-size batch for GPU computation.
+        
+        Converts numpy arrays to tensors and pads sequences to the maximum length in the batch,
+        with masks indicating valid (non-padded) elements.
+        """
         obs_tensors = [torch.as_tensor(t["observations"], dtype=torch.float32, device=self.device) for t in trajectories]
         act_tensors = [torch.as_tensor(t["actions"], dtype=torch.float32, device=self.device) for t in trajectories]
         logp_tensors = [torch.as_tensor(t["log_probs"], dtype=torch.float32, device=self.device) for t in trajectories]
@@ -336,27 +492,31 @@ class PPOAgent:
             "done_mask": pad_sequence(reset_masks, batch_first=True),
         }
 
-    def evaluate_sequences(
-        self,
-        observations: torch.Tensor,
-        actions: torch.Tensor,
-        done_mask: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Evaluate PPO quantities over full recurrent sequences."""
-        policy_output, state_values, _ = self.model(
-            observations,
-            recurrent_state=self.get_initial_state(observations.shape[0]),
-            done_mask=done_mask,
-        )
-        mean, std, entropy = self._policy_stats(policy_output)
-        log_probs = self._log_prob_from_action(mean, std, actions)
-        return log_probs, state_values, entropy
+    def _split_trajectories(self, trajectories: List[Dict[str, np.ndarray]]) -> List[Dict[str, np.ndarray]]:
+        """
+        Split full episodes into overlapping shorter sequences for recurrent network updates.
+        
+        Uses a sliding window with configured stride to create training sequences,
+        allowing the recurrent network to maintain state continuity.
+        """
+        chunked_trajectories: List[Dict[str, np.ndarray]] = []
+        chunk_length = self.config.sequence_length
+        chunk_stride = self.config.sequence_stride
+        for trajectory in trajectories:
+            total_length = len(trajectory["returns"])
+            for start in range(0, total_length, chunk_stride):
+                end = min(start + chunk_length, total_length)
+                if end <= start:
+                    continue
+                chunked_trajectories.append({key: value[start:end] for key, value in trajectory.items()})
+                if end >= total_length:
+                    break
+        return chunked_trajectories
 
-    def update(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
-        """Update the recurrent PPO policy from complete episodes."""
-        if not trajectories:
-            return
-
+    def _sanitize_trajectories(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
+        """Replace NaN and inf values in trajectory data with safe defaults."""
+        low = np.array([-self.config.max_steering_angle, self.config.min_speed], dtype=np.float32)
+        high = np.array([self.config.max_steering_angle, self.config.max_speed], dtype=np.float32)
         for trajectory in trajectories:
             trajectory["observations"] = np.nan_to_num(
                 trajectory["observations"], nan=0.0, posinf=1.0, neginf=-1.0
@@ -364,6 +524,7 @@ class PPOAgent:
             trajectory["actions"] = np.nan_to_num(
                 trajectory["actions"], nan=0.0, posinf=0.0, neginf=0.0
             ).astype(np.float32)
+            trajectory["actions"] = np.clip(trajectory["actions"], low + 1e-5, high - 1e-5)
             trajectory["log_probs"] = np.nan_to_num(
                 trajectory["log_probs"], nan=0.0, posinf=0.0, neginf=0.0
             ).astype(np.float32)
@@ -374,11 +535,130 @@ class PPOAgent:
                 trajectory["advantages"], nan=0.0, posinf=0.0, neginf=0.0
             ).astype(np.float32)
 
+    def _normalize_advantages(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
+        """Normalize advantages across all trajectories to zero mean and unit variance."""
         all_advantages = np.concatenate([t["advantages"] for t in trajectories], axis=0)
         adv_mean = float(all_advantages.mean())
         adv_std = float(all_advantages.std() + 1e-8)
         for trajectory in trajectories:
             trajectory["advantages"] = ((trajectory["advantages"] - adv_mean) / adv_std).astype(np.float32)
+
+    @staticmethod
+    def _sequence_loss_mask(valid_mask: torch.Tensor, burn_in: int) -> torch.Tensor:
+        """
+        Build a loss mask that ignores initial burn-in steps per sequence.
+
+        Keeps at least one valid step active for very short sequences.
+        """
+        valid_lengths = valid_mask.sum(dim=1).to(dtype=torch.long)
+        burn_tensor = torch.full_like(valid_lengths, burn_in)
+        start_index = torch.minimum(burn_tensor, torch.clamp(valid_lengths - 1, min=0))
+        time_index = torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0)
+        return valid_mask * (time_index >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)
+
+    def _update_batch(self, batch: Dict[str, torch.Tensor]) -> None:
+        """
+        Perform a single PPO policy gradient update on one batch of data.
+        
+        Computes clipped surrogate objective for policy, smooth L1 loss for value estimation,
+        and entropy regularization. Applies gradient clipping for stability.
+        """
+        log_probs_new, values, entropy = self.evaluate_sequences(
+            batch["observations"],
+            batch["actions"],
+            batch["done_mask"],
+        )
+        if not (torch.isfinite(log_probs_new).all() and torch.isfinite(values).all() and torch.isfinite(entropy).all()):
+            print("[PPO] WARNING: Skipping update batch due to non-finite policy evaluation.", flush=True)
+            return
+
+        valid_mask = batch["valid_mask"]
+        learn_mask = self._sequence_loss_mask(valid_mask, self.config.burn_in)
+        mask_bool = learn_mask > 0
+        log_ratio = torch.nan_to_num(
+            log_probs_new - batch["log_probs"],
+            nan=0.0,
+            posinf=20.0,
+            neginf=-20.0,
+        ).clamp(-20.0, 20.0)
+        ratio = torch.exp(log_ratio)
+        surrogate1 = ratio * batch["advantages"]
+        surrogate2 = torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon) * batch["advantages"]
+        surrogate = torch.where(mask_bool, torch.min(surrogate1, surrogate2), torch.zeros_like(surrogate1))
+
+        value_error = nn.functional.smooth_l1_loss(values, batch["returns"], reduction="none")
+        value_error = torch.where(mask_bool, value_error, torch.zeros_like(value_error))
+        entropy = torch.where(mask_bool, entropy, torch.zeros_like(entropy))
+
+        valid_count = learn_mask.sum().clamp_min(1.0)
+        policy_loss = -surrogate.sum() / valid_count
+        value_loss = value_error.sum() / valid_count
+        entropy_bonus = entropy.sum() / valid_count
+        loss = policy_loss + 0.5 * value_loss - self.config.entropy_coef * entropy_bonus
+
+        if not torch.isfinite(loss):
+            print("[PPO] WARNING: Skipping update batch due to non-finite loss.", flush=True)
+            return
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        gradients_finite = True
+        for parameter in list(self.model.parameters()) + [self.actor_log_std]:
+            if parameter.grad is not None and not torch.isfinite(parameter.grad).all():
+                gradients_finite = False
+                break
+        if not gradients_finite:
+            print("[PPO] WARNING: Skipping update batch due to non-finite gradients.", flush=True)
+            self.optimizer.zero_grad()
+            return
+
+        nn.utils.clip_grad_norm_(list(self.model.parameters()) + [self.actor_log_std], max_norm=1.0)
+        self.optimizer.step()
+        with torch.no_grad():
+            self.actor_log_std.data.copy_(
+                torch.nan_to_num(self.actor_log_std.data, nan=-0.5, posinf=2.0, neginf=-5.0).clamp(-5.0, 2.0)
+            )
+
+    def evaluate_sequences(
+        self,
+        observations: torch.Tensor,
+        actions: torch.Tensor,
+        done_mask: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Evaluate policy log probabilities, state values, and entropy over full sequences.
+        
+        Used during policy updates to compute the policy gradient and critic loss.
+        """
+        policy_output, state_values, _ = self.model(
+            observations,
+            recurrent_state=self.get_initial_state(observations.shape[0]),
+            done_mask=done_mask,
+        )
+        mean, std = self._policy_stats(policy_output)
+        safe_actions = torch.nan_to_num(actions, nan=0.0, posinf=0.0, neginf=0.0)
+        pre_tanh_actions, squashed_actions = self._inverse_squash_action(safe_actions)
+        log_probs = self._log_prob_from_pre_tanh(mean, std, pre_tanh_actions, squashed_actions)
+        entropy_pre_tanh = Normal(mean, std).rsample()
+        entropy = -self._log_prob_from_pre_tanh(mean, std, entropy_pre_tanh, torch.tanh(entropy_pre_tanh))
+        return log_probs, state_values, entropy
+
+    def update(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
+        """
+        Update policy from a collection of complete episodes.
+        
+        Processes trajectories through sanitization, advantage normalization, and splitting
+        into sequences. Then performs multiple epochs of SGD with batch updates.
+        """
+        if not trajectories:
+            return
+
+        self._sanitize_trajectories(trajectories)
+        self._normalize_advantages(trajectories)
+
+        trajectories = self._split_trajectories(trajectories)
+        if not trajectories:
+            return
 
         num_episodes = len(trajectories)
         for _ in range(self.config.epochs):
@@ -386,63 +666,14 @@ class PPOAgent:
             for start in range(0, num_episodes, self.config.batch_size):
                 batch_indices = indices[start : start + self.config.batch_size]
                 batch = self._prepare_batch([trajectories[idx] for idx in batch_indices])
-
-                log_probs_new, values, entropy = self.evaluate_sequences(
-                    batch["observations"],
-                    batch["actions"],
-                    batch["done_mask"],
-                )
-
-                valid_mask = batch["valid_mask"]
-                mask_bool = valid_mask > 0
-                log_ratio = torch.nan_to_num(
-                    log_probs_new - batch["log_probs"],
-                    nan=0.0,
-                    posinf=20.0,
-                    neginf=-20.0,
-                ).clamp(-20.0, 20.0)
-                ratio = torch.exp(log_ratio)
-                surrogate1 = ratio * batch["advantages"]
-                surrogate2 = (
-                    torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon)
-                    * batch["advantages"]
-                )
-                surrogate = torch.min(surrogate1, surrogate2)
-                surrogate = torch.where(mask_bool, surrogate, torch.zeros_like(surrogate))
-
-                value_error = (values - batch["returns"]) ** 2
-                value_error = torch.where(mask_bool, value_error, torch.zeros_like(value_error))
-
-                entropy = torch.where(mask_bool, entropy, torch.zeros_like(entropy))
-                valid_count = valid_mask.sum().clamp_min(1.0)
-                policy_loss = -surrogate.sum() / valid_count
-                value_loss = value_error.sum() / valid_count
-                entropy_bonus = entropy.sum() / valid_count
-
-                loss = policy_loss + 0.5 * value_loss - self.config.entropy_coef * entropy_bonus
-                if not torch.isfinite(loss):
-                    print("[PPO] WARNING: Skipping update batch due to non-finite loss.", flush=True)
-                    continue
-                self.optimizer.zero_grad()
-                loss.backward()
-                gradients_finite = True
-                for parameter in list(self.model.parameters()) + [self.actor_log_std]:
-                    if parameter.grad is not None and not torch.isfinite(parameter.grad).all():
-                        gradients_finite = False
-                        break
-                if not gradients_finite:
-                    print("[PPO] WARNING: Skipping update batch due to non-finite gradients.", flush=True)
-                    self.optimizer.zero_grad()
-                    continue
-                nn.utils.clip_grad_norm_(list(self.model.parameters()) + [self.actor_log_std], max_norm=1.0)
-                self.optimizer.step()
-                with torch.no_grad():
-                    self.actor_log_std.data.copy_(
-                        torch.nan_to_num(self.actor_log_std.data, nan=-0.5, posinf=2.0, neginf=-5.0).clamp(-5.0, 2.0)
-                    )
+                self._update_batch(batch)
 
     def load_model(self, model_path: str) -> None:
-        """Load saved recurrent model weights."""
+        """
+        Load a saved PPO checkpoint and restore the recurrent model.
+        
+        Validates checkpoint metadata and rebuilds the recurrent cell if needed.
+        """
         checkpoint = _load_checkpoint(model_path, map_location=self.device)
         checkpoint_algorithm = str(checkpoint.get("algorithm", "ppo")).lower().strip()
         if checkpoint_algorithm != "ppo":
@@ -467,11 +698,17 @@ class PPOAgent:
 
 
 # ============================================================================
-# TRAINING
+# TRAINING LOOP
 # ============================================================================
 
+
 def train(config: Optional[Config] = None) -> None:
-    """Run PPO training loop.
+    """
+    Main training loop integrating environment interaction, rollout collection, and policy updates.
+    
+    Collects on-policy experience by rolling out the current policy in the Webots simulator,
+    accumulates returns and advantages, and performs periodic PPO updates. Maintains metrics
+    for progress tracking and saves checkpoints of the best models.
     
     Args:
         config: Configuration object (uses defaults if None)
@@ -479,32 +716,40 @@ def train(config: Optional[Config] = None) -> None:
     if config is None:
         config = Config()
     
-    # Initialize Webots supervisor
     _init_supervisor()
     
-    # Create environment and agent
     env = WebotsEnv(config)
     env.reset()
     run_id = Path(env.run_folder).name
     obs_size = env.observation_size
     action_dim = env.action_dim
     agent = PPOAgent(obs_size, action_dim, config)
-    
+    checkpoint_dir = _run_checkpoint_dir(run_id)
+    final_model_path = _run_checkpoint_path(run_id, "final")
     print(
-        f"[TRAIN][PPO] episodes={config.episodes} update_every={config.update_every} "
-        f"obs={obs_size} act={action_dim} cell={config.recurrent_cell.upper()}",
+        f"[TRAIN][PPO] rnn={config.recurrent_cell.upper()} "
+        f"weights_dir={checkpoint_dir} final={final_model_path}",
         flush=True,
     )
     
-    # Training buffers
+    print(
+        f"[TRAIN][PPO] episodes={config.episodes} update_every={config.update_every} "
+        f"obs={obs_size} act={action_dim} cell={config.recurrent_cell.upper()} "
+        f"seq={config.sequence_length} burn_in={config.burn_in}",
+        flush=True,
+    )
+    
     rollout_trajectories: List[Dict[str, np.ndarray]] = []
     best_reward = float('-inf')
     best_goal_reward = float('-inf')
     best_goal_episode: Optional[int] = None
     reward_window: List[float] = []
+    success_window: List[float] = []
+    goal_touch_window: List[float] = []
+    collision_window: List[float] = []
+    timeout_window: List[float] = []
     start_time = time.perf_counter()
     
-    # Training loop
     for episode in range(config.episodes):
         obs, _ = env.reset()
         done = False
@@ -514,25 +759,25 @@ def train(config: Optional[Config] = None) -> None:
         episode_log_probs: List[float] = []
         episode_rewards: List[float] = []
         episode_end_reason = "max_steps"
+        episode_goal_reached = False
+        episode_success = False
         recurrent_state = agent.get_initial_state(batch_size=1)
         prev_done = True
         
         while not done:
-            # Select action from the current policy for every transition so the
-            # rollout stays on-policy for PPO updates.
             action, log_prob, _, recurrent_state = agent.select_action(
                 obs,
                 recurrent_state=recurrent_state,
                 done=prev_done,
             )
             
-            # Step environment
             obs_next, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             prev_done = done
             episode_step += 1
+            episode_goal_reached = episode_goal_reached or bool(info.get("goal_reached", False))
+            episode_success = bool(info.get("success", False))
             
-            # Track termination reason
             if done:
                 if info.get("reset_reason") == "low_score":
                     episode_end_reason = "low_score"
@@ -543,7 +788,6 @@ def train(config: Optional[Config] = None) -> None:
                 elif truncated:
                     episode_end_reason = "max_steps"
             
-            # Accumulate
             episode_observations.append(obs)
             episode_actions.append(action)
             episode_log_probs.append(float(log_prob.item()))
@@ -551,9 +795,21 @@ def train(config: Optional[Config] = None) -> None:
             
             obs = obs_next
         
-        # Build returns and advantages per episode so reward signals do not
-        # leak across episode boundaries.
-        episode_returns = agent.calculate_returns(np.array(episode_rewards, dtype=np.float32))
+        # Build returns and advantages per episode.
+        bootstrap_value = 0.0
+        if episode_end_reason == "max_steps":
+            with torch.no_grad():
+                _, bootstrap_state_value, _ = agent.model(
+                    np.asarray(obs, dtype=np.float32),
+                    recurrent_state=recurrent_state,
+                    done_mask=np.array([0.0], dtype=np.float32),
+                )
+            bootstrap_value = float(bootstrap_state_value.squeeze(0).item())
+
+        episode_returns = agent.calculate_returns(
+            np.array(episode_rewards, dtype=np.float32) * REWARD_SCALE,
+            bootstrap_value=bootstrap_value,
+        )
         episode_obs_array = np.array(episode_observations, dtype=np.float32)
         with torch.no_grad():
             _, episode_values, _ = agent.model(
@@ -583,68 +839,66 @@ def train(config: Optional[Config] = None) -> None:
             # Clear buffers
             rollout_trajectories.clear()
         
-        # Logging
+        # Logging metadata for one concise line per episode.
         episode_reward_sum = sum(episode_rewards)
         reward_window.append(episode_reward_sum)
-        if (episode + 1) % 10 == 0 or episode_end_reason == "goal" or episode == config.episodes - 1:
-            rolling_reward = float(np.mean(reward_window[-10:]))
-            elapsed = time.perf_counter() - start_time
-            print(
-                f"[TRAIN][PPO] ep={episode + 1:03d}/{config.episodes} "
-                f"r={episode_reward_sum:8.2f} avg10={rolling_reward:8.2f} steps={episode_step:4d} "
-                f"min_d={env.min_episode_distance:5.2f} end={episode_end_reason} t={elapsed:7.1f}s",
-                flush=True,
-            )
+        success_window.append(1.0 if episode_success else 0.0)
+        goal_touch_window.append(1.0 if episode_goal_reached else 0.0)
+        collision_window.append(1.0 if episode_end_reason == "collision" else 0.0)
+        timeout_window.append(1.0 if episode_end_reason == "max_steps" else 0.0)
+        checkpoint_flags: List[str] = []
         
         if episode_end_reason == "goal":
             if episode_reward_sum > best_goal_reward:
                 best_goal_reward = episode_reward_sum
                 best_goal_episode = episode + 1
                 env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward_sum)
-                checkpoint = {
-                    'model': agent.model.state_dict(),
-                    'actor_log_std': agent.actor_log_std.detach().cpu(),
-                    'episode': best_goal_episode,
-                    'reward': best_goal_reward,
-                    'goal_episode': True,
-                    'algorithm': 'ppo',
-                    'config': asdict(config),
-                }
-                checkpoint.update(agent._checkpoint_metadata())
-                torch.save(checkpoint, _dated_checkpoint_path(run_id, 'best_model.pth'))
-                print(f"[CKPT][PPO] goal ep={best_goal_episode:03d} r={best_goal_reward:.2f}", flush=True)
+                header = _make_checkpoint_header(best_goal_episode, best_goal_reward, True, 'ppo', asdict(config))
+                header.update(agent._checkpoint_metadata())
+                header.update({'model': agent.model.state_dict(), 'actor_log_std': agent.actor_log_std.detach().cpu()})
+                _save_checkpoint_file(_CHECKPOINT_DIR, run_id, 'best', header)
+                checkpoint_flags.append("best_goal")
         elif best_goal_episode is None and episode_reward_sum > best_reward:
             best_reward = episode_reward_sum
             env.robot.slam.save_episode(env.run_folder, episode + 1, episode_reward_sum)
-            checkpoint = {
-                'model': agent.model.state_dict(),
-                'actor_log_std': agent.actor_log_std.detach().cpu(),
-                'episode': episode + 1,
-                'reward': best_reward,
-                'goal_episode': False,
-                'algorithm': 'ppo',
-                'config': asdict(config),
-            }
-            checkpoint.update(agent._checkpoint_metadata())
-            torch.save(checkpoint, _dated_checkpoint_path(run_id, 'best_model.pth'))
-            print(f"[CKPT][PPO] best ep={episode + 1:03d} r={best_reward:.2f}", flush=True)
+            header = _make_checkpoint_header(episode + 1, best_reward, False, 'ppo', asdict(config))
+            header.update(agent._checkpoint_metadata())
+            header.update({'model': agent.model.state_dict(), 'actor_log_std': agent.actor_log_std.detach().cpu()})
+            _save_checkpoint_file(_CHECKPOINT_DIR, run_id, 'best', header)
+            checkpoint_flags.append("best")
+
+        if config.save_every > 0 and (episode + 1) % config.save_every == 0:
+            latest = _make_checkpoint_header(episode + 1, episode_reward_sum, episode_end_reason == "goal", 'ppo', asdict(config))
+            latest.update(agent._checkpoint_metadata())
+            latest.update({'model': agent.model.state_dict(), 'actor_log_std': agent.actor_log_std.detach().cpu()})
+            _save_checkpoint_file(_CHECKPOINT_DIR, run_id, 'checkpoint', latest)
+            checkpoint_flags.append("latest")
+
+        rolling_reward = float(np.mean(reward_window[-10:]))
+        rolling_success = float(np.mean(success_window[-10:]))
+        rolling_goal_touch = float(np.mean(goal_touch_window[-10:]))
+        rolling_collision = float(np.mean(collision_window[-10:]))
+        rolling_timeout = float(np.mean(timeout_window[-10:]))
+        elapsed = time.perf_counter() - start_time
+        checkpoint_note = f" ckpt={'+'.join(checkpoint_flags)}" if checkpoint_flags else ""
+        print(
+            f"[TRAIN][PPO] ep={episode + 1:03d}/{config.episodes} "
+            f"r={episode_reward_sum:8.2f} avg10={rolling_reward:8.2f} steps={episode_step:4d} "
+            f"succ10={rolling_success:4.2f} touch10={rolling_goal_touch:4.2f} "
+            f"col10={rolling_collision:4.2f} to10={rolling_timeout:4.2f} "
+            f"min_d={env.min_episode_distance:5.2f} end={episode_end_reason} t={elapsed:7.1f}s{checkpoint_note}",
+            flush=True,
+        )
 
     if rollout_trajectories:
         agent.update(rollout_trajectories)
     
     # Save final model
     final_reward = best_goal_reward if best_goal_episode is not None else best_reward
-    checkpoint = {
-        'model': agent.model.state_dict(),
-        'actor_log_std': agent.actor_log_std.detach().cpu(),
-        'episode': 'final',
-        'reward': final_reward,
-        'goal_episode': best_goal_episode is not None,
-        'algorithm': 'ppo',
-        'config': asdict(config),
-    }
-    checkpoint.update(agent._checkpoint_metadata())
-    torch.save(checkpoint, _checkpoint_path('final_model.pth'))
+    header = _make_checkpoint_header('final', final_reward, best_goal_episode is not None, 'ppo', asdict(config))
+    header.update(agent._checkpoint_metadata())
+    header.update({'model': agent.model.state_dict(), 'actor_log_std': agent.actor_log_std.detach().cpu()})
+    _save_checkpoint_file(_CHECKPOINT_DIR, run_id, 'final', header)
     elapsed = time.perf_counter() - start_time
     print(f"[TRAIN][PPO] final reward={final_reward:.2f} t={elapsed:7.1f}s", flush=True)
 

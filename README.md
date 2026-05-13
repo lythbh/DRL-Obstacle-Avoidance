@@ -1,76 +1,95 @@
-# Environment Setup
-1. Create and activate a Python `3.10.19` environment.
-2. Install the dependencies:
+# DRL Obstacle Avoidance (Webots ALTINO)
+
+This project trains recurrent PPO and recurrent SAC controllers for ALTINO obstacle avoidance in Webots, with shared environment, sensor, reward, and SLAM processing.
+
+## Environment Setup
+1. Create and activate a Python 3.10.19 environment.
+2. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
+3. In Webots, set Preferences -> Python command to your project environment Python.
+   Example:
+   ```text
+   C:\Users\ErikH\miniconda3\envs\FYS5429\python.exe
+   ```
 
-# Repository Layout
-- `run_model.py` runs inference with the trained PPO or SAC agent.
-- `controllers/PPO/PPO.py` contains the PPO controller and training loop.
-- `controllers/SAC/SAC.py` contains the SAC controller and training loop.
-- `controllers/RNN/lstm.py` contains the shared recurrent actor-critic code used by PPO and SAC.
-- `controllers/SLAM/` contains LiDAR, IMU, SLAM, and map preprocessing utilities.
-- `worlds/Simple.wbt` is the SAC world.
-- `worlds/ObstacleCourse.wbt` is the PPO world.
-- `plots/` and the controller folders store generated outputs and checkpoints.
+## Repository Layout
+- `controllers/PPO/PPO.py`: recurrent PPO training controller.
+- `controllers/SAC/SAC.py`: recurrent SAC training controller.
+- `controllers/RNN/`: recurrent policy/value modules used by PPO.
+- `controllers/Webots/webots_env.py`: Webots environment, reward logic, success criteria, and SLAM hooks.
+- `controllers/SLAM/`: IMU/IEKF/map processing modules.
+- `run_model.py`: deterministic inference runner for PPO or SAC checkpoints.
+- `worlds/ObstacleCourse.wbt`: PPO world.
+- `worlds/Simple.wbt`: SAC world.
 
-# Webots Setup
-In Webots, open **Preferences** and point **Python command** to the Python executable in your environment.
+## Current Pipeline
+1. Webots starts the selected world/controller (PPO or SAC).
+2. Controller initializes a global Supervisor and creates `WebotsEnv`.
+3. `WebotsEnv` builds sensors, motor control, SLAM processor, reward computer, and observation vector.
+4. Default observation size is 33 features:
+   - 16 LiDAR sector minima
+   - 7 pose/goal features
+   - 10 IMU features
+5. Action is continuous `[steering, speed]` with environment clipping.
+6. Success is strict: goal is counted only when the robot reaches the goal region and is below the stop-speed threshold.
+7. Both controllers can run recurrent policies with `gru` or `lstm` encoders.
+8. SAC now uses a small fixed-size replay buffer of recurrent sequence windows, so it is off-policy again without the overhead of a large transition replay system.
 
-# Controller Setup
-Use the ALTINO robot in Webots with the controller selected in the world file. The current controller stack is split into:
-- PPO logic in `controllers/PPO/`
-- SAC logic in `controllers/SAC/`
-- Shared recurrent policy code in `controllers/RNN/`
-- Sensor processing in `controllers/SLAM/`
+## Training Behavior
+Both algorithms now report aligned episode metrics:
+- `r`, `avg10`, `steps`, `succ10`, `touch10`, `col10`, `to10`, `min_d`, `end`, `t`
 
-# World Setup
-`worlds/Simple.wbt` uses the SAC controller.
-`worlds/ObstacleCourse.wbt` uses the PPO controller.
+Where:
+- `succ10`: rolling 10-episode success rate (goal reached and stopped)
+- `touch10`: rolling 10-episode goal-touch rate
+- `col10`: rolling 10-episode collision rate
+- `to10`: rolling 10-episode timeout (`max_steps`) rate
 
-# Run
-- Start the simulation from Webots.
+## PPO vs SAC (Current Code)
+### PPO
+- Recurrent options: `gru` or `lstm`
+- Update style: on-policy rollout trajectories
+- Update schedule: every `update_every` episodes
+- Loss style: clipped PPO objective + value loss + entropy regularization
 
-# Pipeline Summary
-This repository uses the following Webots training and inference flow:
+### SAC
+- Recurrent options: `gru` or `lstm`
+- Update style: off-policy sequence replay sampled from a compact ring buffer of fixed-length episode windows
+- Update schedule: after `update_after_steps`, sample `replay_batch_size` windows and run `updates_per_step` optimizer steps
+- Loss style: twin critics, target critics (soft update with `tau`), entropy temperature `alpha` (auto-tuning optional), burn-in masking for recurrent sequences
 
-- `worlds/ObstacleCourse.wbt` runs the PPO controller in `controllers/PPO/PPO.py`.
-- `worlds/Simple.wbt` runs the SAC controller in `controllers/SAC/SAC.py`.
-- Shared recurrent models live in `controllers/RNN/`.
-- Webots wrapper, sensors, reward, and SLAM preprocessing live in `controllers/Webots/` and `controllers/SLAM/`.
-- `run_model.py` loads the matching checkpoint from the relevant controller folder and runs deterministic inference.
+## What Changed in SAC
+The SAC pipeline was updated to keep recurrent training fast while restoring off-policy learning:
+- Added a compact ring replay buffer that stores fixed-length recurrent sequence windows.
+- Replay stores preallocated NumPy arrays and samples batches directly to tensors to avoid the old Python-heavy slowdown.
+- Added `sequence_stride`, `replay_capacity`, `replay_batch_size`, and `min_replay_sequences` to control buffer size and sampling.
+- SAC now samples random replay windows after episodes, so updates are off-policy again.
+- Removed the old feedforward (`ff`) recurrent-cell path; SAC now uses only `gru` and `lstm`.
 
-The main runtime behavior is:
+Important note:
+- This is not a large classic transition replay buffer. It is a compact sequence replay buffer designed for recurrent SAC.
 
-1. Webots starts the selected controller folder, either `PPO` or `SAC`.
-2. The controller initializes a global Webots `Supervisor`.
-3. `WebotsEnv` builds the ALTINO driver, motor controller, sensors, SLAM processor, reward computer, and observation layout.
-4. Observations default to 33 features: 16 LiDAR sector minima, 7 pose and goal-direction features, and 10 IMU features.
-5. PPO trains on complete recurrent episode trajectories and writes `best_model.pth` into `controllers/PPO/checkpoints/<timestamp>/` and `final_model.pth` into `controllers/PPO/`.
-6. SAC trains with replay-buffer updates and writes `best_model.pth` into `controllers/SAC/checkpoints/<timestamp>/` and `final_model.pth` into `controllers/SAC/`.
-7. `run_model.py` loads the newest timestamped `best_model.pth` from the matching controller checkpoint folder and runs deterministic inference.
+## Checkpoints
+Both controllers save best checkpoints into algorithm-specific dated folders:
+- PPO: `controllers/PPO/checkpoints/<timestamp>/best_model.pth`
+- SAC: `controllers/SAC/checkpoints/<timestamp>/best_model.pth`
 
-Recent verified changes:
+Both save final model to controller root:
+- PPO: `controllers/PPO/final_model.pth`
+- SAC: `controllers/SAC/final_model.pth`
 
-- PPO best checkpoints are saved to `controllers/PPO/checkpoints/<timestamp>/` regardless of the process working directory.
-- SAC best checkpoints are saved to `controllers/SAC/checkpoints/<timestamp>/` regardless of the process working directory.
-- Checkpoint loading uses `weights_only=False` explicitly so locally generated checkpoints remain loadable across PyTorch versions.
+## Inference
+Run deterministic inference with:
+```bash
+python run_model.py --algorithm ppo --episodes 10
+python run_model.py --algorithm sac --episodes 10
+```
 
-Verified locally with the `FYS5429` environment:
+Optional args:
+- `--model-path <path>` to force a specific checkpoint
+- `--quiet` to reduce per-episode output
 
-- Parsed the project Python files without writing `.pyc` files.
-- Imported the project modules with a mocked Webots `controller` module.
-- Loaded existing checkpoints in `controllers/PPO/` and `controllers/SAC/`.
-- Ran PPO and SAC smoke tests covering reset/step loops, recurrent action selection, PPO trajectory updates, SAC replay-buffer updates, checkpoint serialization, and cleanup.
-
-Environment notes:
-
-- The working local environment is `FYS5429` with Python `3.10.19` and Torch installed.
-- The default shell Python is `3.13.10` and does not have Torch installed.
-- In Webots, point the Python command to `C:\Users\ErikH\miniconda3\envs\FYS5429\python.exe`.
-
-Remaining risk before a long run:
-
-- A real Webots physics smoke test still needs to be run from the Webots GUI because the local shell does not provide the actual Webots `controller` runtime.
+If `--model-path` is omitted, `run_model.py` loads the newest dated `best_model.pth` for the selected algorithm.
 
