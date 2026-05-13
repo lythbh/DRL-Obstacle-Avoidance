@@ -26,7 +26,8 @@ class PPODefaults:
 class SACDefaults:
     episodes = 2500
     update_after_steps = 2000
-    updates_per_step = 2
+    updates_per_step = 2          # kept for backward-compat; overridden by gradient_steps_per_episode
+    gradient_steps_per_episode = 10  # total gradient steps per episode (controls wall-clock speed)
     save_every = 100
     gamma = 0.99
     tau = 0.005

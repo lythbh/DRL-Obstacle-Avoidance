@@ -108,6 +108,7 @@ class Config:
     episodes: int = SACDefaults.episodes
     update_after_steps: int = SACDefaults.update_after_steps
     updates_per_step: int = SACDefaults.updates_per_step
+    gradient_steps_per_episode: int = SACDefaults.gradient_steps_per_episode
     save_every: int = SACDefaults.save_every
     gamma: float = SACDefaults.gamma
     tau: float = SACDefaults.tau
@@ -189,6 +190,8 @@ class Config:
             raise ValueError("replay_batch_size must be > 0")
         if self.min_replay_sequences <= 0:
             raise ValueError("min_replay_sequences must be > 0")
+        if self.gradient_steps_per_episode <= 0:
+            raise ValueError("gradient_steps_per_episode must be > 0")
         if self.recurrent_hidden_size is None:
             self.recurrent_hidden_size = self.hidden_size
         if self.target_entropy_scale <= 0.0:
@@ -402,31 +405,56 @@ class RecurrentEncoder(nn.Module):
         state = recurrent_state if recurrent_state is not None else self.get_initial_state(batch_size)
         mask = self._prepare_done_mask(done_mask, batch_size, seq_len, latent.device)
 
-        outputs: List[torch.Tensor] = []
+        # Fast path: if resets only occur at t=0 (or not at all), the entire
+        # sequence can be fed to the RNN in one vectorized call instead of a
+        # Python loop over seq_len steps.  This is the dominant bottleneck for
+        # SAC because every gradient step touches 5 recurrent networks
+        # (actor, Q1, Q2, target_Q1, target_Q2).  Sequences from the replay
+        # buffer almost always satisfy this condition: done_mask[:,0]=1 (reset
+        # at sequence start) and done_mask[:,1:]=0 (no mid-sequence resets).
+        no_mid_resets = mask is None or not bool((mask[:, 1:] > 0).any().item())
+
+        next_state: Any
         if self.cell == "lstm":
             if not isinstance(state, tuple) or len(state) != 2:
                 state = self.get_initial_state(batch_size, device=latent.device)
             state = cast(Tuple[torch.Tensor, torch.Tensor], state)
             h_t, c_t = state
-            for t in range(seq_len):
+            if no_mid_resets:
                 if mask is not None:
-                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
+                    keep = (1.0 - mask[:, 0]).view(1, batch_size, 1)
                     h_t = h_t * keep
                     c_t = c_t * keep
-                step_out, (h_t, c_t) = self.core(latent[:, t : t + 1], (h_t, c_t))
-                outputs.append(step_out)
-            next_state: Any = (h_t, c_t)
+                core_out, (h_t, c_t) = self.core(latent, (h_t, c_t))
+            else:
+                outputs: List[torch.Tensor] = []
+                for t in range(seq_len):
+                    if mask is not None:
+                        keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
+                        h_t = h_t * keep
+                        c_t = c_t * keep
+                    step_out, (h_t, c_t) = self.core(latent[:, t : t + 1], (h_t, c_t))
+                    outputs.append(step_out)
+                core_out = torch.cat(outputs, dim=1)
+            next_state = (h_t, c_t)
         else:
             h_t = state
-            for t in range(seq_len):
+            if no_mid_resets:
                 if mask is not None:
-                    keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
+                    keep = (1.0 - mask[:, 0]).view(1, batch_size, 1)
                     h_t = h_t * keep
-                step_out, h_t = self.core(latent[:, t : t + 1], h_t)
-                outputs.append(step_out)
+                core_out, h_t = self.core(latent, h_t)
+            else:
+                outputs = []
+                for t in range(seq_len):
+                    if mask is not None:
+                        keep = (1.0 - mask[:, t]).view(1, batch_size, 1)
+                        h_t = h_t * keep
+                    step_out, h_t = self.core(latent[:, t : t + 1], h_t)
+                    outputs.append(step_out)
+                core_out = torch.cat(outputs, dim=1)
             next_state = h_t
 
-        core_out = torch.cat(outputs, dim=1)
         return core_out.squeeze(1) if seq_len == 1 else core_out, next_state
 
 
@@ -1040,11 +1068,12 @@ def train(config: Optional[Config] = None) -> None:
             config.replay_batch_size,
             config.min_replay_sequences,
         ):
-            # One gradient step per environment step collected this episode
-            # (scaled by updates_per_step).  The old formula divided the full
-            # replay capacity by the batch size, which grew to 512+ steps/episode
-            # as the buffer filled — far too many updates, causing overfitting.
-            num_updates = max(1, len(episode_obs)) * config.updates_per_step
+            # Fixed gradient budget per episode so SAC wall-clock time is
+            # comparable to PPO.  The previous formula (episode_steps ×
+            # updates_per_step ≈ 400/ep) made SAC ~60× slower per episode
+            # than PPO.  gradient_steps_per_episode (default 10) keeps the
+            # update cost independent of episode length.
+            num_updates = config.gradient_steps_per_episode
             for _ in range(num_updates):
                 batch = replay.sample(config.replay_batch_size, agent.device)
                 agent.update(batch)
