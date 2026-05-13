@@ -951,7 +951,7 @@ DEF ALTINO Robot {
     mass 2
   }
   radarCrossSection 100
-  controller "SAC"
+  controller "PPO"
   supervisor TRUE
 }
 WaterBottle {
