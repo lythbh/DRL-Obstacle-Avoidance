@@ -17,7 +17,11 @@ PROGRESS_REWARD_SCALE = 1.2
 DISTANCE_REWARD_SCALE = 0.02
 HEADING_REWARD_SCALE = 0.03
 SAFETY_REWARD_SCALE = 0.03
-MOTION_REWARD_SCALE = 0.02
+MOTION_REWARD_SCALE = 0.05
+SLOW_SPEED_THRESHOLD = 0.25   # speed_norm below this (< 25 % of max = 1.5 m/s) is "too slow"
+SLOW_SPEED_PENALTY = -0.04    # per-step penalty while speed_norm < SLOW_SPEED_THRESHOLD
+HIGH_SPEED_THRESHOLD = 0.6    # speed_norm above this (> 60 % of max = 3.6 m/s) earns a bonus
+HIGH_SPEED_BONUS = 0.03       # per-step bonus while speed_norm > HIGH_SPEED_THRESHOLD
 NEW_BEST_DISTANCE_BONUS = 0.02
 STEP_PENALTY = -0.003
 GOAL_SUCCESS_REWARD = 60.0

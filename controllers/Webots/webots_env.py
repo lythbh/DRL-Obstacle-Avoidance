@@ -22,6 +22,10 @@ from controllers.common.reward_defaults import (
     NEW_BEST_DISTANCE_BONUS,
     PROGRESS_REWARD_SCALE,
     SAFETY_REWARD_SCALE,
+    SLOW_SPEED_PENALTY,
+    SLOW_SPEED_THRESHOLD,
+    HIGH_SPEED_THRESHOLD,
+    HIGH_SPEED_BONUS,
     STEP_PENALTY,
 )
 
@@ -53,7 +57,6 @@ _supervisor: Optional[Supervisor] = None
 
 
 def _init_supervisor() -> None:
-    """Initialize global Supervisor instance for field access."""
     global _supervisor
     supervisor = Supervisor()
     supervisor.simulationSetMode(Supervisor.SIMULATION_MODE_FAST)
@@ -445,6 +448,10 @@ class RewardComputer:
         heading_reward_scale: float = HEADING_REWARD_SCALE,
         safety_reward_scale: float = SAFETY_REWARD_SCALE,
         motion_reward_scale: float = MOTION_REWARD_SCALE,
+        slow_speed_threshold: float = SLOW_SPEED_THRESHOLD,
+        slow_speed_penalty: float = SLOW_SPEED_PENALTY,
+        high_speed_threshold: float = HIGH_SPEED_THRESHOLD,
+        high_speed_bonus: float = HIGH_SPEED_BONUS,
         new_best_distance_bonus: float = NEW_BEST_DISTANCE_BONUS,
         step_penalty: float = STEP_PENALTY,
         goal_threshold: float = 0.8,
@@ -463,6 +470,10 @@ class RewardComputer:
         self.heading_reward_scale = heading_reward_scale
         self.safety_reward_scale = safety_reward_scale
         self.motion_reward_scale = motion_reward_scale
+        self.slow_speed_threshold = float(slow_speed_threshold)
+        self.slow_speed_penalty = float(slow_speed_penalty)
+        self.high_speed_threshold = float(high_speed_threshold)
+        self.high_speed_bonus = float(high_speed_bonus)
         self.new_best_distance_bonus = new_best_distance_bonus
         self.step_penalty = step_penalty
         self.goal_threshold = float(goal_threshold)
@@ -507,6 +518,8 @@ class RewardComputer:
         heading_reward = heading_alignment * self.heading_reward_scale
         safety_penalty = -(1.0 - float(np.clip(min_lidar_norm, 0.0, 1.0))) * self.safety_reward_scale
         motion_reward = float(np.clip(speed_norm, 0.0, 1.0)) * self.motion_reward_scale
+        slow_penalty = self.slow_speed_penalty if speed_norm < self.slow_speed_threshold else 0.0
+        high_speed_reward = self.high_speed_bonus if speed_norm > self.high_speed_threshold else 0.0
         new_best_bonus = self.new_best_distance_bonus if reached_new_best_distance else 0.0
 
         accel_magnitude = float(np.linalg.norm(accel))
@@ -520,6 +533,8 @@ class RewardComputer:
             + heading_reward
             + safety_penalty
             + motion_reward
+            + slow_penalty
+            + high_speed_reward
             + new_best_bonus
             + accel_penalty
             + self.step_penalty
@@ -569,6 +584,10 @@ class WebotsEnv:
             heading_reward_scale=config.heading_reward_scale,
             safety_reward_scale=config.safety_reward_scale,
             motion_reward_scale=config.motion_reward_scale,
+            slow_speed_threshold=float(getattr(config, "slow_speed_threshold", SLOW_SPEED_THRESHOLD)),
+            slow_speed_penalty=float(getattr(config, "slow_speed_penalty", SLOW_SPEED_PENALTY)),
+            high_speed_threshold=float(getattr(config, "high_speed_threshold", HIGH_SPEED_THRESHOLD)),
+            high_speed_bonus=float(getattr(config, "high_speed_bonus", HIGH_SPEED_BONUS)),
             new_best_distance_bonus=config.new_best_distance_bonus,
             step_penalty=config.step_penalty,
             goal_threshold=config.goal_threshold,

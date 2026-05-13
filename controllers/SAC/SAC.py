@@ -38,6 +38,10 @@ from controllers.common.reward_defaults import (
     MAX_STEPS,
     MIN_SPEED,
     MOTION_REWARD_SCALE,
+    SLOW_SPEED_PENALTY,
+    SLOW_SPEED_THRESHOLD,
+    HIGH_SPEED_THRESHOLD,
+    HIGH_SPEED_BONUS,
     NEW_BEST_DISTANCE_BONUS,
     OCCUPANCY_GRID_SHAPE,
     POSE_GOAL_DIM,
@@ -59,52 +63,20 @@ from controllers.common.training_defaults import RecurrentDefaults, SACDefaults
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 
-# Use shared checkpoint helpers to avoid duplication across controllers.
 from controllers.common.checkpoints import (
-    checkpoint_path as _shared_checkpoint_path,
-    run_checkpoint_dir as _shared_run_checkpoint_dir,
-    run_checkpoint_path as _shared_run_checkpoint_path,
-    load_checkpoint as _shared_load_checkpoint,
+    run_checkpoint_dir as _run_checkpoint_dir,
+    run_checkpoint_path as _run_checkpoint_path,
+    load_checkpoint as _load_checkpoint,
     save_checkpoint_file as _save_checkpoint_file,
 )
 from controllers.common.metrics_logger import MetricsLogger
 
 
-def _checkpoint_path(filename: str) -> str:
-    """Controller-local wrapper around shared `checkpoint_path` helper."""
-    return _shared_checkpoint_path(_CONTROLLER_DIR, filename)
-
-
-def _run_checkpoint_dir(run_id: str) -> Path:
-    """Controller-local wrapper around shared `run_checkpoint_dir` helper."""
-    return _shared_run_checkpoint_dir(_CHECKPOINT_DIR, run_id)
-
-
-def _run_checkpoint_path(run_id: str, prefix: str, extension: str = "pth") -> str:
-    """Controller-local wrapper around shared `run_checkpoint_path` helper."""
-    return _shared_run_checkpoint_path(_CHECKPOINT_DIR, run_id, prefix, extension)
-
-
-def _load_checkpoint(path: str, map_location: torch.device) -> Dict[str, Any]:
-    """Controller-local wrapper around shared `load_checkpoint` helper."""
-    return _shared_load_checkpoint(path, map_location)
-
-
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
+# ── Configuration ─────────────────────────────────────────────────────────────
 
 
 @dataclass
 class Config:
-    """
-    Training and environment hyperparameters for SAC.
-    
-    This dataclass consolidates all tunable parameters for the algorithm
-    (learning rates, entropy tuning, network architecture) and the environment
-    (reward shaping, action bounds, episode configuration). Validation in
-    __post_init__ ensures consistency across interdependent parameters.
-    """
     episodes: int = SACDefaults.episodes
     update_after_steps: int = SACDefaults.update_after_steps
     updates_per_step: int = SACDefaults.updates_per_step
@@ -145,6 +117,10 @@ class Config:
     heading_reward_scale: float = HEADING_REWARD_SCALE
     safety_reward_scale: float = SAFETY_REWARD_SCALE
     motion_reward_scale: float = MOTION_REWARD_SCALE
+    slow_speed_threshold: float = SLOW_SPEED_THRESHOLD
+    slow_speed_penalty: float = SLOW_SPEED_PENALTY
+    high_speed_threshold: float = HIGH_SPEED_THRESHOLD
+    high_speed_bonus: float = HIGH_SPEED_BONUS
     new_best_distance_bonus: float = NEW_BEST_DISTANCE_BONUS
     step_penalty: float = STEP_PENALTY
     endpoint: Tuple[float, float] = ENDPOINT
@@ -211,16 +187,6 @@ class Config:
 
 
 class SequenceReplayBuffer:
-    """
-    Fixed-length recurrent replay buffer for efficient SAC off-policy updates.
-    
-    Stores variable-length episodes as overlapping fixed-size windows using a ring buffer.
-    This approach enables efficient recurrent network processing by pre-allocating storage
-    for sequences of observation-action pairs. Each episode is split into windows of
-    length sequence_length with stride sequence_stride, allowing the recurrent network
-    to maintain state continuity during learning.
-    """
-
     def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
         self.capacity = config.replay_capacity
         self.seq_len = config.sequence_length
@@ -310,20 +276,11 @@ class SequenceReplayBuffer:
             "valid_mask": torch.as_tensor(self.valid_mask[indices], dtype=torch.float32, device=device),
         }
 
-# ============================================================================
-# RECURRENT ENCODER AND POLICY/VALUE NETWORKS
-# ============================================================================
+
+# ── Networks ──────────────────────────────────────────────────────────────────
 
 
 class RecurrentEncoder(nn.Module):
-    """
-    Shared recurrent feature encoder for actor and critic networks.
-    
-    Processes observations through a trunk of dense layers followed by either GRU or LSTM.
-    The recurrent core maintains hidden state across time, enabling the network to learn
-    temporal patterns in the observation sequence. Episode boundaries (indicated by
-    done_mask) reset the hidden state to prevent information leakage between episodes.
-    """
     def __init__(self, obs_size: int, config: Config) -> None:
         super().__init__()
         self.cell = config.recurrent_cell
@@ -369,12 +326,6 @@ class RecurrentEncoder(nn.Module):
         seq_len: int,
         device: torch.device,
     ) -> Optional[torch.Tensor]:
-        """
-        Convert done_mask to a standard [B, T] tensor for state reset across batches and sequences.
-        
-        Handles three input formats: scalar (broadcast), [T] (apply to all batches), or [B, T].
-        When a done flag is true, the recurrent state is reset at that timestep.
-        """
         if done_mask is None:
             return None
         mask = torch.as_tensor(done_mask, dtype=torch.float32, device=device)
@@ -459,14 +410,6 @@ class RecurrentEncoder(nn.Module):
 
 
 class GaussianActor(nn.Module):
-    """
-    Stochastic policy network parameterized as a Gaussian distribution.
-    
-    Outputs mean and log-standard-deviation of an action distribution.
-    The actual action is sampled via reparameterization and then squashed to
-    environment action bounds using tanh. This enables gradient-based optimization
-    of the policy through differentiable sampling.
-    """
     def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
         super().__init__()
         self.encoder = RecurrentEncoder(obs_size, config)
@@ -487,13 +430,6 @@ class GaussianActor(nn.Module):
 
 
 class QNetwork(nn.Module):
-    """
-    Critic network that estimates state-action value (Q-function).
-    
-    Concatenates encoded recurrent features with the action vector and passes
-    through dense layers to produce a scalar Q-value estimate. SAC maintains
-    two independent Q-networks to stabilize learning via double Q-learning.
-    """
     def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
         super().__init__()
         self.encoder = RecurrentEncoder(obs_size, config)
@@ -521,29 +457,10 @@ class QNetwork(nn.Module):
         return self.head(torch.cat([features, action], dim=-1)), next_state
 
 
-# ============================================================================
-# SOFT ACTOR-CRITIC AGENT
-# ============================================================================
+# ── SAC Agent ─────────────────────────────────────────────────────────────────
 
 
 class SACAgent:
-    """
-    Soft Actor-Critic implementation for continuous control in recurrent settings.
-    
-    Maintains separate networks for the stochastic policy (actor) and value estimation
-    (critics Q1, Q2, and targets). The algorithm optimizes the policy to maximize
-    expected return while maintaining entropy regularization for exploration. Entropy
-    coefficient alpha is either fixed or automatically tuned via automatic entropy
-    temperature adjustment.
-    
-    Sections:
-    - Device and network initialization
-    - State management
-    - Checkpoint metadata and validation
-    - Action sampling and squashing
-    - Policy updates (actor and critics)
-    - Soft target updates
-    """
     def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
         self.config = config
         self.device = self._get_device()
@@ -665,11 +582,9 @@ class SACAgent:
                 )
 
     def _tensor_obs(self, obs: np.ndarray) -> torch.Tensor:
-        """Convert environment observation to batched tensor format for policy network."""
         return torch.as_tensor(obs, dtype=torch.float32, device=self.device).view(1, -1)
 
     def _squash_action(self, action: torch.Tensor) -> torch.Tensor:
-        """Rescale action from [-1, 1] to environment bounds."""
         return action * self.action_scale + self.action_center
 
     def _sample_policy(
@@ -679,12 +594,6 @@ class SACAgent:
         done_mask: Optional[torch.Tensor] = None,
         deterministic: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[Any]]:
-        """
-        Sample action from the policy and compute its log probability.
-        
-        When deterministic=False, samples via reparameterization. Log probability is adjusted
-        for the tanh squashing using the Jacobian correction to account for the bounded action space.
-        """
         mean, log_std, next_state = self.actor(obs, recurrent_state=recurrent_state, done_mask=done_mask)
         log_std = log_std.clamp(self.config.log_std_min, self.config.log_std_max)
         std = log_std.exp()
@@ -704,12 +613,6 @@ class SACAgent:
         done: bool = False,
         deterministic: bool = False,
     ) -> Tuple[np.ndarray, Optional[Any]]:
-        """
-        Select a single action for environment interaction.
-        
-        Wraps numpy observation as a batch tensor, queries the policy, and returns
-        action as numpy along with the updated recurrent state.
-        """
         done_mask = torch.tensor([float(done)], dtype=torch.float32, device=self.device)
         with torch.no_grad():
             action, _, next_state = self._sample_policy(
@@ -721,19 +624,12 @@ class SACAgent:
         return action.squeeze(0).cpu().numpy(), next_state
 
     def _soft_update(self, source: nn.Module, target: nn.Module) -> None:
-        """Update target network via exponential moving average with the source network."""
         tau = self.config.tau
         for target_param, source_param in zip(target.parameters(), source.parameters()):
             target_param.data.mul_(1.0 - tau).add_(source_param.data, alpha=tau)
 
     @staticmethod
     def _sequence_loss_mask(valid_mask: torch.Tensor, burn_in: int) -> torch.Tensor:
-        """
-        Create a mask for loss computation, zeroing out burn-in steps in each sequence.
-        
-        Burn-in allows the recurrent network to warm up its hidden state before learning
-        begins. The mask respects sequence boundaries (where valid_mask indicates valid timesteps).
-        """
         valid_lengths = valid_mask.sum(dim=1).to(dtype=torch.long)
         burn_tensor = torch.full_like(valid_lengths, burn_in)
         start_index = torch.minimum(burn_tensor, torch.clamp(valid_lengths - 1, min=0))
@@ -742,52 +638,10 @@ class SACAgent:
 
     @staticmethod
     def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        """Compute mean of values over valid (masked) elements."""
         weight = mask.unsqueeze(-1).to(dtype=values.dtype)
         return (values * weight).sum() / weight.sum().clamp_min(1.0)
 
-    def _build_episode_batch(
-        self,
-        episode_obs: List[np.ndarray],
-        episode_actions: List[np.ndarray],
-        episode_rewards: List[float],
-        episode_next_obs: List[np.ndarray],
-        episode_dones: List[bool],
-    ) -> Optional[Dict[str, torch.Tensor]]:
-        """
-        Convert a complete episode to a tensor batch suitable for network forward pass.
-        
-        Adds a batch dimension and converts all numpy arrays to torch tensors.
-        Returns None if the episode is empty.
-        """
-        if not episode_obs:
-            return None
-
-        obs = np.asarray(episode_obs, dtype=np.float32)
-        actions = np.asarray(episode_actions, dtype=np.float32)
-        rewards = np.asarray(episode_rewards, dtype=np.float32).reshape(-1, 1)
-        next_obs = np.asarray(episode_next_obs, dtype=np.float32)
-        dones = np.asarray(episode_dones, dtype=np.float32).reshape(-1, 1)
-        valid_mask = np.ones((obs.shape[0],), dtype=np.float32)
-
-        return {
-            "obs": torch.as_tensor(obs[None, ...], dtype=torch.float32, device=self.device),
-            "actions": torch.as_tensor(actions[None, ...], dtype=torch.float32, device=self.device),
-            "rewards": torch.as_tensor(rewards[None, ...], dtype=torch.float32, device=self.device),
-            "next_obs": torch.as_tensor(next_obs[None, ...], dtype=torch.float32, device=self.device),
-            "dones": torch.as_tensor(dones[None, ...], dtype=torch.float32, device=self.device),
-            "valid_mask": torch.as_tensor(valid_mask[None, ...], dtype=torch.float32, device=self.device),
-        }
-
     def _build_update_masks(self, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Construct masks for loss computation and recurrent state resets.
-        
-        Returns:
-        - learn_mask: Mask for computing loss (zeros out burn-in steps)
-        - done_mask_obs: Reset mask for current observations
-        - done_mask_next: Reset mask for next observations
-        """
         valid_mask = batch["valid_mask"]
         burn_in = min(self.config.burn_in, batch["obs"].shape[1] - 1)
         learn_mask = self._sequence_loss_mask(valid_mask, burn_in)
@@ -806,13 +660,6 @@ class SACAgent:
         done_mask_obs: torch.Tensor,
         done_mask_next: torch.Tensor,
     ) -> torch.Tensor:
-        """
-        Compute critic loss and update Q-networks via temporal difference (TD) error.
-        
-        Computes the target Q-value using the target networks and next action samples,
-        then minimizes MSE between current Q-estimates and the target. Entropy is included
-        in the target to encourage exploration.
-        """
         scaled_rewards = batch["rewards"] * REWARD_SCALE
 
         def _ensure_time_dim(tensor: torch.Tensor) -> torch.Tensor:
@@ -845,13 +692,6 @@ class SACAgent:
         learn_mask: torch.Tensor,
         done_mask_obs: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Update policy (actor) and entropy temperature (alpha).
-        
-        Actor loss encourages the policy to take actions that maximize Q-values
-        while maintaining controlled entropy. Alpha is tuned to keep actual entropy
-        near the target entropy via automatic entropy temperature adjustment.
-        """
         new_action, log_prob, _ = self._sample_policy(batch["obs"], done_mask=done_mask_obs, deterministic=False)
         q1_pi, _ = self.q1(batch["obs"], new_action, done_mask=done_mask_obs)
         q2_pi, _ = self.q2(batch["obs"], new_action, done_mask=done_mask_obs)
@@ -871,12 +711,6 @@ class SACAgent:
         return actor_loss, alpha_loss
 
     def update(self, batch: Dict[str, torch.Tensor]) -> Optional[Dict[str, float]]:
-        """
-        Perform a complete SAC update step: update both critics and the actor.
-        
-        Applies gradient clipping and soft target network updates. Returns a dictionary
-        of logged metrics (losses and entropy coefficient) or None if the batch is empty.
-        """
         if batch["obs"].shape[1] <= 0:
             return None
 
@@ -911,8 +745,7 @@ class SACAgent:
         }
 
     def checkpoint(self, episode: Any, reward: float) -> Dict[str, Any]:
-        """Create a checkpoint dictionary containing all model and optimizer state."""
-        checkpoint = {    
+        checkpoint = {
             "episode": episode,
             "reward": reward,
             "algorithm": "sac",
@@ -931,12 +764,10 @@ class SACAgent:
         return checkpoint
 
     def save(self, path: str, episode: Any, reward: float) -> None:
-        """Save checkpoint to disk."""
         torch.save(self.checkpoint(episode, reward), path)
 
     def load(self, path: str) -> Dict[str, Any]:
-        """Load checkpoint from disk and restore all model and optimizer state."""
-        checkpoint = _load_checkpoint(path, map_location=self.device)
+        checkpoint = _load_checkpoint(path, self.device)
         checkpoint_algorithm = str(checkpoint.get("algorithm", "sac")).lower().strip()
         if checkpoint_algorithm != "sac":
             raise ValueError(f"Checkpoint algorithm '{checkpoint_algorithm}' does not match SAC.")
@@ -955,19 +786,10 @@ class SACAgent:
         return checkpoint
 
 
-# ============================================================================
-# TRAINING LOOP
-# ============================================================================
+# ── Training loop ─────────────────────────────────────────────────────────────
 
 
 def train(config: Optional[Config] = None) -> None:
-    """
-    Main training loop integrating environment interaction, replay buffer, and optimization.
-    
-    Collects experience by rolling out the current policy in the Webots simulator,
-    stores transitions in the replay buffer, and performs off-policy SAC updates.
-    Maintains metrics for progress tracking and saves checkpoints for model evaluation.
-    """
     if config is None:
         config = Config()
 
@@ -977,8 +799,8 @@ def train(config: Optional[Config] = None) -> None:
     run_id = Path(env.run_folder).name
     agent = SACAgent(env.observation_size, env.action_dim, config)
     replay = SequenceReplayBuffer(env.observation_size, env.action_dim, config)
-    checkpoint_dir = _run_checkpoint_dir(run_id)
-    final_model_path = _run_checkpoint_path(run_id, "final")
+    checkpoint_dir = _run_checkpoint_dir(_CHECKPOINT_DIR, run_id)
+    final_model_path = _run_checkpoint_path(_CHECKPOINT_DIR, run_id, "final")
     print(
         f"[TRAIN][SAC] rnn={config.recurrent_cell.upper()} "
         f"weights_dir={checkpoint_dir} final={final_model_path}",
@@ -1014,6 +836,7 @@ def train(config: Optional[Config] = None) -> None:
         episode_dones: List[bool] = []
         episode_goal_reached = False
         episode_success = False
+        episode_speed_norms: List[float] = []
         actor_state = agent.get_initial_state(batch_size=1)
         prev_done = True
 
@@ -1040,6 +863,7 @@ def train(config: Optional[Config] = None) -> None:
 
             obs = next_obs
             episode_reward += reward
+            episode_speed_norms.append(float(info.get("speed_norm", 0.0)))
             episode_goal_reached = episode_goal_reached or bool(info.get("goal_reached", False))
             episode_success = bool(info.get("success", False))
             done = transition_done
@@ -1113,6 +937,7 @@ def train(config: Optional[Config] = None) -> None:
         rolling_goal_touch = float(np.mean(goal_touch_window[-10:]))
         rolling_collision = float(np.mean(collision_window[-10:]))
         rolling_timeout = float(np.mean(timeout_window[-10:]))
+        avg_speed_ms = float(np.mean(episode_speed_norms)) * config.max_speed if episode_speed_norms else 0.0
         elapsed = time.perf_counter() - start_time
         checkpoint_note = f" ckpt={'+'.join(checkpoint_flags)}" if checkpoint_flags else ""
         print(
@@ -1120,8 +945,8 @@ def train(config: Optional[Config] = None) -> None:
             f"r={episode_reward:8.2f} avg10={rolling_reward:8.2f} steps={env.current_step:4d} "
             f"succ10={rolling_success:4.2f} touch10={rolling_goal_touch:4.2f} "
             f"col10={rolling_collision:4.2f} to10={rolling_timeout:4.2f} "
-            f"min_d={env.min_episode_distance:5.2f} end={episode_end_reason} replay={len(replay):4d} "
-            f"t={elapsed:7.1f}s{checkpoint_note}",
+            f"min_d={env.min_episode_distance:5.2f} avg_spd={avg_speed_ms:4.2f}m/s "
+            f"end={episode_end_reason} replay={len(replay):4d} t={elapsed:7.1f}s{checkpoint_note}",
             flush=True,
         )
         metrics_logger.log(
@@ -1134,6 +959,7 @@ def train(config: Optional[Config] = None) -> None:
             collision=int(episode_end_reason == "collision"),
             timeout=int(episode_end_reason == "max_steps"),
             min_dist=round(env.min_episode_distance, 4),
+            avg_speed_ms=round(avg_speed_ms, 3),
             end_reason=episode_end_reason,
             replay_size=len(replay),
             elapsed_s=round(elapsed, 1),
