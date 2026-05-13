@@ -522,6 +522,10 @@ class SACAgent:
         self.action_dim = action_dim
 
         self.actor = GaussianActor(obs_size, action_dim, config).to(self.device)
+        with torch.no_grad():
+            if self.actor.mean.bias is not None and action_dim > 1:
+                # Mild low-speed bias: keep early rollouts controllable without freezing motion.
+                self.actor.mean.bias[1] = -0.8
         self.q1 = QNetwork(obs_size, action_dim, config).to(self.device)
         self.q2 = QNetwork(obs_size, action_dim, config).to(self.device)
         self.target_q1 = QNetwork(obs_size, action_dim, config).to(self.device)
@@ -992,7 +996,7 @@ def train(config: Optional[Config] = None) -> None:
             )
 
             next_obs, reward, terminated, truncated, info = env.step(action)
-            transition_done = bool(terminated)
+            transition_done = bool(terminated or truncated)
             episode_obs.append(np.asarray(obs, dtype=np.float32))
             episode_actions.append(np.asarray(action, dtype=np.float32))
             episode_rewards.append(float(reward))

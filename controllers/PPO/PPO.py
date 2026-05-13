@@ -7,7 +7,7 @@ from typing import Tuple, List, Optional, Dict, Any, Union
 import numpy as np
 import torch
 from torch import nn
-from torch.distributions import AffineTransform, Independent, Normal, TanhTransform, TransformedDistribution
+from torch.distributions import Normal
 from torch.nn.utils.rnn import pad_sequence
 
 RecurrentState = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
@@ -254,6 +254,10 @@ class PPOAgent:
         model_class = GRUActorCritic if recurrent_cell == "gru" else LSTMActorCritic
         self.model = model_class(self.obs_size, self.action_dim, self.config).to(self.device)
         self.actor = self.model.policy_head
+        with torch.no_grad():
+            if self.actor.bias is not None and self.action_dim > 1:
+                # Mild low-speed bias: keep early rollouts controllable without freezing motion.
+                self.actor.bias[1] = -0.8
         self.actor_log_std = nn.Parameter(torch.full((self.action_dim,), -0.5, dtype=torch.float32, device=self.device))
         params = list(self.model.parameters()) + [self.actor_log_std]
         self.optimizer = torch.optim.Adam(params, lr=self.config.learning_rate)
@@ -337,6 +341,13 @@ class PPOAgent:
         )
         return low, high
 
+    def _action_affine(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Get action bounds and affine transform parameters."""
+        low, high = self._action_bounds()
+        center = (high + low) / 2.0
+        scale = (high - low) / 2.0
+        return low, high, center, scale
+
     def _policy_stats(self, policy_output: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Extract mean and log-standard deviation from policy network output.
@@ -351,36 +362,56 @@ class PPOAgent:
         std = torch.nan_to_num(log_std.exp(), nan=1.0, posinf=7.5, neginf=1e-3).clamp_min(1e-3)
         return policy_output, std
 
-    def _action_distribution(self, mean: torch.Tensor, std: torch.Tensor) -> TransformedDistribution:
-        """
-        Construct the policy distribution with bounded action space.
-        
-        Uses a tanh squashing transformation to map unbounded Gaussian samples to the
-        environment action bounds via affine transformation.
-        """
-        low, high = self._action_bounds()
-        center = (high + low) / 2.0
-        scale = (high - low) / 2.0
-        base_dist = Independent(Normal(mean, std), 1)
-        return TransformedDistribution(
-            base_dist,
-            [TanhTransform(cache_size=1), AffineTransform(loc=center, scale=scale)],
-        )
-
-    def _entropy_estimate(self, action_distribution: TransformedDistribution) -> torch.Tensor:
-        """Estimate policy entropy by sampling and computing log probability."""
-        action_sample = action_distribution.rsample()
-        return -action_distribution.log_prob(action_sample)
-
-    def _squash_action(self, pre_tanh_action: torch.Tensor) -> torch.Tensor:
-        """Rescale action from [-1, 1] to environment action bounds."""
-        low, high = self._action_bounds()
-        center = (high + low) / 2.0
-        scale = (high - low) / 2.0
+    def _squash_action(self, pre_tanh_action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Map pre-tanh actions to bounded environment actions."""
+        low, high, center, scale = self._action_affine()
         squashed = torch.tanh(pre_tanh_action)
         action = squashed * scale + center
         eps = 1e-5
-        return torch.max(torch.min(action, high - eps), low + eps)
+        action = torch.max(torch.min(action, high - eps), low + eps)
+        return action, squashed
+
+    def _log_prob_from_pre_tanh(
+        self,
+        mean: torch.Tensor,
+        std: torch.Tensor,
+        pre_tanh_action: torch.Tensor,
+        squashed_action: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Compute stable log-probability for tanh-squashed Gaussian actions."""
+        if squashed_action is None:
+            squashed_action = torch.tanh(pre_tanh_action)
+        _, _, _, scale = self._action_affine()
+        eps = 1e-6
+        dist = Normal(mean, std)
+        log_prob = dist.log_prob(pre_tanh_action)
+        log_prob -= torch.log(scale + eps)
+        log_prob -= torch.log(1.0 - squashed_action.pow(2) + eps)
+        log_prob = log_prob.sum(dim=-1)
+        return torch.nan_to_num(log_prob, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _inverse_squash_action(self, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Convert bounded actions back to pre-tanh space with safe clipping."""
+        low, high, center, scale = self._action_affine()
+        eps = 1e-6
+        safe_action = torch.max(torch.min(action, high - 1e-5), low + 1e-5)
+        squashed = ((safe_action - center) / (scale + eps)).clamp(-1.0 + eps, 1.0 - eps)
+        pre_tanh = 0.5 * (torch.log1p(squashed) - torch.log1p(-squashed))
+        pre_tanh = torch.nan_to_num(pre_tanh, nan=0.0, posinf=5.0, neginf=-5.0)
+        return pre_tanh, squashed
+
+    def _sample_action_and_log_prob(
+        self,
+        mean: torch.Tensor,
+        std: torch.Tensor,
+        deterministic: bool,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Sample bounded action and compute its stable log probability."""
+        dist = Normal(mean, std)
+        pre_tanh = mean if deterministic else dist.rsample()
+        action, squashed = self._squash_action(pre_tanh)
+        log_prob = self._log_prob_from_pre_tanh(mean, std, pre_tanh, squashed_action=squashed)
+        return action, log_prob
 
     def select_action(
         self,
@@ -403,9 +434,7 @@ class PPOAgent:
                 done_mask=done_mask,
             )
             mean, std = self._policy_stats(policy_output)
-            action_distribution = self._action_distribution(mean, std)
-            action = self._squash_action(mean) if deterministic else action_distribution.rsample()
-            log_prob = action_distribution.log_prob(action)
+            action, log_prob = self._sample_action_and_log_prob(mean, std, deterministic=deterministic)
         return (
             action.squeeze(0).cpu().numpy(),
             log_prob.squeeze(0),
@@ -486,6 +515,8 @@ class PPOAgent:
 
     def _sanitize_trajectories(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
         """Replace NaN and inf values in trajectory data with safe defaults."""
+        low = np.array([-self.config.max_steering_angle, self.config.min_speed], dtype=np.float32)
+        high = np.array([self.config.max_steering_angle, self.config.max_speed], dtype=np.float32)
         for trajectory in trajectories:
             trajectory["observations"] = np.nan_to_num(
                 trajectory["observations"], nan=0.0, posinf=1.0, neginf=-1.0
@@ -493,6 +524,7 @@ class PPOAgent:
             trajectory["actions"] = np.nan_to_num(
                 trajectory["actions"], nan=0.0, posinf=0.0, neginf=0.0
             ).astype(np.float32)
+            trajectory["actions"] = np.clip(trajectory["actions"], low + 1e-5, high - 1e-5)
             trajectory["log_probs"] = np.nan_to_num(
                 trajectory["log_probs"], nan=0.0, posinf=0.0, neginf=0.0
             ).astype(np.float32)
@@ -511,6 +543,19 @@ class PPOAgent:
         for trajectory in trajectories:
             trajectory["advantages"] = ((trajectory["advantages"] - adv_mean) / adv_std).astype(np.float32)
 
+    @staticmethod
+    def _sequence_loss_mask(valid_mask: torch.Tensor, burn_in: int) -> torch.Tensor:
+        """
+        Build a loss mask that ignores initial burn-in steps per sequence.
+
+        Keeps at least one valid step active for very short sequences.
+        """
+        valid_lengths = valid_mask.sum(dim=1).to(dtype=torch.long)
+        burn_tensor = torch.full_like(valid_lengths, burn_in)
+        start_index = torch.minimum(burn_tensor, torch.clamp(valid_lengths - 1, min=0))
+        time_index = torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0)
+        return valid_mask * (time_index >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)
+
     def _update_batch(self, batch: Dict[str, torch.Tensor]) -> None:
         """
         Perform a single PPO policy gradient update on one batch of data.
@@ -523,9 +568,13 @@ class PPOAgent:
             batch["actions"],
             batch["done_mask"],
         )
+        if not (torch.isfinite(log_probs_new).all() and torch.isfinite(values).all() and torch.isfinite(entropy).all()):
+            print("[PPO] WARNING: Skipping update batch due to non-finite policy evaluation.", flush=True)
+            return
 
         valid_mask = batch["valid_mask"]
-        mask_bool = valid_mask > 0
+        learn_mask = self._sequence_loss_mask(valid_mask, self.config.burn_in)
+        mask_bool = learn_mask > 0
         log_ratio = torch.nan_to_num(
             log_probs_new - batch["log_probs"],
             nan=0.0,
@@ -541,7 +590,7 @@ class PPOAgent:
         value_error = torch.where(mask_bool, value_error, torch.zeros_like(value_error))
         entropy = torch.where(mask_bool, entropy, torch.zeros_like(entropy))
 
-        valid_count = valid_mask.sum().clamp_min(1.0)
+        valid_count = learn_mask.sum().clamp_min(1.0)
         policy_loss = -surrogate.sum() / valid_count
         value_loss = value_error.sum() / valid_count
         entropy_bonus = entropy.sum() / valid_count
@@ -587,9 +636,11 @@ class PPOAgent:
             done_mask=done_mask,
         )
         mean, std = self._policy_stats(policy_output)
-        action_distribution = self._action_distribution(mean, std)
-        log_probs = action_distribution.log_prob(actions)
-        entropy = self._entropy_estimate(action_distribution)
+        safe_actions = torch.nan_to_num(actions, nan=0.0, posinf=0.0, neginf=0.0)
+        pre_tanh_actions, squashed_actions = self._inverse_squash_action(safe_actions)
+        log_probs = self._log_prob_from_pre_tanh(mean, std, pre_tanh_actions, squashed_actions)
+        entropy_pre_tanh = Normal(mean, std).rsample()
+        entropy = -self._log_prob_from_pre_tanh(mean, std, entropy_pre_tanh, torch.tanh(entropy_pre_tanh))
         return log_probs, state_values, entropy
 
     def update(self, trajectories: List[Dict[str, np.ndarray]]) -> None:

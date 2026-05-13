@@ -24,7 +24,7 @@ class PPODefaults:
 
 class SACDefaults:
     episodes = 2500
-    update_after_steps = 500
+    update_after_steps = 2000
     updates_per_step = 2
     save_every = 100
     gamma = 0.99
@@ -41,6 +41,6 @@ class SACDefaults:
     recurrent_layers = 1
     log_std_min = -5.0
     log_std_max = 2.0
-    replay_capacity = 1024
+    replay_capacity = 8192
     replay_batch_size = 32
-    min_replay_sequences = 64
+    min_replay_sequences = 256

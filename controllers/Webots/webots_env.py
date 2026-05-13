@@ -501,11 +501,11 @@ class RewardComputer:
             delta = float(prev_distance - distance_to_end)
             progress = delta * self.progress_scale if delta >= 0.0 else delta * (0.25 * self.progress_scale)
 
-        proximity = max(0.0, (self.reference_distance - distance_to_end) / max(self.reference_distance, 1e-6))
-        proximity_reward = proximity * self.distance_reward_scale
-        heading_alignment = max(0.0, float(np.cos(goal_error)))
+        distance_ratio = float(np.clip(distance_to_end / max(self.reference_distance, 1e-6), 0.0, 2.0))
+        distance_penalty = -distance_ratio * self.distance_reward_scale
+        heading_alignment = float(np.cos(goal_error))
         heading_reward = heading_alignment * self.heading_reward_scale
-        safety_reward = float(np.clip(min_lidar_norm, 0.0, 1.0)) * self.safety_reward_scale
+        safety_penalty = -(1.0 - float(np.clip(min_lidar_norm, 0.0, 1.0))) * self.safety_reward_scale
         motion_reward = float(np.clip(speed_norm, 0.0, 1.0)) * self.motion_reward_scale
         new_best_bonus = self.new_best_distance_bonus if reached_new_best_distance else 0.0
 
@@ -516,9 +516,9 @@ class RewardComputer:
 
         return (
             progress
-            + proximity_reward
+            + distance_penalty
             + heading_reward
-            + safety_reward
+            + safety_penalty
             + motion_reward
             + new_best_bonus
             + accel_penalty
@@ -590,6 +590,7 @@ class WebotsEnv:
         self.collision = False
         self.prev_distance: Optional[float] = None
         self.was_in_goal: bool = False
+        self.last_min_lidar_norm: float = 1.0
 
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         _repo_root = Path(__file__).parent.parent.parent
@@ -619,6 +620,7 @@ class WebotsEnv:
         self.min_episode_distance = float("inf")
         self.collision = False
         self.was_in_goal = False
+        self.last_min_lidar_norm = 1.0
 
     def _goal_geometry(self, pos: np.ndarray, heading: float) -> Tuple[float, float]:
         goal_vec = self._endpoint - pos
@@ -715,6 +717,7 @@ class WebotsEnv:
         self.current_speed_norm = 0.0
         self.current_distance, _ = self._goal_geometry(pos, heading)
         self.min_episode_distance = self.current_distance
+        self.last_min_lidar_norm = float(lidar_sectors.min())
 
         observation = self._build_observation(lidar_sectors, pos, heading, imu_state)
         return observation, {}
@@ -724,7 +727,12 @@ class WebotsEnv:
         if action_arr.size != 2:
             raise ValueError(f"Expected action with 2 elements [steering, speed], got shape {action_arr.shape}")
         steering = float(np.clip(action_arr[0], -self.config.max_steering_angle, self.config.max_steering_angle))
-        speed = float(np.clip(action_arr[1], self.config.min_speed, self.config.max_speed))
+        requested_speed = float(np.clip(action_arr[1], self.config.min_speed, self.config.max_speed))
+        steering_norm = abs(steering) / max(self.config.max_steering_angle, 1e-6)
+        obstacle_factor = float(np.clip((self.last_min_lidar_norm - 0.05) / 0.95, 0.45, 1.0))
+        steering_factor = float(np.clip(1.0 - 0.55 * steering_norm, 0.45, 1.0))
+        adaptive_speed_cap = self.config.max_speed * obstacle_factor * steering_factor
+        speed = float(np.clip(min(requested_speed, adaptive_speed_cap), self.config.min_speed, self.config.max_speed))
         self.robot.set_steering(steering)
         self.robot.set_speed(speed)
         self.robot.step(self.timestep)
@@ -740,6 +748,7 @@ class WebotsEnv:
             self.min_episode_distance = self.current_distance
 
         min_lidar_norm = float(lidar_sectors.min())
+        self.last_min_lidar_norm = min_lidar_norm
         speed_norm = float(speed / max(self.config.max_speed, 1e-6))
         self.current_speed_norm = speed_norm
         goal_reached = self.current_distance < self.config.goal_threshold
@@ -793,6 +802,12 @@ class WebotsEnv:
             info["success"] = False
 
         if truncated:
+            # Make non-success timeouts clearly worse than goal completion.
+            distance_ratio = float(np.clip(self.current_distance / max(self._reference_distance, 1e-6), 0.0, 2.0))
+            timeout_penalty = -10.0 - 20.0 * distance_ratio
+            reward += timeout_penalty
+            self.episode_reward += timeout_penalty
+            info["reset_reason"] = "max_steps"
             info["success"] = False
 
         if terminated or truncated:
