@@ -68,6 +68,7 @@ from controllers.common.checkpoints import (
     make_checkpoint_header as _make_checkpoint_header,
     save_checkpoint_file as _save_checkpoint_file,
 )
+from controllers.common.metrics_logger import MetricsLogger
 
 
 def _checkpoint_path(filename: str) -> str:
@@ -121,6 +122,7 @@ class Config:
     save_every: int = PPODefaults.save_every
     
     gamma: float = 0.99
+    gae_lambda: float = PPODefaults.gae_lambda
     epsilon: float = 0.2
     learning_rate: float = PPODefaults.learning_rate
     entropy_coef: float = PPODefaults.entropy_coef
@@ -442,14 +444,34 @@ class PPOAgent:
             next_state,
         )
 
-    def calculate_returns(self, rewards: np.ndarray, bootstrap_value: float = 0.0) -> np.ndarray:
-        """Compute discounted cumulative returns for advantage calculation."""
-        returns = np.zeros(len(rewards), dtype=np.float32)
-        discounted_return = float(bootstrap_value)
-        for t in reversed(range(len(rewards))):
-            discounted_return = rewards[t] + self.config.gamma * discounted_return
-            returns[t] = discounted_return
-        return returns
+    def calculate_gae(
+        self,
+        rewards: np.ndarray,
+        values: np.ndarray,
+        bootstrap_value: float = 0.0,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Compute Generalized Advantage Estimation (GAE) and TD(λ) returns.
+
+        GAE reduces the variance of Monte-Carlo advantage estimates (the old
+        approach) by exponentially down-weighting longer-horizon TD errors with
+        factor γλ.  λ=1 recovers Monte-Carlo; λ=0 gives pure 1-step TD.
+
+        Returns:
+            advantages: GAE estimates A(s_t, a_t) for each step.
+            returns: TD(λ) targets V̂(s_t) = A_t + V(s_t) used for the critic.
+        """
+        T = len(rewards)
+        advantages = np.zeros(T, dtype=np.float32)
+        gae = 0.0
+        next_value = float(bootstrap_value)
+        for t in reversed(range(T)):
+            delta = rewards[t] + self.config.gamma * next_value - values[t]
+            gae = delta + self.config.gamma * self.config.gae_lambda * gae
+            advantages[t] = gae
+            next_value = float(values[t])
+        returns = (advantages + values).astype(np.float32)
+        return advantages.astype(np.float32), returns
 
     def _prepare_batch(
         self,
@@ -749,6 +771,7 @@ def train(config: Optional[Config] = None) -> None:
     collision_window: List[float] = []
     timeout_window: List[float] = []
     start_time = time.perf_counter()
+    metrics_logger = MetricsLogger(env.run_folder, algorithm="ppo")
     
     for episode in range(config.episodes):
         obs, _ = env.reset()
@@ -795,7 +818,18 @@ def train(config: Optional[Config] = None) -> None:
             
             obs = obs_next
         
-        # Build returns and advantages per episode.
+        # Compute per-step value estimates for the full episode, then GAE.
+        episode_obs_array = np.array(episode_observations, dtype=np.float32)
+        with torch.no_grad():
+            _, episode_values, _ = agent.model(
+                episode_obs_array,
+                recurrent_state=agent.get_initial_state(batch_size=1),
+                done_mask=np.concatenate(([1.0], np.zeros(len(episode_rewards) - 1, dtype=np.float32))),
+            )
+            episode_values_np = episode_values.squeeze(0).detach().cpu().numpy()
+
+        # Bootstrap V(s_T) from the critic for truncated episodes so the
+        # advantage estimate accounts for future rewards beyond the episode.
         bootstrap_value = 0.0
         if episode_end_reason == "max_steps":
             with torch.no_grad():
@@ -806,28 +840,19 @@ def train(config: Optional[Config] = None) -> None:
                 )
             bootstrap_value = float(bootstrap_state_value.squeeze(0).item())
 
-        episode_returns = agent.calculate_returns(
+        episode_advantages, episode_returns = agent.calculate_gae(
             np.array(episode_rewards, dtype=np.float32) * REWARD_SCALE,
+            episode_values_np,
             bootstrap_value=bootstrap_value,
         )
-        episode_obs_array = np.array(episode_observations, dtype=np.float32)
-        with torch.no_grad():
-            _, episode_values, _ = agent.model(
-                episode_obs_array,
-                recurrent_state=agent.get_initial_state(batch_size=1),
-                done_mask=np.concatenate(([1.0], np.zeros(len(episode_rewards) - 1, dtype=np.float32))),
-            )
-            episode_values = episode_values.squeeze(0).detach().cpu().numpy()
-
-        episode_advantages = episode_returns - episode_values
 
         rollout_trajectories.append(
             {
                 "observations": episode_obs_array,
                 "actions": np.array(episode_actions, dtype=np.float32),
                 "log_probs": np.array(episode_log_probs, dtype=np.float32),
-                "returns": episode_returns.astype(np.float32),
-                "advantages": episode_advantages.astype(np.float32),
+                "returns": episode_returns,
+                "advantages": episode_advantages,
             }
         )
         
@@ -889,10 +914,26 @@ def train(config: Optional[Config] = None) -> None:
             f"min_d={env.min_episode_distance:5.2f} end={episode_end_reason} t={elapsed:7.1f}s{checkpoint_note}",
             flush=True,
         )
+        metrics_logger.log(
+            episode=episode + 1,
+            reward=round(episode_reward_sum, 4),
+            avg10=round(rolling_reward, 4),
+            steps=episode_step,
+            success=int(episode_success),
+            goal_touched=int(episode_goal_reached),
+            collision=int(episode_end_reason == "collision"),
+            timeout=int(episode_end_reason == "max_steps"),
+            min_dist=round(env.min_episode_distance, 4),
+            end_reason=episode_end_reason,
+            elapsed_s=round(elapsed, 1),
+        )
 
     if rollout_trajectories:
         agent.update(rollout_trajectories)
-    
+
+    metrics_logger.close()
+    print(f"[TRAIN][PPO] metrics saved to {metrics_logger.path}", flush=True)
+
     # Save final model
     final_reward = best_goal_reward if best_goal_episode is not None else best_reward
     header = _make_checkpoint_header('final', final_reward, best_goal_episode is not None, 'ppo', asdict(config))

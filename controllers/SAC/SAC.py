@@ -67,6 +67,7 @@ from controllers.common.checkpoints import (
     load_checkpoint as _shared_load_checkpoint,
     save_checkpoint_file as _save_checkpoint_file,
 )
+from controllers.common.metrics_logger import MetricsLogger
 
 
 def _checkpoint_path(filename: str) -> str:
@@ -971,6 +972,7 @@ def train(config: Optional[Config] = None) -> None:
     collision_window: List[float] = []
     timeout_window: List[float] = []
     start_time = time.perf_counter()
+    metrics_logger = MetricsLogger(env.run_folder, algorithm="sac")
 
     for episode in range(config.episodes):
         obs, _ = env.reset()
@@ -996,7 +998,12 @@ def train(config: Optional[Config] = None) -> None:
             )
 
             next_obs, reward, terminated, truncated, info = env.step(action)
-            transition_done = bool(terminated or truncated)
+            # Only mark done on true termination (collision, goal).  Timeout
+            # (truncated) is NOT a terminal state — the Bellman target must still
+            # bootstrap.  Using (terminated or truncated) here was cutting the
+            # Q-value estimate to zero at every episode timeout, preventing the
+            # critic from propagating credit across episode boundaries.
+            transition_done = bool(terminated)
             episode_obs.append(np.asarray(obs, dtype=np.float32))
             episode_actions.append(np.asarray(action, dtype=np.float32))
             episode_rewards.append(float(reward))
@@ -1033,7 +1040,11 @@ def train(config: Optional[Config] = None) -> None:
             config.replay_batch_size,
             config.min_replay_sequences,
         ):
-            num_updates = max(1, len(replay) // config.replay_batch_size) * max(1, config.updates_per_step)
+            # One gradient step per environment step collected this episode
+            # (scaled by updates_per_step).  The old formula divided the full
+            # replay capacity by the batch size, which grew to 512+ steps/episode
+            # as the buffer filled — far too many updates, causing overfitting.
+            num_updates = max(1, len(episode_obs)) * config.updates_per_step
             for _ in range(num_updates):
                 batch = replay.sample(config.replay_batch_size, agent.device)
                 agent.update(batch)
@@ -1084,6 +1095,23 @@ def train(config: Optional[Config] = None) -> None:
             f"t={elapsed:7.1f}s{checkpoint_note}",
             flush=True,
         )
+        metrics_logger.log(
+            episode=episode + 1,
+            reward=round(episode_reward, 4),
+            avg10=round(rolling_reward, 4),
+            steps=env.current_step,
+            success=int(episode_success),
+            goal_touched=int(episode_goal_reached),
+            collision=int(episode_end_reason == "collision"),
+            timeout=int(episode_end_reason == "max_steps"),
+            min_dist=round(env.min_episode_distance, 4),
+            end_reason=episode_end_reason,
+            replay_size=len(replay),
+            elapsed_s=round(elapsed, 1),
+        )
+
+    metrics_logger.close()
+    print(f"[TRAIN][SAC] metrics saved to {metrics_logger.path}", flush=True)
 
     final_reward = best_goal_reward if best_goal_episode is not None else best_reward
     agent.save(final_model_path, "final", final_reward)

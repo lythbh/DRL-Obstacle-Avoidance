@@ -15,6 +15,7 @@ class PPODefaults:
     save_every = 100
     learning_rate = 1e-4
     entropy_coef = 0.02
+    gae_lambda = 0.95
     hidden_size = 128
     latent_size = 128
     lstm_hidden_size = 128
@@ -32,9 +33,9 @@ class SACDefaults:
     actor_lr = 3e-4
     critic_lr = 3e-4
     alpha_lr = 3e-4
-    initial_alpha = 0.05
+    initial_alpha = 0.2
     auto_entropy_tuning = True
-    target_entropy_scale = 0.5
+    target_entropy_scale = 1.0
     hidden_size = 128
     recurrent_cell = "gru"
     recurrent_hidden_size = None
