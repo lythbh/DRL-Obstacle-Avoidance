@@ -22,6 +22,8 @@ from controllers.common.defaults import (
     REW_MOTION_SCALE as MOTION_REWARD_SCALE,
     REW_NEW_BEST_DISTANCE_BONUS as NEW_BEST_DISTANCE_BONUS,
     REW_PROGRESS_SCALE as PROGRESS_REWARD_SCALE,
+    PROXIMITY_REWARD_SCALE,
+    PROXIMITY_RADIUS,
     REW_SAFETY_SCALE as SAFETY_REWARD_SCALE,
     REW_SLOW_SPEED_PENALTY as SLOW_SPEED_PENALTY,
     REW_SLOW_SPEED_THRESHOLD as SLOW_SPEED_THRESHOLD,
@@ -65,7 +67,7 @@ def _init_supervisor() -> None:
 
 
 class SLAMProcessor:
-    """IMU filtering + IEKF heading + occupancy map for the controller."""
+    """IMU filtering + IEKF heading + optional occupancy map for visualization."""
 
     WHEEL_RADIUS: float = 0.033
     N_SECTORS: int = 16
@@ -97,7 +99,8 @@ class SLAMProcessor:
         if self.enabled:
             self.imu_proc: Any = IMUProcessor(dt=dt)
             self.iekf: Any = IEKFBackend()
-            self.slam_map: Any = SLAMMap(map_resolution=0.05)
+            # Occupancy map only built when save_episodes=True (visualization only, not used in obs)
+            self.slam_map: Any = SLAMMap(map_resolution=0.05) if self.save_episodes else None
         else:
             self.imu_proc = None
             self.iekf = None
@@ -141,20 +144,15 @@ class SLAMProcessor:
         n = len(raw_ranges)
         if self._lidar_angles is None or len(self._lidar_angles) != n:
             self._lidar_angles = np.linspace(
-                start=-self._lidar_fov / 2.0,
-                stop=self._lidar_fov / 2.0,
-                num=n,
-                dtype=np.float32,
+                -self._lidar_fov / 2.0, self._lidar_fov / 2.0, n, dtype=np.float32,
             )
         mask = (raw_ranges > 0.01) & np.isfinite(raw_ranges)
         r = raw_ranges[mask]
         assert self._lidar_angles is not None
         a = self._lidar_angles[mask]
         c, s = float(np.cos(heading)), float(np.sin(heading))
-        xl = r * np.cos(a)
-        yl = r * np.sin(a)
-        xw = c * xl - s * yl + pos[0]
-        yw = s * xl + c * yl + pos[1]
+        xl = r * np.cos(a);  yl = r * np.sin(a)
+        xw = c * xl - s * yl + pos[0];  yw = s * xl + c * yl + pos[1]
         return np.column_stack([xw, yw]).astype(np.float32)
 
     def process(
@@ -168,12 +166,11 @@ class SLAMProcessor:
         """Process sensor data: compute lidar sectors, update IMU/IEKF, add keyframes to occupancy map."""
         lidar_sectors = self.sector_lidar(raw_ranges)
 
-        if not self.enabled or self.imu_proc is None or self.iekf is None or self.slam_map is None:
+        if not self.enabled or self.imu_proc is None or self.iekf is None:
             return lidar_sectors, None
 
         imu_state = self.imu_proc.step(gyro, accel)
-        cmd_speed_ms = cmd_speed_rads * self.WHEEL_RADIUS
-        self.iekf.propagate_odom(cmd_speed_ms, float(gyro[2]), self._dt)
+        self.iekf.propagate_odom(cmd_speed_rads * self.WHEEL_RADIUS, float(gyro[2]), self._dt)
 
         heading = self.iekf.state.heading
         pos = gps_pos if gps_pos is not None else self.iekf.state.position
@@ -181,6 +178,10 @@ class SLAMProcessor:
         self.slam_map.try_add_keyframe(
             float(pos[0]), float(pos[1]), heading, scan_points=pts_2d
         )
+        if self.slam_map is not None:
+            pos = gps_pos if gps_pos is not None else self.iekf.state.position
+            pts_2d = self._scan_to_world(raw_ranges, pos, self.iekf.state.heading)
+            self.slam_map.try_add_keyframe(float(pos[0]), float(pos[1]), self.iekf.state.heading, scan_points=pts_2d)
 
         return lidar_sectors, imu_state
 
@@ -323,6 +324,75 @@ class AltinoDriver:
                    else self._get_heading())
         return lidar_sectors, pos, heading, imu_state, collision
 
+    # Movable obstacles: (DEF name, z height to restore after XY randomisation)
+    _OBSTACLE_DEFS: List[Tuple[str, float]] = [
+        ("OBS_BARREL",   0.0),
+        ("OBS_CONE",     0.0),
+        ("OBS_FOOTBALL", 0.1),
+        ("OBS_BOTTLE",   0.0),
+        ("OBS_CHAIR",    0.0),
+        ("OBS_BEER_1",   0.0),
+        ("OBS_BEER_2",   0.0),
+        ("OBS_CYL_1",    0.15),
+        ("OBS_CYL_2",    0.1),
+        ("OBS_CYL_3",    0.15),
+        ("OBS_CYL_4",    0.15),
+        ("OBS_CYL_5",    0.15),
+        ("OBS_BOX_1",    0.15),
+        ("OBS_BOX_2",    0.15),
+        ("OBS_BOX_3",    0.15),
+    ]
+
+    def randomize_goal(self, y_range: float = 1.5) -> np.ndarray:
+        """Randomise goal y-position and move the barrier wall gap to match.
+
+        The goal x stays fixed (far end of arena). Only y varies so travel
+        distance stays consistent. Returns the new goal [x, y].
+        """
+        goal_x = float(self.config.endpoint[0])
+        goal_y = float(np.random.uniform(-y_range, y_range))
+        wall_x = goal_x - 0.5          # barrier sits 0.5 m in front of goal
+        half_span = 1.55               # half-length of each wall segment (5×5 arena)
+
+        top = self.supervisor.getFromDef("BARRIER_TOP")
+        bot = self.supervisor.getFromDef("BARRIER_BOTTOM")
+        if top is not None:
+            top.getField("translation").setSFVec3f([wall_x, goal_y + half_span, 0.25])
+        if bot is not None:
+            bot.getField("translation").setSFVec3f([wall_x, goal_y - half_span, 0.25])
+
+        return np.array([goal_x, goal_y], dtype=np.float32)
+
+    def randomize_obstacles(self) -> None:
+        """Move each obstacle into the travel corridor with 75 % probability."""
+        start_xy = np.array(self.config.start_position[:2], dtype=np.float32)
+        goal_xy  = np.array(self.config.endpoint, dtype=np.float32)
+        placed: List[np.ndarray] = []
+
+        for def_name, z in self._OBSTACLE_DEFS:
+            node = self.supervisor.getFromDef(def_name)
+            if node is None:
+                continue
+            field = node.getField("translation")
+            for _ in range(60):
+                if np.random.random() < 0.75:
+                    # bias toward the travel corridor between start and barrier
+                    x = float(np.random.uniform(-1.5, 2.3))
+                    y = float(np.random.uniform(-1.2, 1.2))
+                else:
+                    x = float(np.random.uniform(-2.2, 2.2))
+                    y = float(np.random.uniform(-2.2, 2.2))
+                pos = np.array([x, y])
+                if np.linalg.norm(pos - start_xy) < 1.0:
+                    continue
+                if np.linalg.norm(pos - goal_xy) < 1.0:
+                    continue
+                if any(np.linalg.norm(pos - p) < 0.45 for p in placed):
+                    continue
+                field.setSFVec3f([x, y, z])
+                placed.append(pos)
+                break
+
     def reset_position(self) -> None:
         """Reset robot to start position and rotation with added noise."""
         if self.translation_field is not None and self.rotation_field is not None:
@@ -418,8 +488,10 @@ class RewardComputer:
 
         accel_magnitude = float(np.linalg.norm(accel))
         accel_penalty = 0.0
-        if distance_to_end < 1.5 and distance_to_end >= self.goal_threshold:
+        proximity_bonus = 0.0
+        if distance_to_end < self.proximity_radius and distance_to_end >= self.goal_threshold:
             accel_penalty = -0.05 * accel_magnitude
+            proximity_bonus = self.proximity_reward_scale * (1.0 - distance_to_end / self.proximity_radius)
 
         return (
             progress
@@ -431,6 +503,7 @@ class RewardComputer:
             + high_speed_reward
             + new_best_bonus
             + accel_penalty
+            + proximity_bonus
             + self.step_penalty
         ), distance_to_end
 
@@ -448,8 +521,8 @@ class WebotsEnv:
         self._imu_feature_dim = int(config.imu_feature_dim)
         if self._lidar_sector_dim <= 0:
             raise ValueError(f"lidar_sector_dim must be positive, got {config.lidar_sector_dim}.")
-        if self._pose_goal_dim != 7:
-            raise ValueError(f"pose_goal_dim must be 7 for the active observation schema, got {config.pose_goal_dim}.")
+        if self._pose_goal_dim != 5:
+            raise ValueError(f"pose_goal_dim must be 5 for the active observation schema, got {config.pose_goal_dim}.")
         if self._imu_feature_dim != 10:
             raise ValueError(f"imu_feature_dim must be 10 for the active observation schema, got {config.imu_feature_dim}.")
 
@@ -477,6 +550,31 @@ class WebotsEnv:
         self.backlights = self.robot.supervisor.getDevice("backlights")
 
         self.reward_computer = RewardComputer(config)
+        self.reward_computer = RewardComputer(
+            self._endpoint,
+            reference_distance=self._reference_distance,
+            collision_reward=config.collision_penalty,
+            progress_scale=config.progress_reward_scale,
+            distance_reward_scale=config.distance_reward_scale,
+            heading_reward_scale=config.heading_reward_scale,
+            safety_reward_scale=config.safety_reward_scale,
+            motion_reward_scale=config.motion_reward_scale,
+            slow_speed_threshold=float(getattr(config, "slow_speed_threshold", SLOW_SPEED_THRESHOLD)),
+            slow_speed_penalty=float(getattr(config, "slow_speed_penalty", SLOW_SPEED_PENALTY)),
+            high_speed_threshold=float(getattr(config, "high_speed_threshold", HIGH_SPEED_THRESHOLD)),
+            high_speed_bonus=float(getattr(config, "high_speed_bonus", HIGH_SPEED_BONUS)),
+            new_best_distance_bonus=config.new_best_distance_bonus,
+            proximity_reward_scale=float(getattr(config, "proximity_reward_scale", PROXIMITY_REWARD_SCALE)),
+            proximity_radius=float(getattr(config, "proximity_radius", PROXIMITY_RADIUS)),
+            step_penalty=config.step_penalty,
+            goal_threshold=config.goal_threshold,
+            goal_stop_speed_threshold=float(getattr(config, "goal_stop_speed_threshold", 0.1)),
+            goal_success_reward=config.goal_success_reward,
+            goal_stop_bonus=config.goal_stop_bonus,
+            goal_hold_reward=config.goal_hold_reward,
+            goal_speed_penalty=config.goal_speed_penalty,
+            goal_overshoot_penalty=config.goal_overshoot_penalty,
+        )
 
         self.current_step = 0
         self.episode_reward = 0.0
@@ -495,6 +593,17 @@ class WebotsEnv:
         self.run_folder = str(_repo_root / "plots" / ts)
         os.makedirs(self.run_folder, exist_ok=True)
         self._episode_count = 0
+
+    def _reset_episode_state(self) -> None:
+        self.current_step = 0
+        self.prev_distance = None
+        self.episode_reward = 0.0
+        self.current_heading = 0.0
+        self.current_distance = float("inf")
+        self.min_episode_distance = float("inf")
+        self.collision = False
+        self.was_in_goal = False
+        self.last_min_lidar_norm = 1.0
 
     def _goal_geometry(self, pos: np.ndarray, heading: float) -> Tuple[float, float]:
         """Compute distance and direction error to goal from current position and heading."""
@@ -553,6 +662,11 @@ class WebotsEnv:
         observation = np.concatenate([
             lidar_sectors, pos, direction_features, accel_norm, gyro_norm, quat,
             self._occupancy_grid_observation(),
+            lidar_sectors,
+            direction_features,
+            accel_norm,
+            gyro_norm,
+            quat,
         ]).astype(np.float32)
         if observation.size != self.observation_size:
             raise RuntimeError(
@@ -564,7 +678,16 @@ class WebotsEnv:
         """Reset environment to start state, return initial observation and info."""
         self.robot.slam.reset_map()
         self._episode_count += 1
-        self.robot.stop()
+        self.robot.motors.stop()
+
+        if getattr(self.config, "randomize_goal", False):
+            y_range = float(getattr(self.config, "goal_y_range", 1.5))
+            new_goal = self.robot.randomize_goal(y_range=y_range)
+            self._endpoint = new_goal
+            self.reward_computer.endpoint = new_goal
+            self.robot.slam._goal = tuple(new_goal.tolist())
+
+        self.robot.randomize_obstacles()
         self.robot.reset_position()
 
         self.current_step = 0
