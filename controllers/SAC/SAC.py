@@ -1,4 +1,4 @@
-"""Soft Actor-Critic controller for the ALTINO Webots task."""
+﻿"""Soft Actor-Critic controller for the ALTINO Webots task."""
 from __future__ import annotations
 
 import sys, time
@@ -190,9 +190,6 @@ class SACAgent:
         self.actor_enc = _make_encoder()
         self.actor_mean = nn.Linear(self.actor_enc.recurrent_hidden_size, action_dim).to(self.device)
         self.actor_log_std_head = nn.Linear(self.actor_enc.recurrent_hidden_size, action_dim).to(self.device)
-        with torch.no_grad():
-            if self.actor_mean.bias is not None and action_dim > 1:
-                self.actor_mean.bias[1] = -0.8
 
         def _make_critic():
             enc = _make_encoder()
@@ -600,3 +597,8 @@ def train(config=None):
 
 if __name__ == "__main__":
     train()
+
+
+
+
+

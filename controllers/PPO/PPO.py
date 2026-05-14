@@ -34,9 +34,10 @@ class Config:
     save_every: int = d.PPODefaults.save_every
     gamma: float = 0.99
     gae_lambda: float = d.PPODefaults.gae_lambda
-    epsilon: float = 0.2
+    epsilon: float = 0.1  # reduced from 0.2 — tighter clipping for more stable updates
     learning_rate: float = d.PPODefaults.learning_rate
     entropy_coef: float = d.PPODefaults.entropy_coef
+    clip_value_loss: bool = d.PPODefaults.clip_value_loss
     hidden_size: int = d.PPODefaults.hidden_size
     latent_size: int = d.PPODefaults.latent_size
     lstm_hidden_size: int = d.PPODefaults.lstm_hidden_size
@@ -128,9 +129,6 @@ class PPOAgent:
         model_class = GRUActorCritic if recurrent_cell.lower().strip() == "gru" else LSTMActorCritic
         self.model = model_class(self.obs_size, self.action_dim, self.config).to(self.device)
         self.actor = self.model.policy_head
-        with torch.no_grad():
-            if self.actor.bias is not None and self.action_dim > 1:
-                self.actor.bias[1] = -0.8
         self.actor_log_std = nn.Parameter(torch.full((self.action_dim,), -0.5, dtype=torch.float32, device=self.device))
         params = list(self.model.parameters()) + [self.actor_log_std]
         self.optimizer = torch.optim.Adam(params, lr=self.config.learning_rate)
@@ -226,6 +224,8 @@ class PPOAgent:
         adv_std = float(all_adv.std() + 1e-8)
         for t in trajectories:
             t["advantages"] = ((t["advantages"] - adv_mean) / adv_std).astype(np.float32)
+            # Clip normalized advantages to prevent extreme ratio outliers
+            t["advantages"] = np.clip(t["advantages"], -5.0, 5.0)
 
     @staticmethod
     def _sequence_loss_mask(valid_mask, burn_in):
@@ -249,6 +249,7 @@ class PPOAgent:
         surr1 = ratio * batch["advantages"]
         surr2 = torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon) * batch["advantages"]
         surrogate = torch.where(mask_bool, torch.min(surr1, surr2), torch.zeros_like(surr1))
+        # Value loss: simple smooth_l1_loss without clipping (clip_value_loss disabled to allow critic gradient flow)
         value_error = nn.functional.smooth_l1_loss(values, batch["returns"], reduction="none")
         entropy_term = torch.where(mask_bool, entropy, torch.zeros_like(entropy))
         valid_count = learn_mask.sum().clamp_min(1.0)
@@ -277,7 +278,19 @@ class PPOAgent:
         grad_norm_actor = MetricsLogger.compute_grad_norm(actor_params)
         grad_norm_critic = MetricsLogger.compute_grad_norm(critic_params)
 
-        nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
+        # Per-module gradient clipping for stability:
+        # - Actor params get conservative clipping (max_norm=0.5)
+        # - Critic and RNN params get looser clipping (max_norm=1.0)
+        actor_clip = list(self.model.policy_head.parameters()) + [self.actor_log_std]
+        critic_clip = list(self.model.value_head.parameters())
+        rnn_attr = "gru" if hasattr(self.model, "gru") else "lstm"
+        rnn_clip = list(getattr(self.model, rnn_attr).parameters())
+        encoder_clip = [p for n, p in self.model.named_parameters()
+                        if "policy_head" not in n and "value_head" not in n and rnn_attr not in n]
+        nn.utils.clip_grad_norm_(actor_clip, max_norm=0.5)
+        nn.utils.clip_grad_norm_(critic_clip, max_norm=5.0)  # raised from 1.0 — critic has only 2 params, needs more room
+        nn.utils.clip_grad_norm_(rnn_clip, max_norm=1.0)
+        nn.utils.clip_grad_norm_(encoder_clip, max_norm=0.5)
         self.optimizer.step()
         with torch.no_grad():
             self.actor_log_std.data.copy_(torch.nan_to_num(self.actor_log_std.data, nan=-0.5, posinf=2.0, neginf=-5.0).clamp(-5.0, 2.0))
@@ -331,7 +344,10 @@ class PPOAgent:
             return []
         update_metrics = []
         num = len(trajectories)
-        for _ in range(self.config.epochs):
+        early_stop = False
+        for epoch in range(self.config.epochs):
+            if early_stop:
+                break
             indices = torch.randperm(num).tolist()
             for start in range(0, num, self.config.batch_size):
                 batch_indices = indices[start: start + self.config.batch_size]
@@ -339,6 +355,10 @@ class PPOAgent:
                 metrics = self._update_batch(batch)
                 if metrics is not None:
                     update_metrics.append(metrics)
+                    # Early stopping if KL divergence is too large
+                    if metrics.get("approx_kl", 0) > 0.05:
+                        early_stop = True
+                        break
         return update_metrics
 
     def load_model(self, model_path: str) -> None:
@@ -469,6 +489,15 @@ def train(config=None):
                 )
 
         agg_upd = MetricsLogger.aggregate_update_metrics(all_update_metrics)
+
+        # Learning rate warmup for first 50 episodes (extended from 10)
+        if episode < 50:
+            warmup_lr = config.learning_rate * (episode + 1) / 50.0
+            for pg in agent.optimizer.param_groups:
+                pg['lr'] = warmup_lr
+        # Entropy coefficient decays linearly over training to phase out exploration
+        decay_frac = min(1.0, episode / max(1, config.episodes))
+        agent.config.entropy_coef = d.PPODefaults.entropy_coef * (1.0 - 0.9 * decay_frac)
 
         ep_sum = sum(ep_rew)
         rew_w.append(ep_sum)
