@@ -1,10 +1,9 @@
 ﻿"""Shared base class for GRU/LSTM actor-critic networks."""
 
+from torch import nn
 from typing import Optional, Tuple, Union
 
-import numpy as np
 import torch
-from torch import nn
 
 RecurrentState = Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
 
@@ -75,12 +74,15 @@ class RecurrentActorCriticBase(nn.Module):
         self.value_head = nn.Linear(self.recurrent_hidden_size, 1)
 
     def get_initial_state(self, batch_size: int, device: Optional[torch.device] = None) -> RecurrentState:
+        """Get initial hidden state for the recurrent network (implemented by subclasses)."""
         raise NotImplementedError
 
     def _run_recurrent(self, latent, recurrent_state, mask, batch_size, seq_len):
+        """Execute recurrent network forward pass on latent features (implemented by subclasses)."""
         raise NotImplementedError
 
     def _split_observation(self, observation, recurrent_state, done_mask):
+        """Parse observation tensor into obstacle, pose/goal, IMU, and optional grid components."""
         obs_tensor = torch.as_tensor(observation, dtype=torch.float32, device=next(self.parameters()).device)
         if obs_tensor.ndim == 1:
             batch_size, seq_len = 1, 1
@@ -99,6 +101,7 @@ class RecurrentActorCriticBase(nn.Module):
         return obstacle, pose_goal, imu, grid, batch_size, seq_len
 
     def _encode_observation(self, observation, recurrent_state, done_mask):
+        """Encode observation components through separate branches and fuse into latent representation."""
         obstacle, pose_goal, imu, grid, batch_size, seq_len = self._split_observation(observation, recurrent_state, done_mask)
         n = batch_size * seq_len
         obstacle_latent = self.obstacle_encoder(obstacle.reshape(n, -1))
@@ -122,6 +125,7 @@ class RecurrentActorCriticBase(nn.Module):
         return latent, batch_size, seq_len
 
     def _prepare_done_mask(self, done_mask, batch_size, seq_len, device):
+        """Convert done_mask to proper tensor shape for recurrent state reset."""
         if done_mask is None:
             return None
         mask = torch.as_tensor(done_mask, dtype=torch.float32, device=device)
@@ -132,6 +136,7 @@ class RecurrentActorCriticBase(nn.Module):
         return mask
 
     def encode_only(self, observation, recurrent_state=None, done_mask=None):
+        """Encode observation and run recurrent network without computing policy/value heads."""
         latent, batch_size, seq_len = self._encode_observation(observation, recurrent_state, done_mask)
         device = latent.device
         if recurrent_state is None:
@@ -141,6 +146,7 @@ class RecurrentActorCriticBase(nn.Module):
         return recurrent_features, next_state
 
     def forward(self, observation, recurrent_state=None, done_mask=None):
+        """Forward pass: encode observation, run recurrent network, compute policy and value outputs."""
         latent, batch_size, seq_len = self._encode_observation(observation, recurrent_state, done_mask)
         device = latent.device
         if recurrent_state is None:

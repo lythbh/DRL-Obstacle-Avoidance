@@ -1,9 +1,9 @@
 ﻿"""GRU actor-critic used by shared RL controllers."""
 
-from typing import Optional, Tuple
+from typing import Optional
+from torch import nn
 
 import torch
-from torch import nn
 
 from .base import RecurrentActorCriticBase
 
@@ -21,11 +21,13 @@ class GRUActorCritic(RecurrentActorCriticBase):
         )
 
     def get_initial_state(self, batch_size: int, device: Optional[torch.device] = None) -> torch.Tensor:
+        """Initialize GRU hidden state with zeros."""
         if device is None:
             device = next(self.parameters()).device
         return torch.zeros((self.recurrent_layers, batch_size, self.recurrent_hidden_size), device=device)
 
     def _run_recurrent(self, latent, recurrent_state, mask, batch_size, seq_len):
+        """Run GRU one timestep at a time, resetting hidden state when done_mask indicates episode end."""
         h_t = recurrent_state
         outputs = []
         for t in range(seq_len):

@@ -21,12 +21,14 @@ class LSTMActorCritic(RecurrentActorCriticBase):
         )
 
     def get_initial_state(self, batch_size: int, device: Optional[torch.device] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Initialize LSTM hidden and cell states with zeros."""
         if device is None:
             device = next(self.parameters()).device
         state_shape = (self.recurrent_layers, batch_size, self.recurrent_hidden_size)
         return (torch.zeros(state_shape, device=device), torch.zeros(state_shape, device=device))
 
     def _run_recurrent(self, latent, recurrent_state, mask, batch_size, seq_len):
+        """Run LSTM one timestep at a time, resetting hidden/cell states when done_mask indicates episode end."""
         h_t, c_t = recurrent_state
         outputs = []
         for t in range(seq_len):

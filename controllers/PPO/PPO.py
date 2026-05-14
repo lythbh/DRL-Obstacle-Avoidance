@@ -1,37 +1,19 @@
-"""PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
+﻿"""PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
 import sys, time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Tuple, List, Optional, Dict, Any, Union
+from typing import Tuple, List, Optional
+
 import numpy as np
 import torch
 from torch import nn
 from torch.distributions import Normal
 from torch.nn.utils.rnn import pad_sequence
 
-RecurrentState = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from controllers.RNN import GRUActorCritic, LSTMActorCritic
+from controllers.RNN import GRUActorCritic, LSTMActorCritic, RecurrentState
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
-from controllers.common.reward_defaults import (
-    COLLISION_THRESHOLD, COLLISION_PENALTY, DISTANCE_REWARD_SCALE,
-    ENABLE_SLAM, ENDPOINT, FORCE_CPU, GOAL_HOLD_REWARD,
-    GOAL_STOP_SPEED_THRESHOLD, GOAL_OVERSHOOT_PENALTY, GOAL_SPEED_PENALTY,
-    GOAL_STOP_BONUS, GOAL_THRESHOLD, GOAL_SUCCESS_REWARD,
-    HEADING_REWARD_SCALE, IMU_FEATURE_DIM, LIDAR_SECTOR_DIM,
-    LOW_SCORE_THRESHOLD, MAX_SPEED, MAX_STEERING_ANGLE, MAX_STEPS,
-    MIN_SPEED, MOTION_REWARD_SCALE, NEW_BEST_DISTANCE_BONUS,
-    OCCUPANCY_GRID_SHAPE, POSE_GOAL_DIM, PROGRESS_REWARD_SCALE,
-    PROFILE_SLAM, RESET_SETTLE_STEPS, REWARD_SCALE, SAFETY_REWARD_SCALE,
-    SAVE_SLAM_PLOTS, SLAM_PROFILE_INTERVAL, START_POSITION,
-    START_POSITION_NOISE, START_ROTATION, START_YAW_NOISE, STEP_PENALTY,
-)
-from controllers.common.training_defaults import PPODefaults, RecurrentDefaults
-
-_CONTROLLER_DIR = Path(__file__).resolve().parent
-_CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
-
+import controllers.common.defaults as d
 from controllers.common.checkpoints import (
     run_checkpoint_dir, run_checkpoint_path, load_checkpoint,
     make_checkpoint_header as _make_checkpoint_header,
@@ -39,82 +21,94 @@ from controllers.common.checkpoints import (
 )
 from controllers.common.metrics_logger import MetricsLogger
 
+_CONTROLLER_DIR = Path(__file__).resolve().parent
+_CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 
 
 @dataclass
 class Config:
-    episodes: int = PPODefaults.episodes
-    update_every: int = PPODefaults.update_every
-    epochs: int = PPODefaults.epochs
-    batch_size: int = PPODefaults.batch_size
-    save_every: int = PPODefaults.save_every
+    episodes: int = d.PPODefaults.episodes
+    update_every: int = d.PPODefaults.update_every
+    epochs: int = d.PPODefaults.epochs
+    batch_size: int = d.PPODefaults.batch_size
+    save_every: int = d.PPODefaults.save_every
     gamma: float = 0.99
-    gae_lambda: float = PPODefaults.gae_lambda
+    gae_lambda: float = d.PPODefaults.gae_lambda
     epsilon: float = 0.2
-    learning_rate: float = PPODefaults.learning_rate
-    entropy_coef: float = PPODefaults.entropy_coef
-    hidden_size: int = PPODefaults.hidden_size
-    latent_size: int = PPODefaults.latent_size
-    lstm_hidden_size: int = PPODefaults.lstm_hidden_size
-    lstm_layers: int = PPODefaults.lstm_layers
-    recurrent_cell: str = PPODefaults.recurrent_cell
-    sequence_length: int = RecurrentDefaults.sequence_length
-    burn_in: int = RecurrentDefaults.burn_in
-    sequence_stride: int = RecurrentDefaults.sequence_stride
-    lidar_sector_dim: int = LIDAR_SECTOR_DIM
-    pose_goal_dim: int = POSE_GOAL_DIM
-    imu_feature_dim: int = IMU_FEATURE_DIM
-    occupancy_grid_shape: Optional[Tuple[int, ...]] = OCCUPANCY_GRID_SHAPE
-    max_steps: int = MAX_STEPS
-    collision_threshold: float = COLLISION_THRESHOLD
-    low_score_threshold: float = LOW_SCORE_THRESHOLD
-    collision_penalty: float = COLLISION_PENALTY
-    progress_reward_scale: float = PROGRESS_REWARD_SCALE
-    distance_reward_scale: float = DISTANCE_REWARD_SCALE
-    heading_reward_scale: float = HEADING_REWARD_SCALE
-    safety_reward_scale: float = SAFETY_REWARD_SCALE
-    motion_reward_scale: float = MOTION_REWARD_SCALE
-    new_best_distance_bonus: float = NEW_BEST_DISTANCE_BONUS
-    step_penalty: float = STEP_PENALTY
-    endpoint: Tuple[float, float] = ENDPOINT
-    goal_threshold: float = GOAL_THRESHOLD
-    goal_stop_speed_threshold: float = GOAL_STOP_SPEED_THRESHOLD
-    goal_success_reward: float = GOAL_SUCCESS_REWARD
-    goal_stop_bonus: float = GOAL_STOP_BONUS
-    goal_hold_reward: float = GOAL_HOLD_REWARD
-    goal_speed_penalty: float = GOAL_SPEED_PENALTY
-    goal_overshoot_penalty: float = GOAL_OVERSHOOT_PENALTY
+    learning_rate: float = d.PPODefaults.learning_rate
+    entropy_coef: float = d.PPODefaults.entropy_coef
+    hidden_size: int = d.PPODefaults.hidden_size
+    latent_size: int = d.PPODefaults.latent_size
+    lstm_hidden_size: int = d.PPODefaults.lstm_hidden_size
+    lstm_layers: int = d.PPODefaults.lstm_layers
+    recurrent_cell: str = d.PPODefaults.recurrent_cell
+    sequence_length: int = d.RecurrentDefaults.sequence_length
+    burn_in: int = d.RecurrentDefaults.burn_in
+    sequence_stride: int = d.RecurrentDefaults.sequence_stride
+    lidar_sector_dim: int = d.ENV_LIDAR_SECTOR_DIM
+    pose_goal_dim: int = d.ENV_POSE_GOAL_DIM
+    imu_feature_dim: int = d.ENV_IMU_FEATURE_DIM
+    occupancy_grid_shape: Optional[Tuple[int, ...]] = d.ENV_OCCUPANCY_GRID_SHAPE
+    max_steps: int = d.ENV_MAX_STEPS
+    collision_threshold: float = d.ENV_COLLISION_THRESHOLD
+    low_score_threshold: float = d.ENV_LOW_SCORE_THRESHOLD
+    collision_penalty: float = d.REW_COLLISION_PENALTY
+    progress_reward_scale: float = d.REW_PROGRESS_SCALE
+    distance_reward_scale: float = d.REW_DISTANCE_SCALE
+    heading_reward_scale: float = d.REW_HEADING_SCALE
+    safety_reward_scale: float = d.REW_SAFETY_SCALE
+    motion_reward_scale: float = d.REW_MOTION_SCALE
+    new_best_distance_bonus: float = d.REW_NEW_BEST_DISTANCE_BONUS
+    step_penalty: float = d.REW_STEP_PENALTY
+    endpoint: Tuple[float, float] = d.ENV_ENDPOINT
+    goal_threshold: float = d.ENV_GOAL_THRESHOLD
+    goal_stop_speed_threshold: float = d.ENV_GOAL_STOP_SPEED_THRESHOLD
+    goal_success_reward: float = d.REW_GOAL_SUCCESS
+    goal_stop_bonus: float = d.REW_GOAL_STOP_BONUS
+    goal_hold_reward: float = d.REW_GOAL_HOLD
+    goal_speed_penalty: float = d.REW_GOAL_SPEED_PENALTY
+    goal_overshoot_penalty: float = d.REW_GOAL_OVERSHOOT_PENALTY
     reference_distance: Optional[float] = None
-    enable_slam: bool = ENABLE_SLAM
-    profile_slam: bool = PROFILE_SLAM
-    slam_profile_interval: int = SLAM_PROFILE_INTERVAL
-    save_slam_plots: bool = SAVE_SLAM_PLOTS
-    force_cpu: bool = FORCE_CPU
-    max_steering_angle: float = MAX_STEERING_ANGLE
-    min_speed: float = MIN_SPEED
+    enable_slam: bool = d.SLAM_ENABLE
+    profile_slam: bool = d.SLAM_PROFILE
+    slam_profile_interval: int = d.SLAM_PROFILE_INTERVAL
+    save_slam_plots: bool = d.SLAM_SAVE_PLOTS
+    force_cpu: bool = d.SLAM_FORCE_CPU
+    max_steering_angle: float = d.ENV_MAX_STEERING_ANGLE
+    min_speed: float = d.ENV_MIN_SPEED
     start_position: Optional[List[float]] = None
     start_rotation: Optional[List[float]] = None
-    start_position_noise: float = START_POSITION_NOISE
-    start_yaw_noise: float = START_YAW_NOISE
-    max_speed: float = MAX_SPEED
-    reset_settle_steps: int = RESET_SETTLE_STEPS
+    start_position_noise: float = d.ENV_START_POSITION_NOISE
+    start_yaw_noise: float = d.ENV_START_YAW_NOISE
+    max_speed: float = d.ENV_MAX_SPEED
+    reset_settle_steps: int = d.ENV_RESET_SETTLE_STEPS
 
     def __post_init__(self):
         self.recurrent_cell = self.recurrent_cell.lower().strip()
         assert self.recurrent_cell in {"lstm", "gru"}, f"Unsupported recurrent_cell: {self.recurrent_cell}"
         if self.start_position is None:
-            self.start_position = list(START_POSITION)
+            self.start_position = list(d.ENV_START_POSITION)
         if self.start_rotation is None:
-            self.start_rotation = list(START_ROTATION)
+            self.start_rotation = list(d.ENV_START_ROTATION)
         if self.reference_distance is None:
             start_xy = np.array(self.start_position[:2], dtype=np.float32)
             endpoint_xy = np.array(self.endpoint, dtype=np.float32)
             self.reference_distance = float(np.linalg.norm(start_xy - endpoint_xy))
 
 
+def _split_sequences(episodes, seq_len, stride):
+    """Split episode trajectories into overlapping sequences for recurrent training."""
+    for ep in episodes:
+        total = len(ep["returns"])
+        for start in range(0, total, stride):
+            end = min(start + seq_len, total)
+            if end > start:
+                yield {k: v[start:end] for k, v in ep.items()}
+
+
 class PPOAgent:
     def __init__(self, obs_size: int, action_dim: int, config: Config):
-        """Initialise PPO agent with model, action bounds, and optimizer."""
+        """Initialize PPO agent with observation and action dimensions, build the neural network model."""
         self.config = config
         self.device = self._get_device()
         self.action_dim = action_dim
@@ -127,7 +121,7 @@ class PPOAgent:
         print(f"[PPO] Using recurrent cell: {config.recurrent_cell.upper()}", flush=True)
 
     def _build_model(self, recurrent_cell: str) -> None:
-        """Construct recurrent actor-critic network and set up optimiser."""
+        """Build or rebuild the actor-critic model with the specified recurrent cell type (GRU or LSTM)."""
         model_class = GRUActorCritic if recurrent_cell.lower().strip() == "gru" else LSTMActorCritic
         self.model = model_class(self.obs_size, self.action_dim, self.config).to(self.device)
         self.actor = self.model.policy_head
@@ -139,51 +133,38 @@ class PPOAgent:
         self.optimizer = torch.optim.Adam(params, lr=self.config.learning_rate)
 
     def _get_device(self) -> torch.device:
-        """Select CUDA if available and not force_cpu, else CPU."""
+        """Determine whether to use CPU or CUDA GPU for training."""
         if self.config.force_cpu or not torch.cuda.is_available():
             return torch.device("cpu")
         return torch.device("cuda")
 
     def get_initial_state(self, batch_size: int = 1) -> RecurrentState:
-        """Return zeroed recurrent state for rollouts."""
+        """Get initial hidden state for the recurrent neural network."""
         return self.model.get_initial_state(batch_size, device=self.device)
 
-    def _action_stats(self, policy_output: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Extract mean and standard deviation from policy output."""
-        return policy_output, self.actor_log_std.expand_as(policy_output).exp().clamp_min(1e-3)
-
-    def _tanh_log_prob(self, dist: Normal, pre_tanh: torch.Tensor) -> torch.Tensor:
-        """Compute log-probability under a tanh-squashed Normal, per dimension."""
-        log_prob = dist.log_prob(pre_tanh)
-        log_prob -= torch.log(self.action_scale + 1e-6)
-        log_prob -= torch.log(1.0 - torch.tanh(pre_tanh).pow(2) + 1e-6)
-        return log_prob
-
-    def _sample(self, mean: torch.Tensor, std: torch.Tensor,
-                deterministic: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Sample tanh-squashed action and compute its log-probability."""
+    def _sample_action(self, policy_output, deterministic=False):
+        """Sample action from normal distribution with tanh squashing and proper log probability computation."""
+        mean = policy_output
+        std = self.actor_log_std.expand_as(policy_output).exp().clamp_min(1e-3)
         dist = Normal(mean, std)
         pre_tanh = mean if deterministic else dist.rsample()
-        action = torch.tanh(pre_tanh) * self.action_scale + self.action_center
+        action_tanh = torch.tanh(pre_tanh)
+        action = action_tanh * self.action_scale + self.action_center
         eps = 1e-5
-        action = torch.max(torch.min(action, self.action_high - eps), self.action_low + eps)
-        return action, self._tanh_log_prob(dist, pre_tanh).sum(dim=-1)
+        action = torch.clamp(action, self.action_low + eps, self.action_high - eps)
+        log_prob = dist.log_prob(pre_tanh)
+        log_prob -= torch.log(self.action_scale + 1e-6)
+        log_prob -= torch.log(1.0 - action_tanh.pow(2) + 1e-6)
+        return action, log_prob.sum(dim=-1)
 
-    def select_action(
-        self,
-        obs: Union[np.ndarray, Dict[str, np.ndarray]],
-        recurrent_state: Optional[RecurrentState] = None,
-        done: bool = False,
-        deterministic: bool = False,
-    ) -> Tuple[np.ndarray, torch.Tensor, torch.Tensor, RecurrentState]:
-        """Sample action from policy for environment interaction."""
+    def select_action(self, obs, recurrent_state=None, done=False, deterministic=False):
+        """Select an action given observation and recurrent state, returning action, log prob, value, and next state."""
         done_mask = torch.tensor([float(done)], dtype=torch.float32, device=self.device)
         with torch.no_grad():
             policy_output, state_value, next_state = self.model(
                 obs, recurrent_state=recurrent_state, done_mask=done_mask,
             )
-            mean, std = self._action_stats(policy_output)
-            action, log_prob = self._sample(mean, std, deterministic=deterministic)
+            action, log_prob = self._sample_action(policy_output, deterministic=deterministic)
         return (
             action.squeeze(0).cpu().numpy(),
             log_prob.squeeze(0),
@@ -191,10 +172,8 @@ class PPOAgent:
             next_state,
         )
 
-    def calculate_gae(
-        self, rewards: np.ndarray, values: np.ndarray, bootstrap_value: float = 0.0,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Compute GAE advantages and TD(lambda) returns."""
+    def calculate_gae(self, rewards, values, bootstrap_value=0.0):
+        """Calculate Generalized Advantage Estimation (GAE) and returns from rewards and values."""
         T = len(rewards)
         advantages = np.zeros(T, dtype=np.float32)
         gae = 0.0
@@ -204,11 +183,10 @@ class PPOAgent:
             gae = delta + self.config.gamma * self.config.gae_lambda * gae
             advantages[t] = gae
             next_value = float(values[t])
-        returns = (advantages + values).astype(np.float32)
-        return advantages.astype(np.float32), returns
+        return advantages.astype(np.float32), (advantages + values).astype(np.float32)
 
-    def _prepare_batch(self, trajectories: List[Dict[str, np.ndarray]]) -> Dict[str, torch.Tensor]:
-        """Pad variable-length trajectories into a fixed-size batch tensor."""
+    def _prepare_batch(self, trajectories):
+        """Pad trajectories of variable length into a batch tensor with valid masks."""
         pad_keys = ["observations", "actions", "log_probs", "returns", "advantages"]
         result = {}
         for key in pad_keys:
@@ -227,24 +205,8 @@ class PPOAgent:
         result["done_mask"] = pad_sequence(reset_masks, batch_first=True)
         return result
 
-    def _split_trajectories(self, trajectories: List[Dict[str, np.ndarray]]) -> List[Dict[str, np.ndarray]]:
-        """Split episodes into overlapping sequences via sliding window."""
-        chunked: List[Dict[str, np.ndarray]] = []
-        chunk_length = self.config.sequence_length
-        chunk_stride = self.config.sequence_stride
-        for trajectory in trajectories:
-            total_length = len(trajectory["returns"])
-            for start in range(0, total_length, chunk_stride):
-                end = min(start + chunk_length, total_length)
-                if end <= start:
-                    continue
-                chunked.append({key: value[start:end] for key, value in trajectory.items()})
-                if end >= total_length:
-                    break
-        return chunked
-
-    def _sanitize_trajectories(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
-        """Replace NaN/inf in trajectory data with safe defaults."""
+    def _sanitize_trajectories(self, trajectories):
+        """Clean trajectories by removing NaNs and clamping actions to valid ranges."""
         low = np.array([-self.config.max_steering_angle, self.config.min_speed], dtype=np.float32)
         high = np.array([self.config.max_steering_angle, self.config.max_speed], dtype=np.float32)
         for t in trajectories:
@@ -254,8 +216,8 @@ class PPOAgent:
             t["returns"] = np.nan_to_num(t["returns"], nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
             t["advantages"] = np.nan_to_num(t["advantages"], nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
-    def _normalize_advantages(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
-        """Normalise advantages to zero mean and unit variance."""
+    def _normalize_advantages(self, trajectories):
+        """Normalize advantages across all trajectories using mean and standard deviation."""
         all_adv = np.concatenate([t["advantages"] for t in trajectories], axis=0)
         adv_mean = float(all_adv.mean())
         adv_std = float(all_adv.std() + 1e-8)
@@ -263,14 +225,14 @@ class PPOAgent:
             t["advantages"] = ((t["advantages"] - adv_mean) / adv_std).astype(np.float32)
 
     @staticmethod
-    def _sequence_loss_mask(valid_mask: torch.Tensor, burn_in: int) -> torch.Tensor:
-        """Build loss mask that ignores burn-in steps per sequence."""
+    def _sequence_loss_mask(valid_mask, burn_in):
+        """Create learning mask that excludes burn-in steps from gradient computation."""
         valid_lengths = valid_mask.sum(dim=1).to(dtype=torch.long)
         start_index = torch.minimum(torch.full_like(valid_lengths, burn_in), torch.clamp(valid_lengths - 1, min=0))
         return valid_mask * (torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0) >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)
 
-    def _update_batch(self, batch: Dict[str, torch.Tensor]) -> None:
-        """Single PPO update: clipped surrogate, value loss, entropy bonus."""
+    def _update_batch(self, batch):
+        """Perform one PPO gradient update on a batch using clipped surrogate loss, value loss, and entropy regularization."""
         log_probs_new, values, entropy = self.evaluate_sequences(
             batch["observations"], batch["actions"], batch["done_mask"],
         )
@@ -304,31 +266,38 @@ class PPOAgent:
         with torch.no_grad():
             self.actor_log_std.data.copy_(torch.nan_to_num(self.actor_log_std.data, nan=-0.5, posinf=2.0, neginf=-5.0).clamp(-5.0, 2.0))
 
-    def evaluate_sequences(
-        self, observations: torch.Tensor, actions: torch.Tensor, done_mask: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Compute log-probs, state values, and entropy over sequences."""
+    def evaluate_sequences(self, observations, actions, done_mask):
+        """Evaluate log probabilities, state values, and entropy for given observations and actions (batch)."""
         policy_output, state_values, _ = self.model(
             observations, recurrent_state=self.get_initial_state(observations.shape[0]), done_mask=done_mask,
         )
-        mean, std = self._action_stats(policy_output)
+        mean = policy_output
+        std = self.actor_log_std.expand_as(policy_output).exp().clamp_min(1e-3)
+        dist = Normal(mean, std)
         eps = 1e-6
-        safe_action = torch.max(torch.min(actions, self.action_high - 1e-5), self.action_low + 1e-5)
+        safe_action = torch.clamp(actions, self.action_low + 1e-5, self.action_high - 1e-5)
         squashed = ((safe_action - self.action_center) / (self.action_scale + eps)).clamp(-1.0 + eps, 1.0 - eps)
         pre_tanh = 0.5 * (torch.log1p(squashed) - torch.log1p(-squashed))
-        dist = Normal(mean, std)
-        log_prob = self._tanh_log_prob(dist, pre_tanh).sum(dim=-1)
+        action_tanh = torch.tanh(pre_tanh)
+        log_prob = dist.log_prob(pre_tanh)
+        log_prob -= torch.log(self.action_scale + 1e-6)
+        log_prob -= torch.log(1.0 - action_tanh.pow(2) + 1e-6)
+        log_prob = log_prob.sum(dim=-1)
         entropy_pre_tanh = dist.rsample()
-        entropy = -self._tanh_log_prob(dist, entropy_pre_tanh).sum(dim=-1)
+        entropy_action_tanh = torch.tanh(entropy_pre_tanh)
+        entropy = dist.log_prob(entropy_pre_tanh)
+        entropy -= torch.log(self.action_scale + 1e-6)
+        entropy -= torch.log(1.0 - entropy_action_tanh.pow(2) + 1e-6)
+        entropy = -entropy.sum(dim=-1)
         return log_prob, state_values, entropy
 
-    def update(self, trajectories: List[Dict[str, np.ndarray]]) -> None:
-        """Update policy from collected trajectories with multiple epochs."""
+    def update(self, trajectories):
+        """Perform multiple PPO epochs of training on collected trajectories with mini-batch updates."""
         if not trajectories:
             return
         self._sanitize_trajectories(trajectories)
         self._normalize_advantages(trajectories)
-        trajectories = self._split_trajectories(trajectories)
+        trajectories = list(_split_sequences(trajectories, self.config.sequence_length, self.config.sequence_stride))
         if not trajectories:
             return
         num = len(trajectories)
@@ -339,7 +308,7 @@ class PPOAgent:
                 self._update_batch(self._prepare_batch([trajectories[i] for i in batch_indices]))
 
     def load_model(self, model_path: str) -> None:
-        """Load saved PPO checkpoint weights."""
+        """Load a pre-trained PPO model checkpoint, adjusting recurrent cell type if needed."""
         checkpoint = load_checkpoint(model_path, map_location=self.device)
         algo = str(checkpoint.get("algorithm", "ppo")).lower().strip()
         assert algo == "ppo", f"Checkpoint algorithm '{algo}' does not match PPO."
@@ -359,9 +328,8 @@ class PPOAgent:
             self.actor_log_std.data.copy_(checkpoint["actor_log_std"].to(self.device))
 
 
-
-def _save_checkpoint(agent: PPOAgent, episode, reward: float, is_goal: bool, prefix: str, run_id: str) -> None:
-    """Build and persist a checkpoint file."""
+def _save_checkpoint(agent, episode, reward, is_goal, prefix, run_id):
+    """Save PPO agent checkpoint with model weights, config, and training metadata."""
     header = _make_checkpoint_header(episode, reward, is_goal, "ppo", asdict(agent.config))
     header["obs_size"] = agent.obs_size
     header["action_dim"] = agent.action_dim
@@ -371,8 +339,8 @@ def _save_checkpoint(agent: PPOAgent, episode, reward: float, is_goal: bool, pre
     _save_checkpoint_file(_CHECKPOINT_DIR, run_id, prefix, header)
 
 
-def train(config: Optional[Config] = None) -> None:
-    """Main training loop: environment interaction and policy updates."""
+def train(config=None):
+    """Main training loop: collect episodes, perform PPO updates, log metrics, and save checkpoints."""
     if config is None:
         config = Config()
     _init_supervisor()
@@ -387,10 +355,10 @@ def train(config: Optional[Config] = None) -> None:
     print(f"[TRAIN][PPO] rnn={config.recurrent_cell.upper()} weights_dir={checkpoint_dir} final={final_model_path}", flush=True)
     print(f"[TRAIN][PPO] episodes={config.episodes} update_every={config.update_every} obs={obs_size} act={action_dim} cell={config.recurrent_cell.upper()} seq={config.sequence_length} burn_in={config.burn_in}", flush=True)
 
-    rollout: List[Dict[str, np.ndarray]] = []
+    rollout = []
     best_reward = float("-inf")
     best_goal_reward = float("-inf")
-    best_goal_episode: Optional[int] = None
+    best_goal_episode = None
     rew_w, suc_w, gol_w, col_w, to_w = [], [], [], [], []
     start_time = time.perf_counter()
     metrics_logger = MetricsLogger(env.run_folder, algorithm="ppo")
@@ -439,7 +407,9 @@ def train(config: Optional[Config] = None) -> None:
                 )
                 bootstrap_value = float(bs_val.squeeze(0).item())
 
-        ep_adv, ep_ret = agent.calculate_gae(np.array(ep_rew, dtype=np.float32) * REWARD_SCALE, ep_val_np, bootstrap_value=bootstrap_value)
+        ep_adv, ep_ret = agent.calculate_gae(
+            np.array(ep_rew, dtype=np.float32) * d.REW_SCALE, ep_val_np, bootstrap_value=bootstrap_value,
+        )
         rollout.append({"observations": ep_obs_arr, "actions": np.array(ep_act, dtype=np.float32),
                         "log_probs": np.array(ep_lp, dtype=np.float32), "returns": ep_ret, "advantages": ep_adv})
 
@@ -453,7 +423,7 @@ def train(config: Optional[Config] = None) -> None:
         gol_w.append(1.0 if ep_goal else 0.0)
         col_w.append(1.0 if ep_end_reason == "collision" else 0.0)
         to_w.append(1.0 if ep_end_reason == "max_steps" else 0.0)
-        ckpt_flags: List[str] = []
+        ckpt_flags = []
 
         if ep_end_reason == "goal" and ep_sum > best_goal_reward:
             best_goal_reward = ep_sum
@@ -492,7 +462,7 @@ def train(config: Optional[Config] = None) -> None:
     _save_checkpoint(agent, "final", final_reward, best_goal_episode is not None, "final", run_id)
     elapsed = time.perf_counter() - start_time
     print(f"[TRAIN][PPO] final reward={final_reward:.2f} t={elapsed:7.1f}s", flush=True)
-    env.robot.motors.stop()
+    env.robot.stop()
     print("[TRAIN][PPO] done", flush=True)
 
 

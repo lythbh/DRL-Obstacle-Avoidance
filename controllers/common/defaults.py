@@ -1,4 +1,4 @@
-﻿"""Consolidated defaults for environment, SLAM, rewards, and training."""
+"""Consolidated defaults for environment, SLAM, rewards, and training."""
 
 # --- Environment observation / physics ---
 ENV_LIDAR_SECTOR_DIM = 16
@@ -83,9 +83,12 @@ class SACDefaults:
     auto_entropy_tuning = True
     target_entropy_scale = 1.0
     hidden_size = 128
+    latent_size = 128
     recurrent_cell = "gru"
     recurrent_hidden_size = None
     recurrent_layers = 1
+    lstm_hidden_size = 128
+    lstm_layers = 1
     log_std_min = -5.0
     log_std_max = 2.0
     replay_capacity = 16384
