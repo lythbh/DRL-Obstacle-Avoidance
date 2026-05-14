@@ -200,37 +200,34 @@ class TestLogProbCorrection:
 
     def test_action_in_bounds(self):
         agent = self._make_agent()
-        low, high = agent._action_bounds()
-        mean = torch.zeros(1, 2)
-        std  = torch.ones(1, 2) * 0.6
+        policy_output = torch.zeros(1, 2)
         for _ in range(50):
-            action, _ = agent._sample_action_and_log_prob(mean, std, deterministic=False)
-            assert (action >= low - 1e-4).all() and (action <= high + 1e-4).all(), \
-                f"Action {action} out of bounds [{low}, {high}]"
+            action, _ = agent._sample_action(policy_output, deterministic=False)
+            assert (action >= agent.action_low - 1e-4).all() and (action <= agent.action_high + 1e-4).all()
 
     def test_log_prob_finite(self):
         agent = self._make_agent()
-        mean = torch.zeros(1, 2)
-        std  = torch.ones(1, 2) * 0.6
-        _, log_prob = agent._sample_action_and_log_prob(mean, std, deterministic=False)
+        policy_output = torch.zeros(1, 2)
+        _, log_prob = agent._sample_action(policy_output, deterministic=False)
         assert torch.isfinite(log_prob).all(), "Log-probability must be finite"
 
     def test_log_prob_negative(self):
         """For a continuous distribution, log-prob can be negative (density < 1 is possible,
-        but very high-density points near mean may exceed 0 — what matters is it is finite)."""
+        but very high-density points near mean may exceed 0 - what matters is it is finite)."""
         agent = self._make_agent()
-        mean = torch.zeros(1, 2)
-        std  = torch.ones(1, 2) * 0.6
+        policy_output = torch.zeros(1, 2)
         for _ in range(30):
-            _, log_prob = agent._sample_action_and_log_prob(mean, std, deterministic=False)
+            _, log_prob = agent._sample_action(policy_output, deterministic=False)
             assert torch.isfinite(log_prob).all()
 
     def test_inverse_squash_roundtrip(self):
-        """_inverse_squash_action must be the inverse of _squash_action (up to clipping eps)."""
+        """tanh-squash and inverse must recover pre-tanh (up to clamping eps)."""
         agent = self._make_agent()
         pre_tanh = torch.randn(10, 2) * 0.5
-        action, squashed = agent._squash_action(pre_tanh)
-        pre_tanh_recovered, _ = agent._inverse_squash_action(action)
+        action = torch.tanh(pre_tanh) * agent.action_scale + agent.action_center
+        eps = 1e-6
+        squashed = ((action - agent.action_center) / (agent.action_scale + eps)).clamp(-1.0 + eps, 1.0 - eps)
+        pre_tanh_recovered = 0.5 * (torch.log1p(squashed) - torch.log1p(-squashed))
         np.testing.assert_allclose(
             pre_tanh.numpy(), pre_tanh_recovered.numpy(),
             atol=1e-4,
@@ -266,7 +263,7 @@ class TestSequenceReplayBuffer:
         rewards = list(np.random.randn(T).astype(float))
         dones   = [False] * (T - 1) + [True]
         buf.add_episode(obs, actions, rewards, obs, dones)
-        assert buf.size > 0, "Buffer size must increase after adding an episode"
+        assert len(buf) > 0, "Buffer size must increase after adding an episode"
 
     def test_sample_shapes_correct(self):
         buf = self._make_buffer(capacity=256, seq_len=8, stride=4)
@@ -294,7 +291,7 @@ class TestSequenceReplayBuffer:
         dones   = [False] * T
         for _ in range(5):
             buf.add_episode(obs, actions, rewards, obs, dones)
-        assert buf.size == buf.capacity, "Buffer should be full after overflow"
+        assert len(buf) == buf.capacity, "Buffer should be full after overflow"
 
     def test_valid_mask_marks_padded_steps(self):
         """Short windows (< seq_len) must be zero-padded with valid_mask=0 beyond actual length."""
@@ -306,7 +303,7 @@ class TestSequenceReplayBuffer:
         dones   = [False] * T
         buf.add_episode(obs, actions, rewards, obs, dones)
         # The stored window should have valid_mask=1 for first T steps, 0 for the rest.
-        stored_mask = buf.valid_mask[0]
+        stored_mask = buf.buffer[0]["valid_mask"]
         assert stored_mask[:T].sum()  == T,     "First T steps must be valid"
         assert stored_mask[T:].sum()  == 0,     "Padded steps must be invalid"
 
@@ -368,7 +365,7 @@ class TestRewardComputer:
 
     def test_goal_reached_returns_large_positive(self):
         rc = self._make_computer()
-        from controllers.common.reward_defaults import GOAL_SUCCESS_REWARD, GOAL_STOP_BONUS
+        from controllers.common.defaults import REW_GOAL_SUCCESS as GOAL_SUCCESS_REWARD, REW_GOAL_STOP_BONUS as GOAL_STOP_BONUS
         pos_at_goal = np.array([2.0, 0.0], dtype=np.float32)
         reward, dist = rc.compute(
             collision=False,
