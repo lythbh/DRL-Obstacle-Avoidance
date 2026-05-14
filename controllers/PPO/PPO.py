@@ -232,13 +232,12 @@ class PPOAgent:
         return valid_mask * (torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0) >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)
 
     def _update_batch(self, batch):
-        """Perform one PPO gradient update on a batch using clipped surrogate loss, value loss, and entropy regularization."""
+        """Perform one PPO gradient update on a batch, returning a dict with loss components and gradient statistics."""
         log_probs_new, values, entropy = self.evaluate_sequences(
             batch["observations"], batch["actions"], batch["done_mask"],
         )
         if not (torch.isfinite(log_probs_new).all() and torch.isfinite(values).all() and torch.isfinite(entropy).all()):
-            print("[PPO] WARNING: Skipping update batch due to non-finite policy evaluation.", flush=True)
-            return
+            return None
         valid_mask = batch["valid_mask"]
         learn_mask = self._sequence_loss_mask(valid_mask, self.config.burn_in)
         mask_bool = learn_mask > 0
@@ -252,19 +251,46 @@ class PPOAgent:
         valid_count = learn_mask.sum().clamp_min(1.0)
         loss = (-surrogate.sum() + 0.5 * torch.where(mask_bool, value_error, torch.zeros_like(value_error)).sum() - self.config.entropy_coef * entropy_term.sum()) / valid_count
         if not torch.isfinite(loss):
-            print("[PPO] WARNING: Skipping update batch due to non-finite loss.", flush=True)
-            return
+            return None
+
+        with torch.no_grad():
+            actor_loss_val = float(surrogate.sum() / valid_count)
+            critic_loss_val = float(value_error.sum() / valid_count)
+            entropy_val = float(entropy_term.sum() / valid_count)
+            value_residual_val = float(torch.abs(values - batch["returns"])[mask_bool].mean().item())
+            approx_kl = float((log_probs_new - batch["log_probs"])[mask_bool].mean().item())
+
         self.optimizer.zero_grad()
         loss.backward()
         for p in list(self.model.parameters()) + [self.actor_log_std]:
             if p.grad is not None and not torch.isfinite(p.grad).all():
-                print("[PPO] WARNING: Skipping update batch due to non-finite gradients.", flush=True)
                 self.optimizer.zero_grad()
-                return
-        nn.utils.clip_grad_norm_(list(self.model.parameters()) + [self.actor_log_std], max_norm=1.0)
+                return None
+
+        actor_params = [self.model.policy_head.weight, self.model.policy_head.bias, self.actor_log_std]
+        critic_params = [self.model.value_head.weight, self.model.value_head.bias]
+        all_params = list(self.model.parameters()) + [self.actor_log_std]
+
+        grad_norm_actor = MetricsLogger.compute_grad_norm(actor_params)
+        grad_norm_critic = MetricsLogger.compute_grad_norm(critic_params)
+
+        nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
         self.optimizer.step()
         with torch.no_grad():
             self.actor_log_std.data.copy_(torch.nan_to_num(self.actor_log_std.data, nan=-0.5, posinf=2.0, neginf=-5.0).clamp(-5.0, 2.0))
+
+        lr = float(self.optimizer.param_groups[0]["lr"])
+        return {
+            "actor_loss": round(actor_loss_val, 6),
+            "critic_loss": round(critic_loss_val, 6),
+            "policy_entropy": round(entropy_val, 6),
+            "entropy_coef": round(self.config.entropy_coef, 6),
+            "value_residual": round(value_residual_val, 6),
+            "approx_kl": round(approx_kl, 6),
+            "grad_norm_actor": round(grad_norm_actor, 6),
+            "grad_norm_critic": round(grad_norm_critic, 6),
+            "lr_actor": lr,
+        }
 
     def evaluate_sequences(self, observations, actions, done_mask):
         """Evaluate log probabilities, state values, and entropy for given observations and actions (batch)."""
@@ -292,20 +318,25 @@ class PPOAgent:
         return log_prob, state_values, entropy
 
     def update(self, trajectories):
-        """Perform multiple PPO epochs of training on collected trajectories with mini-batch updates."""
+        """Perform multiple PPO epochs of training on collected trajectories, returning per-update metrics."""
         if not trajectories:
-            return
+            return []
         self._sanitize_trajectories(trajectories)
         self._normalize_advantages(trajectories)
         trajectories = list(_split_sequences(trajectories, self.config.sequence_length, self.config.sequence_stride))
         if not trajectories:
-            return
+            return []
+        update_metrics = []
         num = len(trajectories)
         for _ in range(self.config.epochs):
             indices = torch.randperm(num).tolist()
             for start in range(0, num, self.config.batch_size):
                 batch_indices = indices[start: start + self.config.batch_size]
-                self._update_batch(self._prepare_batch([trajectories[i] for i in batch_indices]))
+                batch = self._prepare_batch([trajectories[i] for i in batch_indices])
+                metrics = self._update_batch(batch)
+                if metrics is not None:
+                    update_metrics.append(metrics)
+        return update_metrics
 
     def load_model(self, model_path: str) -> None:
         """Load a pre-trained PPO model checkpoint, adjusting recurrent cell type if needed."""
@@ -360,8 +391,11 @@ def train(config=None):
     best_goal_reward = float("-inf")
     best_goal_episode = None
     rew_w, suc_w, gol_w, col_w, to_w = [], [], [], [], []
+    total_steps = 0
     start_time = time.perf_counter()
     metrics_logger = MetricsLogger(env.run_folder, algorithm="ppo")
+    metrics_logger.log_hyperparams(asdict(config), recurrent_cell=config.recurrent_cell,
+                                   obs_size=obs_size, action_dim=action_dim)
 
     for episode in range(config.episodes):
         obs, _ = env.reset()
@@ -379,6 +413,7 @@ def train(config=None):
             done = terminated or truncated
             prev_done = done
             ep_step += 1
+            total_steps += 1
             ep_goal = ep_goal or bool(info.get("goal_reached", False))
             ep_success = bool(info.get("success", False))
             if done:
@@ -407,15 +442,30 @@ def train(config=None):
                 )
                 bootstrap_value = float(bs_val.squeeze(0).item())
 
+        scaled_rew = np.array(ep_rew, dtype=np.float32) * d.REW_SCALE
         ep_adv, ep_ret = agent.calculate_gae(
-            np.array(ep_rew, dtype=np.float32) * d.REW_SCALE, ep_val_np, bootstrap_value=bootstrap_value,
+            scaled_rew, ep_val_np, bootstrap_value=bootstrap_value,
         )
         rollout.append({"observations": ep_obs_arr, "actions": np.array(ep_act, dtype=np.float32),
                         "log_probs": np.array(ep_lp, dtype=np.float32), "returns": ep_ret, "advantages": ep_adv})
 
+        act_stats = MetricsLogger.compute_action_stats(ep_act)
+        obs_stats = MetricsLogger.compute_obs_stats(ep_obs)
+        ep_val_residual = MetricsLogger.compute_value_residual(ep_val_np, ep_ret)
+
+        all_update_metrics = []
         if (episode + 1) % config.update_every == 0:
-            agent.update(rollout)
+            batch_metrics = agent.update(rollout)
             rollout.clear()
+            for upd in batch_metrics:
+                all_update_metrics.append(upd)
+                metrics_logger.log_update(
+                    global_step=total_steps, episode=episode + 1,
+                    recurrent_cell=config.recurrent_cell,
+                    **upd,
+                )
+
+        agg_upd = MetricsLogger.aggregate_update_metrics(all_update_metrics)
 
         ep_sum = sum(ep_rew)
         rew_w.append(ep_sum)
@@ -449,15 +499,34 @@ def train(config=None):
         elapsed = time.perf_counter() - start_time
         ckpt_note = f" ckpt={'+'.join(ckpt_flags)}" if ckpt_flags else ""
         print(f"[TRAIN][PPO] ep={episode + 1:03d}/{config.episodes} r={ep_sum:8.2f} avg10={r10:8.2f} steps={ep_step:4d} succ10={s10:4.2f} touch10={g10:4.2f} col10={c10:4.2f} to10={t10:4.2f} min_d={env.min_episode_distance:5.2f} end={ep_end_reason} t={elapsed:7.1f}s{ckpt_note}", flush=True)
-        metrics_logger.log(episode=episode + 1, reward=round(ep_sum, 4), avg10=round(r10, 4), steps=ep_step,
-                          success=int(ep_success), goal_touched=int(ep_goal), collision=int(ep_end_reason == "collision"),
-                          timeout=int(ep_end_reason == "max_steps"), min_dist=round(env.min_episode_distance, 4),
-                          end_reason=ep_end_reason, elapsed_s=round(elapsed, 1))
+
+        metrics_logger.log_episode(
+            episode=episode + 1,
+            global_step=total_steps,
+            reward=round(ep_sum, 4),
+            avg10=round(r10, 4),
+            length=ep_step,
+            success=int(ep_success),
+            goal_touched=int(ep_goal),
+            collision=int(ep_end_reason == "collision"),
+            timeout=int(ep_end_reason == "max_steps"),
+            min_dist=round(env.min_episode_distance, 4),
+            avg_speed_ms=0.0,
+            end_reason=ep_end_reason,
+            elapsed_s=round(elapsed, 1),
+            recurrent_cell=config.recurrent_cell,
+            replay_buffer_size=0,
+            **act_stats,
+            **obs_stats,
+            **agg_upd,
+        )
 
     if rollout:
         agent.update(rollout)
     metrics_logger.close()
     print(f"[TRAIN][PPO] metrics saved to {metrics_logger.path}", flush=True)
+    print(f"[TRAIN][PPO] updates saved to {metrics_logger.update_path}", flush=True)
+    print(f"[TRAIN][PPO] hyperparams saved to {metrics_logger.hyperparams_path}", flush=True)
     final_reward = best_goal_reward if best_goal_episode is not None else best_reward
     _save_checkpoint(agent, "final", final_reward, best_goal_episode is not None, "final", run_id)
     elapsed = time.perf_counter() - start_time

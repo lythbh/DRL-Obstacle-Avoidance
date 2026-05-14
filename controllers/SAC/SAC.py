@@ -1,4 +1,4 @@
-"""Soft Actor-Critic controller for the ALTINO Webots task."""
+﻿"""Soft Actor-Critic controller for the ALTINO Webots task."""
 from __future__ import annotations
 
 import sys, time
@@ -281,13 +281,20 @@ class SACAgent:
             action, _, next_state = self._sample_policy(self._tensor_obs(obs), recurrent_state, done_mask, deterministic)
         return action.squeeze().cpu().numpy(), next_state
 
-    def _soft_update(self, source_enc, source_head, target_enc, target_head) -> None:
-        """Perform soft update of target networks using exponential moving average."""
+    def _soft_update(self, source_enc, source_head, target_enc, target_head) -> float:
+        """Perform soft update of target networks using EMA; return L2 magnitude of parameter changes."""
         tau = self.config.tau
+        total_change_sq = 0.0
         for tp, sp in zip(target_enc.parameters(), source_enc.parameters()):
+            delta = sp.data * tau - tp.data * tau
+            total_change_sq += float(delta.norm(2).item() ** 2)
             tp.data.mul_(1.0 - tau).add_(sp.data, alpha=tau)
         for tp, sp in zip(target_head.parameters(), source_head.parameters()):
+            delta = sp.data * tau - tp.data * tau
+            total_change_sq += float(delta.norm(2).item() ** 2)
             tp.data.mul_(1.0 - tau).add_(sp.data, alpha=tau)
+        import math
+        return float(math.sqrt(total_change_sq))
 
     @staticmethod
     def _sequence_loss_mask(valid_mask: torch.Tensor, burn_in: int) -> torch.Tensor:
@@ -312,7 +319,7 @@ class SACAgent:
         return q_head(torch.cat([features, action], dim=-1)), next_state
 
     def update(self, batch):
-        """Perform SAC training update: compute critic loss, actor loss, and entropy regularization."""
+        """Perform SAC training update, returning a dict with all loss components, gradient norms, and diagnostics."""
         if batch["obs"].shape[1] <= 0:
             return None
 
@@ -344,16 +351,20 @@ class SACAgent:
         critic_loss = self._masked_mean((cq1 - target_q).pow(2), learn_mask)
         critic_loss += self._masked_mean((cq2 - target_q).pow(2), learn_mask)
 
+        td_error = self._masked_mean(torch.abs(cq1 - target_q), learn_mask)
+
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        nn.utils.clip_grad_norm_(list(self.q1_enc.parameters()) + list(self.q1_head.parameters()) +
-                                 list(self.q2_enc.parameters()) + list(self.q2_head.parameters()), max_norm=1.0)
+        critic_params = list(self.q1_enc.parameters()) + list(self.q1_head.parameters()) + list(self.q2_enc.parameters()) + list(self.q2_head.parameters())
+        grad_norm_critic = MetricsLogger.compute_grad_norm(critic_params)
+        nn.utils.clip_grad_norm_(critic_params, max_norm=1.0)
         self.critic_optimizer.step()
 
         new_action, log_prob, _ = self._sample_policy(batch["obs"], done_mask=done_mask_obs, deterministic=False)
         q1_pi, _ = self._critic_forward(self.q1_enc, self.q1_head, batch["obs"], new_action, done_mask=done_mask_obs)
         q2_pi, _ = self._critic_forward(self.q2_enc, self.q2_head, batch["obs"], new_action, done_mask=done_mask_obs)
         actor_loss = self._masked_mean(self.alpha.detach() * log_prob - torch.min(q1_pi, q2_pi), learn_mask)
+        policy_entropy = self._masked_mean(-log_prob, learn_mask)
 
         alpha_loss = torch.tensor(0.0, device=self.device)
         if self.config.auto_entropy_tuning:
@@ -361,7 +372,9 @@ class SACAgent:
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
-        nn.utils.clip_grad_norm_(list(self.actor_enc.parameters()) + list(self.actor_mean.parameters()) + list(self.actor_log_std_head.parameters()), max_norm=1.0)
+        actor_params = list(self.actor_enc.parameters()) + list(self.actor_mean.parameters()) + list(self.actor_log_std_head.parameters())
+        grad_norm_actor = MetricsLogger.compute_grad_norm(actor_params)
+        nn.utils.clip_grad_norm_(actor_params, max_norm=1.0)
         self.actor_optimizer.step()
 
         if self.config.auto_entropy_tuning:
@@ -369,14 +382,21 @@ class SACAgent:
             alpha_loss.backward()
             self.alpha_optimizer.step()
 
-        self._soft_update(self.q1_enc, self.q1_head, self.target_q1_enc, self.target_q1_head)
-        self._soft_update(self.q2_enc, self.q2_head, self.target_q2_enc, self.target_q2_head)
+        target_update_mag = self._soft_update(self.q1_enc, self.q1_head, self.target_q1_enc, self.target_q1_head)
+        target_update_mag += self._soft_update(self.q2_enc, self.q2_head, self.target_q2_enc, self.target_q2_head)
 
         return {
             "critic_loss": float(critic_loss.item()),
             "actor_loss": float(actor_loss.item()),
             "alpha_loss": float(alpha_loss.item()),
             "alpha": float(self.alpha.item()),
+            "policy_entropy": float(policy_entropy.item()),
+            "value_residual": float(td_error.item()),
+            "grad_norm_actor": round(grad_norm_actor, 6),
+            "grad_norm_critic": round(grad_norm_critic, 6),
+            "target_update_magnitude": round(target_update_mag, 6),
+            "lr_actor": round(float(self.actor_optimizer.param_groups[0]["lr"]), 8),
+            "lr_critic": round(float(self.critic_optimizer.param_groups[0]["lr"]), 8),
         }
 
     def checkpoint(self, episode, reward):
@@ -452,6 +472,8 @@ def train(config=None):
     rew_w, suc_w, gol_w, col_w, to_w = [], [], [], [], []
     start_time = time.perf_counter()
     metrics_logger = MetricsLogger(env.run_folder, algorithm="sac")
+    metrics_logger.log_hyperparams(asdict(config), recurrent_cell=config.recurrent_cell,
+                                   obs_size=env.observation_size, action_dim=env.action_dim)
 
     for episode in range(config.episodes):
         obs, _ = env.reset()
@@ -487,9 +509,22 @@ def train(config=None):
 
         replay.add_episode(ep_obs, ep_act, ep_rew, ep_next, ep_done)
 
+        all_update_metrics = []
         if total_steps >= config.update_after_steps and replay.can_sample(config.replay_batch_size, config.min_replay_sequences):
             for _ in range(config.gradient_steps_per_episode):
-                agent.update(replay.sample(config.replay_batch_size, agent.device))
+                upd = agent.update(replay.sample(config.replay_batch_size, agent.device))
+                if upd is not None:
+                    all_update_metrics.append(upd)
+                    metrics_logger.log_update(
+                        global_step=total_steps, episode=episode + 1,
+                        recurrent_cell=config.recurrent_cell,
+                        **upd,
+                    )
+
+        act_stats = MetricsLogger.compute_action_stats(ep_act)
+        obs_stats = MetricsLogger.compute_obs_stats(ep_obs)
+        ep_val_residual = 0.0
+        agg_upd = MetricsLogger.aggregate_update_metrics(all_update_metrics)
 
         rew_w.append(episode_reward)
         suc_w.append(1.0 if ep_success else 0.0)
@@ -529,14 +564,32 @@ def train(config=None):
         elapsed = time.perf_counter() - start_time
         ckpt_note = f" ckpt={'+'.join(ckpt_flags)}" if ckpt_flags else ""
         print(f"[TRAIN][SAC] ep={episode + 1:03d}/{config.episodes} r={episode_reward:8.2f} avg10={r10:8.2f} steps={env.current_step:4d} succ10={s10:4.2f} touch10={g10:4.2f} col10={c10:4.2f} to10={t10:4.2f} min_d={env.min_episode_distance:5.2f} avg_spd={avg_spd:4.2f}m/s end={ep_end_reason} replay={len(replay):4d} t={elapsed:7.1f}s{ckpt_note}", flush=True)
-        metrics_logger.log(episode=episode + 1, reward=round(episode_reward, 4), avg10=round(r10, 4), steps=env.current_step,
-                          success=int(ep_success), goal_touched=int(ep_goal), collision=int(ep_end_reason == "collision"),
-                          timeout=int(ep_end_reason == "max_steps"), min_dist=round(env.min_episode_distance, 4),
-                          avg_speed_ms=round(avg_spd, 3), end_reason=ep_end_reason, replay_size=len(replay),
-                          elapsed_s=round(elapsed, 1))
+
+        metrics_logger.log_episode(
+            episode=episode + 1,
+            global_step=total_steps,
+            reward=round(episode_reward, 4),
+            avg10=round(r10, 4),
+            length=env.current_step,
+            success=int(ep_success),
+            goal_touched=int(ep_goal),
+            collision=int(ep_end_reason == "collision"),
+            timeout=int(ep_end_reason == "max_steps"),
+            min_dist=round(env.min_episode_distance, 4),
+            avg_speed_ms=round(avg_spd, 3),
+            end_reason=ep_end_reason,
+            elapsed_s=round(elapsed, 1),
+            recurrent_cell=config.recurrent_cell,
+            replay_buffer_size=len(replay),
+            **act_stats,
+            **obs_stats,
+            **agg_upd,
+        )
 
     metrics_logger.close()
     print(f"[TRAIN][SAC] metrics saved to {metrics_logger.path}", flush=True)
+    print(f"[TRAIN][SAC] updates saved to {metrics_logger.update_path}", flush=True)
+    print(f"[TRAIN][SAC] hyperparams saved to {metrics_logger.hyperparams_path}", flush=True)
     final_reward = best_goal_reward if best_goal_episode is not None else best_reward
     agent.save(final_model_path, "final", final_reward)
     elapsed = time.perf_counter() - start_time
@@ -547,4 +600,3 @@ def train(config=None):
 
 if __name__ == "__main__":
     train()
-
