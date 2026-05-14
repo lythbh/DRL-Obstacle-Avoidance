@@ -1,4 +1,4 @@
-﻿"""Soft Actor-Critic controller for the ALTINO Webots task."""
+"""Soft Actor-Critic controller for the ALTINO Webots task."""
 from __future__ import annotations
 
 import sys, time
@@ -313,7 +313,7 @@ class SACAgent:
                 action = action.squeeze(1)
             elif features.ndim == 3 and action.ndim == 2:
                 action = action.unsqueeze(1)
-        return q_head(torch.cat([features, action], dim=-1)), next_state
+        q_val = q_head(torch.cat([features, action], dim=-1)); return torch.clamp(q_val, -200.0, 300.0), next_state
 
     def update(self, batch):
         """Perform SAC training update, returning a dict with all loss components, gradient norms, and diagnostics."""
@@ -345,8 +345,8 @@ class SACAgent:
 
         cq1, _ = self._critic_forward(self.q1_enc, self.q1_head, batch["obs"], batch["actions"], done_mask=done_mask_obs)
         cq2, _ = self._critic_forward(self.q2_enc, self.q2_head, batch["obs"], batch["actions"], done_mask=done_mask_obs)
-        critic_loss = self._masked_mean((cq1 - target_q).pow(2), learn_mask)
-        critic_loss += self._masked_mean((cq2 - target_q).pow(2), learn_mask)
+        critic_loss = self._masked_mean(nn.functional.smooth_l1_loss(cq1, target_q, reduction='none'), learn_mask)
+        critic_loss += self._masked_mean(nn.functional.smooth_l1_loss(cq2, target_q, reduction='none'), learn_mask)
 
         td_error = self._masked_mean(torch.abs(cq1 - target_q), learn_mask)
 
@@ -354,7 +354,7 @@ class SACAgent:
         critic_loss.backward()
         critic_params = list(self.q1_enc.parameters()) + list(self.q1_head.parameters()) + list(self.q2_enc.parameters()) + list(self.q2_head.parameters())
         grad_norm_critic = MetricsLogger.compute_grad_norm(critic_params)
-        nn.utils.clip_grad_norm_(critic_params, max_norm=1.0)
+        nn.utils.clip_grad_norm_(critic_params, max_norm=1.0)  # reduced from 5.0 — tighter clipping to prevent Q-value drift
         self.critic_optimizer.step()
 
         new_action, log_prob, _ = self._sample_policy(batch["obs"], done_mask=done_mask_obs, deterministic=False)
@@ -482,11 +482,18 @@ def train(config=None):
         ep_speeds = []
         actor_state = agent.get_initial_state(batch_size=1)
         prev_done = True
+        ep_step = 0
 
         while not done:
+            # Reset recurrent state at sequence boundaries to match training context window.
+            # Without this, actor uses full-episode context (4000 steps) while critic was
+            # trained on zero-initialized 16-step sequences, creating a mismatch.
+            if ep_step > 0 and ep_step % config.sequence_length == 0:
+                actor_state = agent.get_initial_state(batch_size=1)
             action, actor_state = agent.select_action(obs, actor_state, done=prev_done, deterministic=False)
             next_obs, reward, terminated, truncated, info = env.step(action)
-            transition_done = bool(terminated)
+            ep_step += 1
+            transition_done = bool(terminated or truncated)
             ep_obs.append(np.asarray(obs, dtype=np.float32))
             ep_act.append(np.asarray(action, dtype=np.float32))
             ep_rew.append(float(reward))

@@ -478,10 +478,10 @@ def train(config=None):
         obs_stats = MetricsLogger.compute_obs_stats(ep_obs)
         ep_val_residual = MetricsLogger.compute_value_residual(ep_val_np, ep_ret)
 
-        # Learning rate warmup for first 50 episodes (extended from 10).
-        # Applied BEFORE the PPO update so that the update uses the correct warmup LR.
-        if episode < 50:
-            warmup_lr = config.learning_rate * (episode + 1) / 50.0
+        # Learning rate warmup: ramp from 25% to 100% over first 25 episodes.
+        # Avoids freezing the model when exploration is strongest.
+        if episode < 25:
+            warmup_lr = config.learning_rate * (0.25 + 0.75 * (episode + 1) / 25.0)
             for pg in agent.optimizer.param_groups:
                 pg['lr'] = warmup_lr
 
@@ -502,7 +502,7 @@ def train(config=None):
         # Entropy coefficient decays linearly over training, maintaining some
         # exploration throughout to prevent premature convergence to poor policies.
         decay_frac = min(1.0, episode / max(1, config.episodes))
-        agent.config.entropy_coef = d.PPODefaults.entropy_coef * (1.0 - 0.5 * decay_frac)
+        agent.config.entropy_coef = d.PPODefaults.entropy_coef * (1.0 - 0.15 * decay_frac)
 
         ep_sum = sum(ep_rew)
         rew_w.append(ep_sum)
