@@ -8,9 +8,29 @@ from typing import Tuple, List, Optional, Dict, Any, Union
 import numpy as np
 import torch
 from torch import multiprocessing, nn
+from collections import namedtuple
+import random
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from controllers.common.reward_defaults import (
+    COLLISION_PENALTY,
+    PROGRESS_REWARD_SCALE,
+    DISTANCE_REWARD_SCALE,
+    HEADING_REWARD_SCALE,
+    SAFETY_REWARD_SCALE,
+    MOTION_REWARD_SCALE,
+    NEW_BEST_DISTANCE_BONUS,
+    STEP_PENALTY,
+    GOAL_SUCCESS_REWARD,
+    GOAL_STOP_BONUS,
+    GOAL_HOLD_REWARD,
+    GOAL_OVERSHOOT_PENALTY,
+    LOW_SCORE_THRESHOLD,
+    GOAL_THRESHOLD,
+    GOAL_STOP_SPEED_THRESHOLD,
+)
 
 RecurrentState = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
-
 
 class CriticNetwork(nn.Module):
     """Simple Q-network for state-action value estimation."""
@@ -36,6 +56,55 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
 
+# PER Replay Buffer
+import numpy as np
+
+class SumTree:
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.tree = np.zeros(2 * capacity - 1)
+        self.data = np.zeros(capacity, dtype=object)
+        self.write = 0
+        self.n_entries = 0
+
+    def __len__(self):
+        return self.n_entries
+
+    def _propagate(self, idx, change):
+        parent = (idx - 1) // 2
+        self.tree[parent] += change
+        if parent != 0:
+            self._propagate(parent, change)
+
+    def _retrieve(self, idx, s):
+        left = 2 * idx + 1
+        right = left + 1
+        if left >= len(self.tree):
+            return idx
+        if s <= self.tree[left]:
+            return self._retrieve(left, s)
+        else:
+            return self._retrieve(right, s - self.tree[left])
+
+    def total(self):
+        return self.tree[0]
+
+    def add(self, p, data):
+        idx = self.write + self.capacity - 1
+        self.data[self.write] = data
+        change = p - self.tree[idx]
+        self.tree[idx] = p
+        self._propagate(idx, change)
+        self.write += 1
+        if self.write >= self.capacity:
+            self.write = 0
+        if self.n_entries < self.capacity:
+            self.n_entries += 1
+
+    def get(self, s):
+        idx = self._retrieve(0, s)
+        data_idx = idx - self.capacity + 1
+        return (idx, self.tree[idx], self.data[data_idx])
 
 # ============================================================================
 # CONFIGURATION
@@ -46,64 +115,64 @@ class Config:
     """Training and environment hyperparameters."""
 
     # Training
+    # Training
     episodes: int = 500
-    update_every: int = 25  # DDPG update frequency (environment steps)
-    batch_size: int = 64
-    exploration_noise_std: float = 0.15
-    exploration_noise_min: float = 0.01
+    update_every: int = 25
+    batch_size: int = 128
+    exploration_noise_std: float = 0.5
+    exploration_noise_min: float = 0.2
     exploration_noise_decay: float = 0.995
 
     # DDPG Agent
-    gamma: float = 0.96  # Discount factor
-    tau: float = 0.06  # Soft update parameter (increased for faster convergence)
-    actor_learning_rate: float = 3e-4
-    critic_learning_rate: float = 1e-4
-    hidden_size: int = 128  # Network hidden layer size
-    latent_size: int = 128  # Encoder output size before the recurrent core
-    lstm_hidden_size: int = 128  # Hidden size of the recurrent core
+    gamma: float = 0.96
+    tau: float = 0.06
+    actor_learning_rate: float = 1e-3
+    critic_learning_rate: float = 5e-4
+    hidden_size: int = 128
+    latent_size: int = 128
+    lstm_hidden_size: int = 128
     lstm_layers: int = 1
-    recurrent_cell: str = "gru" # "lstm" or "gru"
+    recurrent_cell: str = "gru"
     lidar_sector_dim: int = 16
-    pose_goal_dim: int = 7  # [x, y] + [sin/cos heading, sin/cos goal_error, norm dist]
-    imu_feature_dim: int = 10  # accel(3) + gyro(3) + quaternion(4)
-    occupancy_grid_shape: Optional[Tuple[int, ...]] = None  # Optional CNN shape, e.g. (1, 16, 16)
+    pose_goal_dim: int = 9 
+    imu_feature_dim: int = 10
+    occupancy_grid_shape: Optional[Tuple[int, ...]] = None
 
-    # Environment
-    max_steps: int = 2000  # Max steps per episode
-    collision_threshold: float = 0.1  # LiDAR distance threshold for collision
-    low_score_threshold: float = -800.0  # Episode reset threshold
-    collision_penalty: float = -6.0  # Penalty when collision happens
-    progress_reward_scale: float = 1.5  # Scale for distance-progress reward
-    distance_reward_scale: float = progress_reward_scale
-    heading_reward_scale: float = 0.5  # Bonus when facing toward the goal
-    safety_reward_scale: float = 0.6  # Encourages keeping distance from obstacles
-    motion_reward_scale: float = 0.15  # Bonus for moving forward to avoid stop-policy collapse
-    new_best_distance_bonus: float = 1.0  # Bonus when reaching a new closest distance to goal
-    step_penalty: float = -0.03  # Per-step penalty (increased to penalize long episodes, discourages circling)
-    stagnation_penalty: float = -2.0  # Penalty applied when no progress for N steps
-    stagnation_steps: int = 40  # Steps without distance improvement before stagnation penalty kicks in
-    stagnation_termination_steps: int = 100  # Force episode end if stagnant for this many steps
-    endpoint: Tuple[float, float] = (2.0, 0.0)  # Goal location
-    goal_threshold: float = 0.1  # Radius around goal considered reached
-    goal_stop_bonus: float = 350.0  # Extra reward for stopping at the goal
-    goal_hold_reward: float = 10.0  # Reward per timestep while inside goal threshold
-    goal_speed_penalty: float = -60.0  # Penalty for still moving inside the goal region
-    goal_overshoot_penalty: float = -50.0  # Penalty for driving past the goal region
-    goal_score_threshold: float = 3500.0  # End episode when total reward reaches this threshold
-    reference_distance: Optional[float] = None  # Start-to-goal distance, filled in at init
+    # Environment (use reward_defaults.py for rewards)
+    max_steps: int = 1500
+    collision_threshold: float = 0.1
+    low_score_threshold: float = LOW_SCORE_THRESHOLD  # -800.0
+    collision_penalty: float = COLLISION_PENALTY  # -10.0
+    progress_reward_scale: float = PROGRESS_REWARD_SCALE  # 0.8
+    distance_reward_scale: float = DISTANCE_REWARD_SCALE  # 0.5
+    heading_reward_scale: float = HEADING_REWARD_SCALE  # 0.3
+    safety_reward_scale: float = SAFETY_REWARD_SCALE  # 0.5
+    motion_reward_scale: float = MOTION_REWARD_SCALE  # 0.1
+    new_best_distance_bonus: float = NEW_BEST_DISTANCE_BONUS  # 1.0
+    step_penalty: float = STEP_PENALTY  # -0.05
+    stagnation_penalty: float = -20.0
+    stagnation_steps: int = 40
+    stagnation_termination_steps: int = 100
+    endpoint: Tuple[float, float] = (2.0, 0.0)
+    goal_success_reward: float = 100.0
+    goal_threshold: float = GOAL_THRESHOLD  # 0.3
+    goal_stop_speed_threshold: float = 0.15
+    goal_stop_bonus: float = GOAL_STOP_BONUS  # 50.0
+    goal_hold_reward: float = GOAL_HOLD_REWARD  # 2.0
+    goal_overshoot_penalty: float = GOAL_OVERSHOOT_PENALTY  # -5.0
+    goal_score_threshold: float = 3500.0
+    reference_distance: Optional[float] = None
 
     # Robot Control
     max_steering_angle: float = 0.9
     min_speed: float = 0.0
-    start_position: Optional[List[float]] = None  # [x, y, z]
-    start_rotation: Optional[List[float]] = None  # [x, y, z, w]
-    start_position_noise: float = 0.03  # Random position jitter at reset
-    start_yaw_noise: float = 0.2  # Random yaw jitter at reset
-    episode_warmup_steps: int = 60  # Random exploration steps after reset
-
-    # Motor/Sensor Config
+    start_position: Optional[List[float]] = None
+    start_rotation: Optional[List[float]] = None
+    start_position_noise: float = 0.03
+    start_yaw_noise: float = 0.2
+    episode_warmup_steps: int = 60
     max_speed: float = 10.0
-    reset_settle_steps: int = 10  # Steps to wait for physics to settle after reset
+    reset_settle_steps: int = 10
 
     def __post_init__(self) -> None:
         """Initialize defaults for mutable fields."""
@@ -130,6 +199,10 @@ class DDPGAgent:
     def __init__(self, obs_size: int, action_dim: int, config: Config):
         self.config = config
         self.device = self._get_device()
+        self.replay_buffer = SumTree(capacity=100000)
+        self.priorities = []
+        self.beta = 0.4
+        self.beta_increment = 0.001
         self.action_dim = action_dim
         self.obs_size = obs_size
         self.noise_std = self.config.exploration_noise_std
@@ -192,6 +265,7 @@ class DDPGAgent:
         deterministic: bool = False,
     ) -> Tuple[np.ndarray, RecurrentState]:
         """Sample a single action and advance the recurrent state."""
+        
         with torch.no_grad():
             policy_output, _, next_state = self.actor(
                 obs,
@@ -205,9 +279,9 @@ class DDPGAgent:
                 action = torch.clamp(action, *self._action_bounds())
         return action.cpu().numpy(), next_state
 
-    def update(self, replay_buffer: List[Dict[str, np.ndarray]]) -> None:
+    def update(self) -> None:
         """Update the DDPG policy from replay buffer."""
-        if len(replay_buffer) < self.config.batch_size:
+        if len(self.replay_buffer) < self.config.batch_size:
             return
 
         # Ensure models are in training mode
@@ -216,9 +290,19 @@ class DDPGAgent:
         self.target_actor.eval()
         self.target_critic.eval()
 
-        # Sample batch
-        indices = np.random.choice(len(replay_buffer), self.config.batch_size, replace=False)
-        batch = [replay_buffer[i] for i in indices]
+        # Sample batch with PER
+        batch = []
+        indices = []
+        priorities = []
+        segment = self.replay_buffer.total() / self.config.batch_size
+        for i in range(self.config.batch_size):
+            a = segment * i
+            b = segment * (i + 1)
+            s = random.uniform(a, b)
+            (idx, p, data) = self.replay_buffer.get(s)
+            batch.append(data)
+            indices.append(idx)
+            priorities.append(p)
         
         # Prepare tensors
         obs = torch.tensor(np.array([b['obs'] for b in batch]), dtype=torch.float32, device=self.device)
@@ -240,6 +324,10 @@ class DDPGAgent:
 
         current_q = self.critic(obs, actions)
         critic_loss = nn.MSELoss()(current_q, target_q)
+
+        td_errors = (target_q - current_q).abs().detach().cpu().numpy()
+        for i, idx in enumerate(indices):
+            self.replay_buffer.add((td_errors[i] + 1e-5) ** self.beta, batch[i])
         
         # Check for NaN/inf
         if not torch.isfinite(critic_loss):
@@ -272,6 +360,18 @@ class DDPGAgent:
         # Soft update targets
         self._soft_update(self.target_actor, self.actor, self.config.tau)
         self._soft_update(self.target_critic, self.critic, self.config.tau)
+
+
+        # Logging Q-values
+        # avg_q = current_q.mean().item()
+        # if not hasattr(self, 'q_values'):
+        #     self.q_values = []
+        # self.q_values.append(avg_q)
+        # if len(self.q_values) > 100:  # Log every 100 updates
+        #     self.q_values.pop(0)
+        # if len(self.q_values) == 100:
+        #     print(f"[DDPG] Avg Q-value (last 100 updates): {np.mean(self.q_values):.2f}", flush=True)
+
 
     def decay_exploration_noise(self) -> None:
         self.noise_std = max(
@@ -313,8 +413,6 @@ def train(config: Optional[Config] = None) -> None:
     print(f"[TRAIN] Observation size: {obs_size}, Action dims: {action_dim}")
     
     # Replay buffer
-    replay_buffer = []
-    max_replay_size = 100000
     total_updates = 0
     
     # Training loop
@@ -383,13 +481,12 @@ def train(config: Optional[Config] = None) -> None:
                 'next_obs': obs_next,
                 'done': float(done),
             }
-            replay_buffer.append(transition)
-            if len(replay_buffer) > max_replay_size:
-                replay_buffer.pop(0)
+            priority = 1.0
+            agent.replay_buffer.add(priority, transition)
             
             # DDPG update every N environment steps (INSIDE loop)
             if episode_step > 0 and episode_step % config.update_every == 0:
-                agent.update(replay_buffer)
+                agent.update()
                 episode_updates += 1
                 total_updates += 1
             
