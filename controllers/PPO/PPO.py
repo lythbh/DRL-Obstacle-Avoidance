@@ -61,34 +61,20 @@ _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 
 # Use shared checkpoint helpers to avoid duplication across controllers.
 from controllers.common.checkpoints import (
-    checkpoint_path as _shared_checkpoint_path,
-    run_checkpoint_dir as _shared_run_checkpoint_dir,
-    run_checkpoint_path as _shared_run_checkpoint_path,
-    load_checkpoint as _shared_load_checkpoint,
+    run_checkpoint_dir,
+    run_checkpoint_path,
+    load_checkpoint,
     make_checkpoint_header as _make_checkpoint_header,
     save_checkpoint_file as _save_checkpoint_file,
 )
 from controllers.common.metrics_logger import MetricsLogger
 
 
-def _checkpoint_path(filename: str) -> str:
-    """Controller-local wrapper around shared `checkpoint_path` helper."""
-    return _shared_checkpoint_path(_CONTROLLER_DIR, filename)
 
 
-def _run_checkpoint_dir(run_id: str) -> Path:
-    """Controller-local wrapper around shared `run_checkpoint_dir` helper."""
-    return _shared_run_checkpoint_dir(_CHECKPOINT_DIR, run_id)
-
-
-def _run_checkpoint_path(run_id: str, prefix: str, extension: str = "pth") -> str:
-    """Controller-local wrapper around shared `run_checkpoint_path` helper."""
-    return _shared_run_checkpoint_path(_CHECKPOINT_DIR, run_id, prefix, extension)
-
-
-def _load_checkpoint(path: str, map_location: Union[str, torch.device]) -> Dict[str, Any]:
+def load_checkpoint(path: str, map_location: Union[str, torch.device]) -> Dict[str, Any]:
     """Controller-local wrapper around shared `load_checkpoint` helper."""
-    return _shared_load_checkpoint(path, map_location)
+    return _sharedload_checkpoint(path, map_location)
 
 
 
@@ -696,7 +682,7 @@ class PPOAgent:
         
         Validates checkpoint metadata and rebuilds the recurrent cell if needed.
         """
-        checkpoint = _load_checkpoint(model_path, map_location=self.device)
+        checkpoint = load_checkpoint(model_path, map_location=self.device)
         checkpoint_algorithm = str(checkpoint.get("algorithm", "ppo")).lower().strip()
         if checkpoint_algorithm != "ppo":
             raise ValueError(f"Checkpoint algorithm '{checkpoint_algorithm}' does not match PPO.")
@@ -746,8 +732,8 @@ def train(config: Optional[Config] = None) -> None:
     obs_size = env.observation_size
     action_dim = env.action_dim
     agent = PPOAgent(obs_size, action_dim, config)
-    checkpoint_dir = _run_checkpoint_dir(run_id)
-    final_model_path = _run_checkpoint_path(run_id, "final")
+    checkpoint_dir = run_checkpoint_dir(_CHECKPOINT_DIR, run_id)
+    final_model_path = run_checkpoint_path(_CHECKPOINT_DIR, run_id, "final")
     print(
         f"[TRAIN][PPO] rnn={config.recurrent_cell.upper()} "
         f"weights_dir={checkpoint_dir} final={final_model_path}",
@@ -950,3 +936,4 @@ def train(config: Optional[Config] = None) -> None:
 
 if __name__ == "__main__":
     train()
+
