@@ -1,7 +1,6 @@
 """Webots simulation stack for the ALTINO robot."""
 
 import os
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -21,6 +20,8 @@ from controllers.common.reward_defaults import (
     MOTION_REWARD_SCALE,
     NEW_BEST_DISTANCE_BONUS,
     PROGRESS_REWARD_SCALE,
+    PROXIMITY_REWARD_SCALE,
+    PROXIMITY_RADIUS,
     SAFETY_REWARD_SCALE,
     SLOW_SPEED_PENALTY,
     SLOW_SPEED_THRESHOLD,
@@ -152,7 +153,7 @@ class SensorReader:
 
 
 class SLAMProcessor:
-    """IMU filtering + IEKF heading + occupancy map for the controller."""
+    """IMU filtering + IEKF heading + optional occupancy map for visualization."""
 
     WHEEL_RADIUS: float = 0.033
     N_SECTORS: int = 16
@@ -165,8 +166,6 @@ class SLAMProcessor:
         goal: Tuple[float, float] = (0.0, 0.0),
         lidar_sector_dim: int = N_SECTORS,
         enabled: bool = True,
-        profile_enabled: bool = False,
-        profile_interval: int = 500,
         save_episodes: bool = False,
     ) -> None:
         self._dt = dt
@@ -177,82 +176,38 @@ class SLAMProcessor:
         self._goal = goal
         self.n_sectors = int(lidar_sector_dim)
         self.enabled = bool(enabled) and _SLAM_AVAILABLE
-        self.profile_enabled = bool(profile_enabled) and self.enabled
-        self.profile_interval = max(1, int(profile_interval))
         self.save_episodes = bool(save_episodes) and self.enabled
-        self._profile_step_count = 0
-        self._profile_process_time = 0.0
-        self._profile_keyframe_time = 0.0
-        self._profile_reset_time = 0.0
-        self._profile_save_time = 0.0
-        self._profile_keyframes_added = 0
-        self._profile_reset_calls = 0
-        self._profile_save_calls = 0
         if self.n_sectors <= 0:
             raise ValueError(f"lidar_sector_dim must be positive, got {lidar_sector_dim}.")
 
         if self.enabled:
             self.imu_proc: Any = IMUProcessor(dt=dt)
             self.iekf: Any = IEKFBackend()
-            self.slam_map: Any = SLAMMap(map_resolution=0.05)
+            # Occupancy map only built when save_episodes=True (visualization only, not used in obs)
+            self.slam_map: Any = SLAMMap(map_resolution=0.05) if self.save_episodes else None
         else:
             self.imu_proc = None
             self.iekf = None
             self.slam_map = None
 
-    def _report_profile(self, label: str) -> None:
-        if not self.profile_enabled or self._profile_step_count <= 0:
-            return
-        avg_process_ms = (self._profile_process_time / max(self._profile_step_count, 1)) * 1000.0
-        avg_keyframe_ms = (self._profile_keyframe_time / max(self._profile_step_count, 1)) * 1000.0
-        avg_reset_ms = (self._profile_reset_time / max(self._profile_reset_calls, 1)) * 1000.0
-        avg_save_ms = (self._profile_save_time / max(self._profile_save_calls, 1)) * 1000.0
-        print(
-            f"[SLAM][PROFILE] {label} steps={self._profile_step_count} "
-            f"avg_process={avg_process_ms:.3f}ms avg_keyframe={avg_keyframe_ms:.3f}ms "
-            f"avg_reset={avg_reset_ms:.3f}ms avg_save={avg_save_ms:.3f}ms "
-            f"keyframes={self._profile_keyframes_added} enabled={self.enabled}",
-            flush=True,
-        )
-        self._profile_step_count = 0
-        self._profile_process_time = 0.0
-        self._profile_keyframe_time = 0.0
-        self._profile_reset_time = 0.0
-        self._profile_save_time = 0.0
-        self._profile_keyframes_added = 0
-        self._profile_reset_calls = 0
-        self._profile_save_calls = 0
-
     def reset(self, init_pos: np.ndarray, init_heading: float) -> None:
         if not self.enabled or self.imu_proc is None:
             return
-        start = time.perf_counter()
         self.imu_proc.reset()
         self.iekf = IEKFBackend(
             init_pos=init_pos.astype(np.float64),
             init_heading=float(init_heading),
         )
-        if self.profile_enabled:
-            self._profile_reset_time += time.perf_counter() - start
-            self._profile_reset_calls += 1
 
     def reset_map(self) -> None:
-        if self.enabled:
-            start = time.perf_counter()
+        if self.enabled and self.save_episodes:
             self.slam_map = SLAMMap(map_resolution=0.05)
-            if self.profile_enabled:
-                self._profile_reset_time += time.perf_counter() - start
-                self._profile_reset_calls += 1
 
     def save_episode(self, run_folder: str, episode: int, reward: float = 0.0) -> None:
         if not self.save_episodes or self.slam_map is None:
             return
-        start = time.perf_counter()
         path = os.path.join(run_folder, f"episode_{episode:04d}_reward_{reward:.0f}.png")
         self.slam_map.save_plot(path, goal=self._goal)
-        if self.profile_enabled:
-            self._profile_save_time += time.perf_counter() - start
-            self._profile_save_calls += 1
 
     def sector_lidar(self, raw_ranges: np.ndarray) -> np.ndarray:
         valid = np.where((raw_ranges > 0.01) & np.isfinite(raw_ranges), raw_ranges, self._lidar_max_range)
@@ -268,21 +223,14 @@ class SLAMProcessor:
         n = len(raw_ranges)
         if self._lidar_angles is None or len(self._lidar_angles) != n:
             self._lidar_angles = np.linspace(
-                start=-self._lidar_fov / 2.0,
-                stop=self._lidar_fov / 2.0,
-                num=n,
-                dtype=np.float32,
+                -self._lidar_fov / 2.0, self._lidar_fov / 2.0, n, dtype=np.float32,
             )
         mask = (raw_ranges > 0.01) & np.isfinite(raw_ranges)
         r = raw_ranges[mask]
-        lidar_angles = self._lidar_angles
-        assert lidar_angles is not None
-        a = lidar_angles[mask]
+        a = self._lidar_angles[mask]
         c, s = float(np.cos(heading)), float(np.sin(heading))
-        xl = r * np.cos(a)
-        yl = r * np.sin(a)
-        xw = c * xl - s * yl + pos[0]
-        yw = s * xl + c * yl + pos[1]
+        xl = r * np.cos(a);  yl = r * np.sin(a)
+        xw = c * xl - s * yl + pos[0];  yw = s * xl + c * yl + pos[1]
         return np.column_stack([xw, yw]).astype(np.float32)
 
     def process(
@@ -295,29 +243,16 @@ class SLAMProcessor:
     ) -> Tuple[np.ndarray, Any]:
         lidar_sectors = self.sector_lidar(raw_ranges)
 
-        if not self.enabled or self.imu_proc is None or self.iekf is None or self.slam_map is None:
+        if not self.enabled or self.imu_proc is None or self.iekf is None:
             return lidar_sectors, None
 
-        process_start = time.perf_counter()
         imu_state = self.imu_proc.step(gyro, accel)
-        cmd_speed_ms = cmd_speed_rads * self.WHEEL_RADIUS
-        self.iekf.propagate_odom(cmd_speed_ms, float(gyro[2]), self._dt)
+        self.iekf.propagate_odom(cmd_speed_rads * self.WHEEL_RADIUS, float(gyro[2]), self._dt)
 
-        heading = self.iekf.state.heading
-        pos = gps_pos if gps_pos is not None else self.iekf.state.position
-        pts_2d = self._scan_to_world(raw_ranges, pos, heading)
-        keyframe_start = time.perf_counter()
-        new_keyframe = self.slam_map.try_add_keyframe(
-            float(pos[0]), float(pos[1]), heading, scan_points=pts_2d
-        )
-        if new_keyframe is not None:
-            self._profile_keyframes_added += 1
-        if self.profile_enabled:
-            self._profile_process_time += time.perf_counter() - process_start
-            self._profile_keyframe_time += time.perf_counter() - keyframe_start
-            self._profile_step_count += 1
-            if self._profile_step_count % self.profile_interval == 0:
-                self._report_profile(f"interval={self.profile_interval}")
+        if self.slam_map is not None:
+            pos = gps_pos if gps_pos is not None else self.iekf.state.position
+            pts_2d = self._scan_to_world(raw_ranges, pos, self.iekf.state.heading)
+            self.slam_map.try_add_keyframe(float(pos[0]), float(pos[1]), self.iekf.state.heading, scan_points=pts_2d)
 
         return lidar_sectors, imu_state
 
@@ -342,9 +277,7 @@ class AltinoDriver:
             goal=config.endpoint,
             lidar_sector_dim=config.lidar_sector_dim,
             enabled=bool(getattr(config, "enable_slam", True)),
-            profile_enabled=bool(getattr(config, "profile_slam", False)),
-            profile_interval=int(getattr(config, "slam_profile_interval", 500)),
-            save_episodes=bool(getattr(config, "save_slam_plots", True)),
+            save_episodes=bool(getattr(config, "save_slam_plots", False)),
         )
         self._cmd_speed_rads = 0.0
 
@@ -408,6 +341,75 @@ class AltinoDriver:
                    else self._get_heading())
         return lidar_sectors, pos, heading, imu_state, collision
 
+    # Movable obstacles: (DEF name, z height to restore after XY randomisation)
+    _OBSTACLE_DEFS: List[Tuple[str, float]] = [
+        ("OBS_BARREL",   0.0),
+        ("OBS_CONE",     0.0),
+        ("OBS_FOOTBALL", 0.1),
+        ("OBS_BOTTLE",   0.0),
+        ("OBS_CHAIR",    0.0),
+        ("OBS_BEER_1",   0.0),
+        ("OBS_BEER_2",   0.0),
+        ("OBS_CYL_1",    0.15),
+        ("OBS_CYL_2",    0.1),
+        ("OBS_CYL_3",    0.15),
+        ("OBS_CYL_4",    0.15),
+        ("OBS_CYL_5",    0.15),
+        ("OBS_BOX_1",    0.15),
+        ("OBS_BOX_2",    0.15),
+        ("OBS_BOX_3",    0.15),
+    ]
+
+    def randomize_goal(self, y_range: float = 1.5) -> np.ndarray:
+        """Randomise goal y-position and move the barrier wall gap to match.
+
+        The goal x stays fixed (far end of arena). Only y varies so travel
+        distance stays consistent. Returns the new goal [x, y].
+        """
+        goal_x = float(self.config.endpoint[0])
+        goal_y = float(np.random.uniform(-y_range, y_range))
+        wall_x = goal_x - 0.5          # barrier sits 0.5 m in front of goal
+        half_span = 1.55               # half-length of each wall segment (5×5 arena)
+
+        top = self.supervisor.getFromDef("BARRIER_TOP")
+        bot = self.supervisor.getFromDef("BARRIER_BOTTOM")
+        if top is not None:
+            top.getField("translation").setSFVec3f([wall_x, goal_y + half_span, 0.25])
+        if bot is not None:
+            bot.getField("translation").setSFVec3f([wall_x, goal_y - half_span, 0.25])
+
+        return np.array([goal_x, goal_y], dtype=np.float32)
+
+    def randomize_obstacles(self) -> None:
+        """Move each obstacle into the travel corridor with 75 % probability."""
+        start_xy = np.array(self.config.start_position[:2], dtype=np.float32)
+        goal_xy  = np.array(self.config.endpoint, dtype=np.float32)
+        placed: List[np.ndarray] = []
+
+        for def_name, z in self._OBSTACLE_DEFS:
+            node = self.supervisor.getFromDef(def_name)
+            if node is None:
+                continue
+            field = node.getField("translation")
+            for _ in range(60):
+                if np.random.random() < 0.75:
+                    # bias toward the travel corridor between start and barrier
+                    x = float(np.random.uniform(-1.5, 2.3))
+                    y = float(np.random.uniform(-1.2, 1.2))
+                else:
+                    x = float(np.random.uniform(-2.2, 2.2))
+                    y = float(np.random.uniform(-2.2, 2.2))
+                pos = np.array([x, y])
+                if np.linalg.norm(pos - start_xy) < 1.0:
+                    continue
+                if np.linalg.norm(pos - goal_xy) < 1.0:
+                    continue
+                if any(np.linalg.norm(pos - p) < 0.45 for p in placed):
+                    continue
+                field.setSFVec3f([x, y, z])
+                placed.append(pos)
+                break
+
     def reset_position(self) -> None:
         if self.translation_field is not None and self.rotation_field is not None:
             start_position_values = self.config.start_position or [-2.0, 0.0, 0.02]
@@ -453,6 +455,8 @@ class RewardComputer:
         high_speed_threshold: float = HIGH_SPEED_THRESHOLD,
         high_speed_bonus: float = HIGH_SPEED_BONUS,
         new_best_distance_bonus: float = NEW_BEST_DISTANCE_BONUS,
+        proximity_reward_scale: float = PROXIMITY_REWARD_SCALE,
+        proximity_radius: float = PROXIMITY_RADIUS,
         step_penalty: float = STEP_PENALTY,
         goal_threshold: float = 0.8,
         goal_stop_speed_threshold: float = 0.1,
@@ -475,6 +479,8 @@ class RewardComputer:
         self.high_speed_threshold = float(high_speed_threshold)
         self.high_speed_bonus = float(high_speed_bonus)
         self.new_best_distance_bonus = new_best_distance_bonus
+        self.proximity_reward_scale = proximity_reward_scale
+        self.proximity_radius = proximity_radius
         self.step_penalty = step_penalty
         self.goal_threshold = float(goal_threshold)
         self.goal_stop_speed_threshold = float(goal_stop_speed_threshold)
@@ -524,8 +530,10 @@ class RewardComputer:
 
         accel_magnitude = float(np.linalg.norm(accel))
         accel_penalty = 0.0
-        if distance_to_end < 1.5 and distance_to_end >= self.goal_threshold:
+        proximity_bonus = 0.0
+        if distance_to_end < self.proximity_radius and distance_to_end >= self.goal_threshold:
             accel_penalty = -0.05 * accel_magnitude
+            proximity_bonus = self.proximity_reward_scale * (1.0 - distance_to_end / self.proximity_radius)
 
         return (
             progress
@@ -537,6 +545,7 @@ class RewardComputer:
             + high_speed_reward
             + new_best_bonus
             + accel_penalty
+            + proximity_bonus
             + self.step_penalty
         ), distance_to_end
 
@@ -553,27 +562,19 @@ class WebotsEnv:
         self._imu_feature_dim = int(config.imu_feature_dim)
         if self._lidar_sector_dim <= 0:
             raise ValueError(f"lidar_sector_dim must be positive, got {config.lidar_sector_dim}.")
-        if self._pose_goal_dim != 7:
-            raise ValueError(f"pose_goal_dim must be 7 for the active observation schema, got {config.pose_goal_dim}.")
+        if self._pose_goal_dim != 5:
+            raise ValueError(f"pose_goal_dim must be 5 for the active observation schema, got {config.pose_goal_dim}.")
         if self._imu_feature_dim != 10:
             raise ValueError(f"imu_feature_dim must be 10 for the active observation schema, got {config.imu_feature_dim}.")
-        self._occupancy_grid_shape = self._normalize_occupancy_grid_shape(config.occupancy_grid_shape)
-        self._occupancy_grid_size = (
-            int(np.prod(self._occupancy_grid_shape)) if self._occupancy_grid_shape is not None else 0
-        )
         self.observation_size = (
             self._lidar_sector_dim
             + self._pose_goal_dim
             + self._imu_feature_dim
-            + self._occupancy_grid_size
         )
         self._endpoint = np.array(config.endpoint, dtype=np.float32)
         self._reference_distance = float(config.reference_distance if config.reference_distance is not None else 1.0)
         self.robot = AltinoDriver(config)
         self.timestep = self.robot.timestep
-
-        self.headlights = self.robot.get_device("headlights")
-        self.backlights = self.robot.get_device("backlights")
 
         self.reward_computer = RewardComputer(
             self._endpoint,
@@ -589,6 +590,8 @@ class WebotsEnv:
             high_speed_threshold=float(getattr(config, "high_speed_threshold", HIGH_SPEED_THRESHOLD)),
             high_speed_bonus=float(getattr(config, "high_speed_bonus", HIGH_SPEED_BONUS)),
             new_best_distance_bonus=config.new_best_distance_bonus,
+            proximity_reward_scale=float(getattr(config, "proximity_reward_scale", PROXIMITY_REWARD_SCALE)),
+            proximity_radius=float(getattr(config, "proximity_radius", PROXIMITY_RADIUS)),
             step_penalty=config.step_penalty,
             goal_threshold=config.goal_threshold,
             goal_stop_speed_threshold=float(getattr(config, "goal_stop_speed_threshold", 0.1)),
@@ -617,19 +620,6 @@ class WebotsEnv:
         os.makedirs(self.run_folder, exist_ok=True)
         self._episode_count = 0
 
-    @staticmethod
-    def _normalize_occupancy_grid_shape(shape: Optional[Tuple[int, ...]]) -> Optional[Tuple[int, ...]]:
-        if shape is None:
-            return None
-        grid_shape = tuple(int(dim) for dim in shape)
-        if len(grid_shape) not in {2, 3}:
-            raise ValueError("occupancy_grid_shape must be (H, W) or (1, H, W).")
-        if any(dim <= 0 for dim in grid_shape):
-            raise ValueError(f"occupancy_grid_shape dimensions must be positive, got {shape}.")
-        if len(grid_shape) == 3 and grid_shape[0] != 1:
-            raise ValueError("WebotsEnv emits a single occupancy channel; use shape (1, H, W).")
-        return grid_shape
-
     def _reset_episode_state(self) -> None:
         self.current_step = 0
         self.prev_distance = None
@@ -647,32 +637,6 @@ class WebotsEnv:
         goal_direction = float(np.arctan2(goal_vec[1], goal_vec[0]))
         goal_error = float(np.arctan2(np.sin(goal_direction - heading), np.cos(goal_direction - heading)))
         return goal_distance, goal_error
-
-    def _occupancy_grid_observation(self) -> np.ndarray:
-        if self._occupancy_grid_shape is None:
-            return np.empty((0,), dtype=np.float32)
-
-        if len(self._occupancy_grid_shape) == 2:
-            height, width = self._occupancy_grid_shape
-        else:
-            _, height, width = self._occupancy_grid_shape
-
-        log_odds: Optional[np.ndarray] = None
-        if _SLAM_AVAILABLE and self.robot.slam.slam_map is not None:
-            log_odds = self.robot.slam.slam_map.occ_map.log_odds
-
-        if log_odds is None:
-            grid_2d = np.full((height, width), 0.5, dtype=np.float32)
-        else:
-            row_idx = np.linspace(0, log_odds.shape[0] - 1, height).astype(np.int64)
-            col_idx = np.linspace(0, log_odds.shape[1] - 1, width).astype(np.int64)
-            sampled_log_odds = log_odds[np.ix_(row_idx, col_idx)]
-            grid_2d = (1.0 / (1.0 + np.exp(-sampled_log_odds))).astype(np.float32)
-
-        grid_2d = np.nan_to_num(np.clip(grid_2d, 0.0, 1.0), nan=0.5, posinf=1.0, neginf=0.0)
-        if len(self._occupancy_grid_shape) == 3:
-            return grid_2d.reshape(1, height, width).reshape(-1)  # [1,H,W] -> flat grid tail for the RNN.
-        return grid_2d.reshape(-1)  # [H,W] -> flat grid tail for the RNN.
 
     def _build_observation(
         self,
@@ -701,15 +665,12 @@ class WebotsEnv:
             gyro_norm = np.zeros(3, dtype=np.float32)
             quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
 
-        grid_features = self._occupancy_grid_observation()
         observation = np.concatenate([
             lidar_sectors,
-            pos,
             direction_features,
             accel_norm,
             gyro_norm,
             quat,
-            grid_features,
         ]).astype(np.float32)
         if observation.size != self.observation_size:
             raise RuntimeError(
@@ -721,6 +682,15 @@ class WebotsEnv:
         self.robot.slam.reset_map()
         self._episode_count += 1
         self.robot.motors.stop()
+
+        if getattr(self.config, "randomize_goal", False):
+            y_range = float(getattr(self.config, "goal_y_range", 1.5))
+            new_goal = self.robot.randomize_goal(y_range=y_range)
+            self._endpoint = new_goal
+            self.reward_computer.endpoint = new_goal
+            self.robot.slam._goal = tuple(new_goal.tolist())
+
+        self.robot.randomize_obstacles()
         self.robot.reset_position()
         self._reset_episode_state()
 

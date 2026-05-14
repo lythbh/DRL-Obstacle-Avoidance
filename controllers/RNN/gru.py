@@ -25,7 +25,7 @@ class GRUActorCritic(nn.Module):
         super().__init__()
         self.obs_size = obs_size
         self.action_dim = action_dim
-        self.grid_shape = config.occupancy_grid_shape
+        self.grid_shape = None
         self.obstacle_dim = config.lidar_sector_dim
         self.pose_goal_dim = config.pose_goal_dim
         self.imu_dim = config.imu_feature_dim

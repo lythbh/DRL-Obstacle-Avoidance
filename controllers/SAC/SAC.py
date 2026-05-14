@@ -43,15 +43,12 @@ from controllers.common.reward_defaults import (
     HIGH_SPEED_THRESHOLD,
     HIGH_SPEED_BONUS,
     NEW_BEST_DISTANCE_BONUS,
-    OCCUPANCY_GRID_SHAPE,
     POSE_GOAL_DIM,
     PROGRESS_REWARD_SCALE,
-    PROFILE_SLAM,
     RESET_SETTLE_STEPS,
     REWARD_SCALE,
     SAFETY_REWARD_SCALE,
     SAVE_SLAM_PLOTS,
-    SLAM_PROFILE_INTERVAL,
     START_POSITION,
     START_POSITION_NOISE,
     START_ROTATION,
@@ -106,7 +103,6 @@ class Config:
     lidar_sector_dim: int = LIDAR_SECTOR_DIM
     pose_goal_dim: int = POSE_GOAL_DIM
     imu_feature_dim: int = IMU_FEATURE_DIM
-    occupancy_grid_shape: Optional[Tuple[int, ...]] = OCCUPANCY_GRID_SHAPE
 
     max_steps: int = MAX_STEPS
     collision_threshold: float = COLLISION_THRESHOLD
@@ -134,9 +130,9 @@ class Config:
     reference_distance: Optional[float] = None
 
     enable_slam: bool = ENABLE_SLAM
-    profile_slam: bool = PROFILE_SLAM
-    slam_profile_interval: int = SLAM_PROFILE_INTERVAL
     save_slam_plots: bool = SAVE_SLAM_PLOTS
+    randomize_goal: bool = False   # enable after robot reliably reaches the fixed goal (~20-30% success)
+    goal_y_range: float = 1.5      # goal y sampled from [-goal_y_range, +goal_y_range]
     force_cpu: bool = FORCE_CPU
 
     max_steering_angle: float = MAX_STEERING_ANGLE
@@ -174,8 +170,6 @@ class Config:
             raise ValueError("target_entropy_scale must be greater than 0")
         if self.goal_stop_speed_threshold <= 0.0:
             raise ValueError("goal_stop_speed_threshold must be greater than 0")
-        if self.slam_profile_interval <= 0:
-            raise ValueError("slam_profile_interval must be greater than 0")
         if self.start_position is None:
             self.start_position = list(START_POSITION)
         if self.start_rotation is None:

@@ -39,15 +39,12 @@ from controllers.common.reward_defaults import (
     MIN_SPEED,
     MOTION_REWARD_SCALE,
     NEW_BEST_DISTANCE_BONUS,
-    OCCUPANCY_GRID_SHAPE,
     POSE_GOAL_DIM,
     PROGRESS_REWARD_SCALE,
-    PROFILE_SLAM,
     RESET_SETTLE_STEPS,
     REWARD_SCALE,
     SAFETY_REWARD_SCALE,
     SAVE_SLAM_PLOTS,
-    SLAM_PROFILE_INTERVAL,
     START_POSITION,
     START_POSITION_NOISE,
     START_ROTATION,
@@ -137,7 +134,6 @@ class Config:
     lidar_sector_dim: int = LIDAR_SECTOR_DIM
     pose_goal_dim: int = POSE_GOAL_DIM
     imu_feature_dim: int = IMU_FEATURE_DIM
-    occupancy_grid_shape: Optional[Tuple[int, ...]] = OCCUPANCY_GRID_SHAPE
     
     max_steps: int = MAX_STEPS
     collision_threshold: float = COLLISION_THRESHOLD
@@ -161,9 +157,9 @@ class Config:
     reference_distance: Optional[float] = None
 
     enable_slam: bool = ENABLE_SLAM
-    profile_slam: bool = PROFILE_SLAM
-    slam_profile_interval: int = SLAM_PROFILE_INTERVAL
     save_slam_plots: bool = SAVE_SLAM_PLOTS
+    randomize_goal: bool = False   # enable after robot reliably reaches the fixed goal (~20-30% success)
+    goal_y_range: float = 1.5      # goal y sampled from [-goal_y_range, +goal_y_range]
     force_cpu: bool = FORCE_CPU
     
     max_steering_angle: float = MAX_STEERING_ANGLE
@@ -207,8 +203,6 @@ class Config:
             raise ValueError("save_every must be non-negative")
         if self.goal_stop_speed_threshold <= 0.0:
             raise ValueError("goal_stop_speed_threshold must be greater than 0")
-        if self.slam_profile_interval <= 0:
-            raise ValueError("slam_profile_interval must be greater than 0")
         if self.start_position is None:
             self.start_position = list(START_POSITION)
         if self.start_rotation is None:
@@ -288,11 +282,6 @@ class PPOAgent:
                 "lidar_sector_dim": self.config.lidar_sector_dim,
                 "pose_goal_dim": self.config.pose_goal_dim,
                 "imu_feature_dim": self.config.imu_feature_dim,
-                "occupancy_grid_shape": (
-                    tuple(self.config.occupancy_grid_shape)
-                    if self.config.occupancy_grid_shape is not None
-                    else None
-                ),
             },
         }
 
@@ -320,8 +309,6 @@ class PPOAgent:
             if key not in saved_architecture:
                 continue
             actual_value = saved_architecture[key]
-            if key == "occupancy_grid_shape" and actual_value is not None:
-                actual_value = tuple(actual_value)
             if actual_value != expected_value:
                 mismatches.append(f"{key}: checkpoint={actual_value}, current={expected_value}")
 
@@ -826,7 +813,7 @@ def train(config: Optional[Config] = None) -> None:
                 recurrent_state=agent.get_initial_state(batch_size=1),
                 done_mask=np.concatenate(([1.0], np.zeros(len(episode_rewards) - 1, dtype=np.float32))),
             )
-            episode_values_np = episode_values.squeeze(0).detach().cpu().numpy()
+            episode_values_np = episode_values.detach().cpu().numpy().reshape(-1)
 
         # Bootstrap V(s_T) from the critic for truncated episodes so the
         # advantage estimate accounts for future rewards beyond the episode.
