@@ -10,9 +10,10 @@ Usage::
     logger.close()
 """
 
+from typing import Any, Optional
+
 import csv
 import os
-from typing import Any, Dict, Optional
 
 
 class MetricsLogger:

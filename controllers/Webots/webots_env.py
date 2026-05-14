@@ -8,26 +8,26 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
-from controllers.common.reward_defaults import (
-    COLLISION_PENALTY,
-    DISTANCE_REWARD_SCALE,
-    GOAL_HOLD_REWARD,
-    GOAL_OVERSHOOT_PENALTY,
-    GOAL_SPEED_PENALTY,
-    GOAL_STOP_BONUS,
-    GOAL_SUCCESS_REWARD,
-    HEADING_REWARD_SCALE,
-    MOTION_REWARD_SCALE,
-    NEW_BEST_DISTANCE_BONUS,
-    PROGRESS_REWARD_SCALE,
+from controllers.common.defaults import (
+    REW_COLLISION_PENALTY as COLLISION_PENALTY,
+    REW_DISTANCE_SCALE as DISTANCE_REWARD_SCALE,
+    REW_GOAL_HOLD as GOAL_HOLD_REWARD,
+    REW_GOAL_OVERSHOOT_PENALTY as GOAL_OVERSHOOT_PENALTY,
+    REW_GOAL_SPEED_PENALTY as GOAL_SPEED_PENALTY,
+    REW_GOAL_STOP_BONUS as GOAL_STOP_BONUS,
+    REW_GOAL_SUCCESS as GOAL_SUCCESS_REWARD,
+    REW_HEADING_SCALE as HEADING_REWARD_SCALE,
+    REW_HIGH_SPEED_BONUS as HIGH_SPEED_BONUS,
+    REW_HIGH_SPEED_THRESHOLD as HIGH_SPEED_THRESHOLD,
+    REW_MOTION_SCALE as MOTION_REWARD_SCALE,
+    REW_NEW_BEST_DISTANCE_BONUS as NEW_BEST_DISTANCE_BONUS,
+    REW_PROGRESS_SCALE as PROGRESS_REWARD_SCALE,
     PROXIMITY_REWARD_SCALE,
     PROXIMITY_RADIUS,
-    SAFETY_REWARD_SCALE,
-    SLOW_SPEED_PENALTY,
-    SLOW_SPEED_THRESHOLD,
-    HIGH_SPEED_THRESHOLD,
-    HIGH_SPEED_BONUS,
-    STEP_PENALTY,
+    REW_SAFETY_SCALE as SAFETY_REWARD_SCALE,
+    REW_SLOW_SPEED_PENALTY as SLOW_SPEED_PENALTY,
+    REW_SLOW_SPEED_THRESHOLD as SLOW_SPEED_THRESHOLD,
+    REW_STEP_PENALTY as STEP_PENALTY,
 )
 
 _SLAM_IMPORT_ERROR: Optional[Exception] = None
@@ -44,6 +44,7 @@ _SLAM_STATUS_REPORTED = False
 
 
 def _report_slam_status() -> None:
+    """Report SLAM availability status once at startup."""
     global _SLAM_STATUS_REPORTED
     if _SLAM_STATUS_REPORTED:
         return
@@ -58,98 +59,11 @@ _supervisor: Optional[Supervisor] = None
 
 
 def _init_supervisor() -> None:
+    """Initialize Webots Supervisor and set fast simulation mode."""
     global _supervisor
     supervisor = Supervisor()
     supervisor.simulationSetMode(Supervisor.SIMULATION_MODE_FAST)
     _supervisor = supervisor
-
-
-class MotorController:
-    """Manages steering and wheel motors."""
-
-    def __init__(self, supervisor: Supervisor):
-        self.supervisor: Any = supervisor
-        self.left_steer: Any = supervisor.getDevice('left_steer')
-        self.right_steer: Any = supervisor.getDevice('right_steer')
-        self._init_steering()
-
-        self.wheels: List[Any] = [
-            supervisor.getDevice('left_front_wheel'),
-            supervisor.getDevice('right_front_wheel'),
-            supervisor.getDevice('left_rear_wheel'),
-            supervisor.getDevice('right_rear_wheel'),
-        ]
-        self._init_wheels()
-
-    def _init_steering(self) -> None:
-        for motor in [self.left_steer, self.right_steer]:
-            motor.setPosition(0.0)
-            motor.setVelocity(1.0)
-
-    def _init_wheels(self) -> None:
-        for motor in self.wheels:
-            motor.setPosition(float('inf'))
-            motor.setVelocity(0.0)
-
-    def set_steering(self, angle: float) -> None:
-        self.left_steer.setPosition(angle)
-        self.right_steer.setPosition(angle)
-
-    def set_speed(self, speed: float) -> None:
-        for motor in self.wheels:
-            motor.setVelocity(speed)
-
-    def stop(self) -> None:
-        self.set_steering(0.0)
-        self.set_speed(0.0)
-
-
-class SensorReader:
-    """Manages LiDAR, GPS, accelerometer, and gyroscope sensors."""
-
-    def __init__(self, supervisor: Supervisor, timestep: int, collision_threshold: float):
-        self.supervisor: Any = supervisor
-        self.timestep = timestep
-        self.collision_threshold = collision_threshold
-
-        self.lidar: Any = supervisor.getDevice("lidar")
-        self.lidar.enable(timestep)
-        self.lidar_max_range = self.lidar.getMaxRange()
-
-        self.gps: Any = supervisor.getDevice("gps")
-        self.gps.enable(timestep)
-
-        self.accelerometer: Any = supervisor.getDevice("accelerometer")
-        self.accelerometer.enable(timestep)
-
-        try:
-            self.gyro: Any = supervisor.getDevice("gyro")
-            self.gyro.enable(timestep)
-            self._has_gyro = True
-        except Exception:
-            self.gyro = None
-            self._has_gyro = False
-            print("[ENV] WARNING: gyro device not found; using zeros.", flush=True)
-
-    def read_observation(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, bool]:
-        raw_ranges = np.array(self.lidar.getRangeImage(), dtype=np.float32)
-
-        gps_values = self.gps.getValues()
-        position = np.array([gps_values[0], gps_values[1]], dtype=np.float32)
-
-        accel_values = self.accelerometer.getValues()
-        accel = np.array([accel_values[0], accel_values[1], accel_values[2]], dtype=np.float32)
-
-        if self._has_gyro:
-            gyro_values = self.gyro.getValues()
-            gyro = np.array([gyro_values[0], gyro_values[1], gyro_values[2]], dtype=np.float32)
-        else:
-            gyro = np.zeros(3, dtype=np.float32)
-
-        valid = raw_ranges[raw_ranges > 0.01]
-        collision = bool(len(valid) > 0 and float(valid.min()) < self.collision_threshold)
-
-        return raw_ranges, position, accel, gyro, collision
 
 
 class SLAMProcessor:
@@ -166,8 +80,10 @@ class SLAMProcessor:
         goal: Tuple[float, float] = (0.0, 0.0),
         lidar_sector_dim: int = N_SECTORS,
         enabled: bool = True,
+        profile_interval: int = 500,
         save_episodes: bool = False,
     ) -> None:
+        """Initialize SLAM processor with IMU filtering, IEKF backend, and occupancy mapping."""
         self._dt = dt
         self._lidar_max_range = lidar_max_range
         self._lidar_max_range_inv = 1.0 / max(lidar_max_range, 1e-6)
@@ -191,6 +107,7 @@ class SLAMProcessor:
             self.slam_map = None
 
     def reset(self, init_pos: np.ndarray, init_heading: float) -> None:
+        """Reset IMU processor and IEKF backend with initial position and heading."""
         if not self.enabled or self.imu_proc is None:
             return
         self.imu_proc.reset()
@@ -200,16 +117,19 @@ class SLAMProcessor:
         )
 
     def reset_map(self) -> None:
-        if self.enabled and self.save_episodes:
+        """Clear occupancy grid map and reset SLAM state."""
+        if self.enabled:
             self.slam_map = SLAMMap(map_resolution=0.05)
 
     def save_episode(self, run_folder: str, episode: int, reward: float = 0.0) -> None:
+        """Save occupancy map visualization for the episode."""
         if not self.save_episodes or self.slam_map is None:
             return
         path = os.path.join(run_folder, f"episode_{episode:04d}_reward_{reward:.0f}.png")
         self.slam_map.save_plot(path, goal=self._goal)
 
     def sector_lidar(self, raw_ranges: np.ndarray) -> np.ndarray:
+        """Bin raw lidar ranges into equal sectors and normalize by max range."""
         valid = np.where((raw_ranges > 0.01) & np.isfinite(raw_ranges), raw_ranges, self._lidar_max_range)
         remainder = len(valid) % self.n_sectors
         if remainder:
@@ -220,6 +140,7 @@ class SLAMProcessor:
         return np.clip(sectors * self._lidar_max_range_inv, 0.0, 1.0).astype(np.float32)
 
     def _scan_to_world(self, raw_ranges: np.ndarray, pos: np.ndarray, heading: float) -> np.ndarray:
+        """Transform lidar scan points from robot frame to world frame using position and heading."""
         n = len(raw_ranges)
         if self._lidar_angles is None or len(self._lidar_angles) != n:
             self._lidar_angles = np.linspace(
@@ -227,6 +148,7 @@ class SLAMProcessor:
             )
         mask = (raw_ranges > 0.01) & np.isfinite(raw_ranges)
         r = raw_ranges[mask]
+        assert self._lidar_angles is not None
         a = self._lidar_angles[mask]
         c, s = float(np.cos(heading)), float(np.sin(heading))
         xl = r * np.cos(a);  yl = r * np.sin(a)
@@ -241,6 +163,7 @@ class SLAMProcessor:
         cmd_speed_rads: float,
         gps_pos: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, Any]:
+        """Process sensor data: compute lidar sectors, update IMU/IEKF, add keyframes to occupancy map."""
         lidar_sectors = self.sector_lidar(raw_ranges)
 
         if not self.enabled or self.imu_proc is None or self.iekf is None:
@@ -249,6 +172,12 @@ class SLAMProcessor:
         imu_state = self.imu_proc.step(gyro, accel)
         self.iekf.propagate_odom(cmd_speed_rads * self.WHEEL_RADIUS, float(gyro[2]), self._dt)
 
+        heading = self.iekf.state.heading
+        pos = gps_pos if gps_pos is not None else self.iekf.state.position
+        pts_2d = self._scan_to_world(raw_ranges, pos, heading)
+        self.slam_map.try_add_keyframe(
+            float(pos[0]), float(pos[1]), heading, scan_points=pts_2d
+        )
         if self.slam_map is not None:
             pos = gps_pos if gps_pos is not None else self.iekf.state.position
             pts_2d = self._scan_to_world(raw_ranges, pos, self.iekf.state.heading)
@@ -261,6 +190,7 @@ class AltinoDriver:
     """High-level robot control interface."""
 
     def __init__(self, config: Any):
+        """Initialize ALTINO robot driver with steering, wheels, sensors, and SLAM processor."""
         global _supervisor
         assert _supervisor is not None, "Supervisor not initialized. Call _init_supervisor() first."
         self.supervisor = _supervisor
@@ -268,18 +198,53 @@ class AltinoDriver:
         self.timestep = int(self.supervisor.getBasicTimeStep())
         self._dt = self.timestep / 1000.0
 
-        self.motors = MotorController(self.supervisor)
-        self.sensors = SensorReader(self.supervisor, self.timestep, config.collision_threshold)
+        self.left_steer = self.supervisor.getDevice('left_steer')
+        self.right_steer = self.supervisor.getDevice('right_steer')
+        for motor in [self.left_steer, self.right_steer]:
+            motor.setPosition(0.0)
+            motor.setVelocity(1.0)
+
+        self.wheels = [
+            self.supervisor.getDevice('left_front_wheel'),
+            self.supervisor.getDevice('right_front_wheel'),
+            self.supervisor.getDevice('left_rear_wheel'),
+            self.supervisor.getDevice('right_rear_wheel'),
+        ]
+        for motor in self.wheels:
+            motor.setPosition(float('inf'))
+            motor.setVelocity(0.0)
+
+        self.lidar = self.supervisor.getDevice("lidar")
+        self.lidar.enable(self.timestep)
+        self.lidar_max_range = self.lidar.getMaxRange()
+
+        self.gps = self.supervisor.getDevice("gps")
+        self.gps.enable(self.timestep)
+
+        self.accelerometer = self.supervisor.getDevice("accelerometer")
+        self.accelerometer.enable(self.timestep)
+
+        try:
+            self.gyro = self.supervisor.getDevice("gyro")
+            self.gyro.enable(self.timestep)
+            self._has_gyro = True
+        except Exception:
+            self.gyro = None
+            self._has_gyro = False
+            print("[ENV] WARNING: gyro device not found; using zeros.", flush=True)
+
+        self._cmd_speed_rads = 0.0
+
         self.slam = SLAMProcessor(
-            lidar_max_range=self.sensors.lidar_max_range,
-            lidar_fov=self.sensors.lidar.getFov(),
+            lidar_max_range=self.lidar_max_range,
+            lidar_fov=self.lidar.getFov(),
             dt=self._dt,
             goal=config.endpoint,
             lidar_sector_dim=config.lidar_sector_dim,
             enabled=bool(getattr(config, "enable_slam", True)),
-            save_episodes=bool(getattr(config, "save_slam_plots", False)),
+            profile_interval=int(getattr(config, "slam_profile_interval", 500)),
+            save_episodes=bool(getattr(config, "save_slam_plots", True)),
         )
-        self._cmd_speed_rads = 0.0
 
         try:
             self.altino_node = self.supervisor.getFromDef('ALTINO')
@@ -292,19 +257,26 @@ class AltinoDriver:
             self.rotation_field = None
 
     def set_steering(self, angle: float) -> None:
-        self.motors.set_steering(angle)
+        """Set steering angle for both left and right wheels."""
+        self.left_steer.setPosition(angle)
+        self.right_steer.setPosition(angle)
 
     def set_speed(self, speed: float) -> None:
-        self.motors.set_speed(speed)
-        self._cmd_speed_rads = speed
+        """Set velocity target for all four wheels (front and rear)."""
+        for motor in self.wheels:
+            motor.setVelocity(speed)
 
-    def get_device(self, name: str):
-        return self.supervisor.getDevice(name)
+    def stop(self) -> None:
+        """Stop the robot by setting steering to zero and speed to zero."""
+        self.set_steering(0.0)
+        self.set_speed(0.0)
 
     def step(self, timestep: int) -> int:
+        """Advance simulation by one timestep."""
         return self.supervisor.step(timestep)
 
     def _get_heading(self) -> float:
+        """Extract yaw angle from robot's rotation matrix representation."""
         if self.rotation_field is None:
             return 0.0
         rotation = self.rotation_field.getSFRotation()
@@ -326,16 +298,27 @@ class AltinoDriver:
         return float(np.arctan2(np.sin(yaw), np.cos(yaw)))
 
     def reset_slam(self) -> None:
-        gps_vals = self.sensors.gps.getValues()
+        """Reset SLAM state with current GPS position and computed heading."""
+        gps_vals = self.gps.getValues()
         init_pos = np.array([gps_vals[0], gps_vals[1]], dtype=np.float32)
         self.slam.reset(init_pos, self._get_heading())
-        self._cmd_speed_rads = 0.0
 
     def read_sensors(self) -> Tuple[np.ndarray, np.ndarray, float, Any, bool]:
-        raw_ranges, pos, accel, gyro, collision = self.sensors.read_observation()
-        lidar_sectors, imu_state = self.slam.process(
-            raw_ranges, accel, gyro, self._cmd_speed_rads, gps_pos=pos
-        )
+        """Read all robot sensors: lidar, GPS, accelerometer, gyro; process through SLAM."""
+        raw_ranges = np.array(self.lidar.getRangeImage(), dtype=np.float32)
+        gps_values = self.gps.getValues()
+        pos = np.array([gps_values[0], gps_values[1]], dtype=np.float32)
+        accel_values = self.accelerometer.getValues()
+        accel = np.array([accel_values[0], accel_values[1], accel_values[2]], dtype=np.float32)
+        if self._has_gyro and self.gyro is not None:
+            gyro_values = self.gyro.getValues()
+            gyro = np.array([gyro_values[0], gyro_values[1], gyro_values[2]], dtype=np.float32)
+        else:
+            gyro = np.zeros(3, dtype=np.float32)
+        valid = raw_ranges[raw_ranges > 0.01]
+        collision = bool(len(valid) > 0 and float(valid.min()) < self.config.collision_threshold)
+
+        lidar_sectors, imu_state = self.slam.process(raw_ranges, accel, gyro, self._cmd_speed_rads, gps_pos=pos)
         heading = (self.slam.iekf.state.heading
                    if (_SLAM_AVAILABLE and self.slam.iekf is not None)
                    else self._get_heading())
@@ -411,6 +394,7 @@ class AltinoDriver:
                 break
 
     def reset_position(self) -> None:
+        """Reset robot to start position and rotation with added noise."""
         if self.translation_field is not None and self.rotation_field is not None:
             start_position_values = self.config.start_position or [-2.0, 0.0, 0.02]
             start_rotation_values = self.config.start_rotation or [0.0, 0.0, 1.0, 0.0]
@@ -440,56 +424,29 @@ class AltinoDriver:
 class RewardComputer:
     """Computes rewards for the obstacle avoidance task."""
 
-    def __init__(
-        self,
-        endpoint: np.ndarray,
-        reference_distance: float,
-        collision_reward: float = COLLISION_PENALTY,
-        progress_scale: float = PROGRESS_REWARD_SCALE,
-        distance_reward_scale: float = DISTANCE_REWARD_SCALE,
-        heading_reward_scale: float = HEADING_REWARD_SCALE,
-        safety_reward_scale: float = SAFETY_REWARD_SCALE,
-        motion_reward_scale: float = MOTION_REWARD_SCALE,
-        slow_speed_threshold: float = SLOW_SPEED_THRESHOLD,
-        slow_speed_penalty: float = SLOW_SPEED_PENALTY,
-        high_speed_threshold: float = HIGH_SPEED_THRESHOLD,
-        high_speed_bonus: float = HIGH_SPEED_BONUS,
-        new_best_distance_bonus: float = NEW_BEST_DISTANCE_BONUS,
-        proximity_reward_scale: float = PROXIMITY_REWARD_SCALE,
-        proximity_radius: float = PROXIMITY_RADIUS,
-        step_penalty: float = STEP_PENALTY,
-        goal_threshold: float = 0.8,
-        goal_stop_speed_threshold: float = 0.1,
-        goal_success_reward: float = GOAL_SUCCESS_REWARD,
-        goal_stop_bonus: float = GOAL_STOP_BONUS,
-        goal_hold_reward: float = GOAL_HOLD_REWARD,
-        goal_speed_penalty: float = GOAL_SPEED_PENALTY,
-        goal_overshoot_penalty: float = GOAL_OVERSHOOT_PENALTY,
-    ):
-        self.endpoint = np.array(endpoint, dtype=np.float32)
-        self.reference_distance = float(reference_distance)
-        self.collision_reward = collision_reward
-        self.progress_scale = progress_scale
-        self.distance_reward_scale = distance_reward_scale
-        self.heading_reward_scale = heading_reward_scale
-        self.safety_reward_scale = safety_reward_scale
-        self.motion_reward_scale = motion_reward_scale
-        self.slow_speed_threshold = float(slow_speed_threshold)
-        self.slow_speed_penalty = float(slow_speed_penalty)
-        self.high_speed_threshold = float(high_speed_threshold)
-        self.high_speed_bonus = float(high_speed_bonus)
-        self.new_best_distance_bonus = new_best_distance_bonus
-        self.proximity_reward_scale = proximity_reward_scale
-        self.proximity_radius = proximity_radius
-        self.step_penalty = step_penalty
-        self.goal_threshold = float(goal_threshold)
-        self.goal_stop_speed_threshold = float(goal_stop_speed_threshold)
-        self.goal_success_reward = goal_success_reward
-        self.goal_stop_bonus = goal_stop_bonus
-        self.goal_hold_reward = goal_hold_reward
-        self.goal_speed_penalty = goal_speed_penalty
-        self.goal_overshoot_penalty = goal_overshoot_penalty
-        self.best_time = np.inf
+    def __init__(self, config: Any) -> None:
+        """Initialize reward computer with configured reward coefficients."""
+        self.endpoint = np.array(config.endpoint, dtype=np.float32)
+        self.reference_distance = float(config.reference_distance)
+        self.collision_reward = float(config.collision_penalty)
+        self.progress_scale = float(config.progress_reward_scale)
+        self.distance_reward_scale = float(config.distance_reward_scale)
+        self.heading_reward_scale = float(config.heading_reward_scale)
+        self.safety_reward_scale = float(config.safety_reward_scale)
+        self.motion_reward_scale = float(config.motion_reward_scale)
+        self.slow_speed_threshold = float(getattr(config, "slow_speed_threshold", SLOW_SPEED_THRESHOLD))
+        self.slow_speed_penalty = float(getattr(config, "slow_speed_penalty", SLOW_SPEED_PENALTY))
+        self.high_speed_threshold = float(getattr(config, "high_speed_threshold", HIGH_SPEED_THRESHOLD))
+        self.high_speed_bonus = float(getattr(config, "high_speed_bonus", HIGH_SPEED_BONUS))
+        self.new_best_distance_bonus = float(config.new_best_distance_bonus)
+        self.step_penalty = float(config.step_penalty)
+        self.goal_threshold = float(config.goal_threshold)
+        self.goal_stop_speed_threshold = float(getattr(config, "goal_stop_speed_threshold", 0.1))
+        self.goal_success_reward = float(config.goal_success_reward)
+        self.goal_stop_bonus = float(config.goal_stop_bonus)
+        self.goal_hold_reward = float(config.goal_hold_reward)
+        self.goal_speed_penalty = float(config.goal_speed_penalty)
+        self.goal_overshoot_penalty = float(config.goal_overshoot_penalty)
 
     def compute(
         self,
@@ -503,6 +460,7 @@ class RewardComputer:
         reached_new_best_distance: bool,
         accel: np.ndarray,
     ) -> Tuple[float, Optional[float]]:
+        """Compute reward from collision, progress, heading, safety, speed, and goal bonus components."""
         if collision:
             return self.collision_reward, None
 
@@ -554,6 +512,7 @@ class WebotsEnv:
     """Webots simulation environment for ALTINO obstacle avoidance."""
 
     def __init__(self, config: Any):
+        """Initialize Webots environment with robot, reward computer, and observation builders."""
         _report_slam_status()
         self.config = config
         self.action_dim = 2
@@ -566,16 +525,31 @@ class WebotsEnv:
             raise ValueError(f"pose_goal_dim must be 5 for the active observation schema, got {config.pose_goal_dim}.")
         if self._imu_feature_dim != 10:
             raise ValueError(f"imu_feature_dim must be 10 for the active observation schema, got {config.imu_feature_dim}.")
+
+        self._occupancy_grid_shape = None
+        if config.occupancy_grid_shape is not None:
+            grid_shape = tuple(int(dim) for dim in config.occupancy_grid_shape)
+            if len(grid_shape) not in {2, 3} or any(dim <= 0 for dim in grid_shape):
+                raise ValueError(f"Invalid occupancy_grid_shape {config.occupancy_grid_shape}.")
+            if len(grid_shape) == 3 and grid_shape[0] != 1:
+                raise ValueError("WebotsEnv emits a single occupancy channel; use shape (1, H, W).")
+            self._occupancy_grid_shape = grid_shape
+
+        self._occupancy_grid_size = (
+            int(np.prod(self._occupancy_grid_shape)) if self._occupancy_grid_shape is not None else 0
+        )
         self.observation_size = (
-            self._lidar_sector_dim
-            + self._pose_goal_dim
-            + self._imu_feature_dim
+            self._lidar_sector_dim + self._pose_goal_dim + self._imu_feature_dim + self._occupancy_grid_size
         )
         self._endpoint = np.array(config.endpoint, dtype=np.float32)
         self._reference_distance = float(config.reference_distance if config.reference_distance is not None else 1.0)
         self.robot = AltinoDriver(config)
         self.timestep = self.robot.timestep
 
+        self.headlights = self.robot.supervisor.getDevice("headlights")
+        self.backlights = self.robot.supervisor.getDevice("backlights")
+
+        self.reward_computer = RewardComputer(config)
         self.reward_computer = RewardComputer(
             self._endpoint,
             reference_distance=self._reference_distance,
@@ -632,28 +606,48 @@ class WebotsEnv:
         self.last_min_lidar_norm = 1.0
 
     def _goal_geometry(self, pos: np.ndarray, heading: float) -> Tuple[float, float]:
+        """Compute distance and direction error to goal from current position and heading."""
         goal_vec = self._endpoint - pos
         goal_distance = float(np.linalg.norm(goal_vec))
         goal_direction = float(np.arctan2(goal_vec[1], goal_vec[0]))
         goal_error = float(np.arctan2(np.sin(goal_direction - heading), np.cos(goal_direction - heading)))
         return goal_distance, goal_error
 
-    def _build_observation(
-        self,
-        lidar_sectors: np.ndarray,
-        pos: np.ndarray,
-        heading: float,
-        imu_state: Any,
-    ) -> np.ndarray:
+    def _occupancy_grid_observation(self) -> np.ndarray:
+        """Extract occupancy grid features from SLAM map or generate default empty grid."""
+        if self._occupancy_grid_shape is None:
+            return np.empty((0,), dtype=np.float32)
+
+        if len(self._occupancy_grid_shape) == 2:
+            height, width = self._occupancy_grid_shape
+        else:
+            _, height, width = self._occupancy_grid_shape
+
+        log_odds: Optional[np.ndarray] = None
+        if _SLAM_AVAILABLE and self.robot.slam.slam_map is not None:
+            log_odds = self.robot.slam.slam_map.occ_map.log_odds
+
+        if log_odds is None:
+            grid_2d = np.full((height, width), 0.5, dtype=np.float32)
+        else:
+            row_idx = np.linspace(0, log_odds.shape[0] - 1, height).astype(np.int64)
+            col_idx = np.linspace(0, log_odds.shape[1] - 1, width).astype(np.int64)
+            sampled_log_odds = log_odds[np.ix_(row_idx, col_idx)]
+            grid_2d = (1.0 / (1.0 + np.exp(-sampled_log_odds))).astype(np.float32)
+
+        grid_2d = np.nan_to_num(np.clip(grid_2d, 0.0, 1.0), nan=0.5, posinf=1.0, neginf=0.0)
+        if len(self._occupancy_grid_shape) == 3:
+            return grid_2d.reshape(1, height, width).reshape(-1)
+        return grid_2d.reshape(-1)
+
+    def _build_observation(self, lidar_sectors, pos, heading, imu_state):
+        """Combine lidar, position, heading, IMU, and occupancy grid into observation vector."""
         goal_distance, goal_error = self._goal_geometry(pos, heading)
-        ref_dist = self._reference_distance
 
         direction_features = np.array([
-            np.sin(heading),
-            np.cos(heading),
-            np.sin(goal_error),
-            np.cos(goal_error),
-            goal_distance / max(ref_dist, 1e-6),
+            np.sin(heading), np.cos(heading),
+            np.sin(goal_error), np.cos(goal_error),
+            goal_distance / max(self._reference_distance, 1e-6),
         ], dtype=np.float32)
 
         if _SLAM_AVAILABLE and imu_state is not None:
@@ -666,6 +660,8 @@ class WebotsEnv:
             quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
 
         observation = np.concatenate([
+            lidar_sectors, pos, direction_features, accel_norm, gyro_norm, quat,
+            self._occupancy_grid_observation(),
             lidar_sectors,
             direction_features,
             accel_norm,
@@ -679,6 +675,7 @@ class WebotsEnv:
         return np.nan_to_num(observation, nan=0.0, posinf=1.0, neginf=-1.0)
 
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """Reset environment to start state, return initial observation and info."""
         self.robot.slam.reset_map()
         self._episode_count += 1
         self.robot.motors.stop()
@@ -692,7 +689,16 @@ class WebotsEnv:
 
         self.robot.randomize_obstacles()
         self.robot.reset_position()
-        self._reset_episode_state()
+
+        self.current_step = 0
+        self.prev_distance = None
+        self.episode_reward = 0.0
+        self.current_heading = 0.0
+        self.current_distance = float("inf")
+        self.min_episode_distance = float("inf")
+        self.collision = False
+        self.was_in_goal = False
+        self.last_min_lidar_norm = 1.0
 
         for _ in range(self.config.reset_settle_steps):
             self.robot.step(self.timestep)
@@ -712,6 +718,7 @@ class WebotsEnv:
         return observation, {}
 
     def step(self, action: Union[np.ndarray, List[float], Tuple[float, float]]) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+        """Execute action, compute reward, check termination, and return observation and info."""
         action_arr = np.asarray(action, dtype=np.float32).reshape(-1)
         if action_arr.size != 2:
             raise ValueError(f"Expected action with 2 elements [steering, speed], got shape {action_arr.shape}")
@@ -751,15 +758,8 @@ class WebotsEnv:
         info: Dict[str, Any] = {}
 
         reward, new_distance = self.reward_computer.compute(
-            collision,
-            self.current_pos,
-            self.current_step,
-            self.prev_distance,
-            goal_error,
-            min_lidar_norm,
-            speed_norm,
-            reached_new_best_distance,
-            accel_for_reward,
+            collision, self.current_pos, self.current_step, self.prev_distance,
+            goal_error, min_lidar_norm, speed_norm, reached_new_best_distance, accel_for_reward,
         )
         self.prev_distance = new_distance
         self.episode_reward += reward
@@ -799,7 +799,7 @@ class WebotsEnv:
             info["success"] = False
 
         if terminated or truncated:
-            self.robot.motors.stop()
+            self.robot.stop()
 
         observation = self._build_observation(lidar_sectors, pos, heading, imu_state)
         return observation, reward, terminated, truncated, info
