@@ -10,8 +10,12 @@ from typing import List, Optional, Tuple
 
 class OccupancyMap:
     """Log-odds occupancy grid with Bresenham ray-casting."""
+    """Log-odds occupancy grid with Bresenham ray-casting."""
 
     FREE_LOG_ODDS = -0.5
+    OCC_LOG_ODDS  =  1.5
+    MIN_LOG_ODDS  = -5.0
+    MAX_LOG_ODDS  =  5.0
     OCC_LOG_ODDS  =  1.5
     MIN_LOG_ODDS  = -5.0
     MAX_LOG_ODDS  =  5.0
@@ -38,6 +42,7 @@ class OccupancyMap:
         return 0 <= row < self.ny and 0 <= col < self.nx
 
     def update(self, robot_pos: np.ndarray, scan_points: np.ndarray, max_range: float = 10.0) -> None:
+    def update(self, robot_pos: np.ndarray, scan_points: np.ndarray, max_range: float = 10.0) -> None:
         for p in scan_points:
             dist = np.linalg.norm(p - robot_pos)
             if dist > max_range or dist < 0.01:
@@ -47,12 +52,14 @@ class OccupancyMap:
                 self.log_odds[er, ec] = np.clip(
                     self.log_odds[er, ec] + self.OCC_LOG_ODDS,
                     self.MIN_LOG_ODDS, self.MAX_LOG_ODDS,
+                    self.MIN_LOG_ODDS, self.MAX_LOG_ODDS,
                 )
             rr, rc = self.world_to_cell(robot_pos)
             for row, col in self._bresenham(rr, rc, er, ec):
                 if self.in_bounds(row, col):
                     self.log_odds[row, col] = np.clip(
                         self.log_odds[row, col] + self.FREE_LOG_ODDS,
+                        self.MIN_LOG_ODDS, self.MAX_LOG_ODDS,
                         self.MIN_LOG_ODDS, self.MAX_LOG_ODDS,
                     )
 
@@ -64,6 +71,7 @@ class OccupancyMap:
     def _bresenham(r0: int, c0: int, r1: int, c1: int) -> List[Tuple[int, int]]:
         cells = []
         dr, dc = abs(r1 - r0), abs(c1 - c0)
+        dr, dc = abs(r1 - r0), abs(c1 - c0)
         r, c = r0, c0
         sr = 1 if r1 > r0 else -1
         sc = 1 if c1 > c0 else -1
@@ -74,6 +82,7 @@ class OccupancyMap:
                 err -= dr
                 if err < 0:
                     r += sr; err += dc
+                    r += sr; err += dc
                 c += sc
         else:
             err = dr // 2
@@ -81,6 +90,7 @@ class OccupancyMap:
                 cells.append((r, c))
                 err -= dc
                 if err < 0:
+                    c += sc; err += dr
                     c += sc; err += dr
                 r += sr
         return cells
@@ -131,10 +141,15 @@ class SLAMMap:
             extent = [ox, ox + self.occ_map.nx * res, oy, oy + self.occ_map.ny * res]
             ax.imshow(prob, origin="lower", extent=extent, cmap="gray_r",
                       vmin=0.0, vmax=1.0, interpolation="nearest")
+            extent = [ox, ox + self.occ_map.nx * res, oy, oy + self.occ_map.ny * res]
+            ax.imshow(prob, origin="lower", extent=extent, cmap="gray_r",
+                      vmin=0.0, vmax=1.0, interpolation="nearest")
 
             if self._trajectory:
                 pos = np.array(self._trajectory)
                 ax.plot(pos[:, 0], pos[:, 1], "r-", linewidth=1.0, label="trajectory")
+                ax.scatter([pos[0, 0]], [pos[0, 1]], c="lime", s=60, zorder=5, label="start")
+                ax.scatter([pos[-1, 0]], [pos[-1, 1]], c="red", s=60, marker="*", zorder=5, label="end")
                 ax.scatter([pos[0, 0]], [pos[0, 1]], c="lime", s=60, zorder=5, label="start")
                 ax.scatter([pos[-1, 0]], [pos[-1, 1]], c="red", s=60, marker="*", zorder=5, label="end")
 
