@@ -1,6 +1,6 @@
-﻿"""Shared base class for GRU/LSTM actor-critic networks."""
+"""Shared base class for GRU/LSTM actor-critic networks."""
 
-from typing import TYPE_CHECKING, Dict, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -313,13 +313,26 @@ class RecurrentActorCriticBase(nn.Module):
             raise ValueError(f"done_mask must be scalar, [T], or [B, T], got shape {tuple(mask.shape)}")
         return mask
 
+    def encode_only(
+        self,
+        observation: Union[np.ndarray, torch.Tensor, Dict[str, Union[np.ndarray, torch.Tensor]]],
+        recurrent_state: Optional[RecurrentState] = None,
+        done_mask: Optional[Union[np.ndarray, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, RecurrentState]:
+        latent, batch_size, seq_len = self._encode_observation(observation, recurrent_state, done_mask)
+        device = latent.device
+        if recurrent_state is None:
+            recurrent_state = self.get_initial_state(batch_size, device=device)
+        mask = self._prepare_done_mask(done_mask, batch_size, seq_len, device)
+        recurrent_features, next_state = self._run_recurrent(latent, recurrent_state, mask, batch_size, seq_len)
+        return recurrent_features, next_state
+
     def forward(
         self,
         observation: Union[np.ndarray, torch.Tensor, Dict[str, Union[np.ndarray, torch.Tensor]]],
         recurrent_state: Optional[RecurrentState] = None,
         done_mask: Optional[Union[np.ndarray, torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, RecurrentState]:
-        """Encode observation, run recurrent core, return policy, values, and next state."""
         latent, batch_size, seq_len = self._encode_observation(observation, recurrent_state, done_mask)
         device = latent.device
         if recurrent_state is None:
@@ -340,3 +353,6 @@ class RecurrentActorCriticBase(nn.Module):
             policy_output = policy_output[:, 0]
             state_value = state_value[:, 0]
         return policy_output, state_value, next_state
+
+
+

@@ -26,8 +26,8 @@ class PPODefaults:
 class SACDefaults:
     episodes = 2500
     update_after_steps = 2000
-    updates_per_step = 2          # kept for backward-compat; overridden by gradient_steps_per_episode
-    gradient_steps_per_episode = 10  # total gradient steps per episode (controls wall-clock speed)
+    updates_per_step = 2          
+    gradient_steps_per_episode = 10  
     save_every = 100
     gamma = 0.99
     tau = 0.005
@@ -43,6 +43,6 @@ class SACDefaults:
     recurrent_layers = 1
     log_std_min = -5.0
     log_std_max = 2.0
-    replay_capacity = 8192
+    replay_capacity = 16384
     replay_batch_size = 32
     min_replay_sequences = 256
