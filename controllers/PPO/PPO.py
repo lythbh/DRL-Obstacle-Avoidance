@@ -425,6 +425,7 @@ def train(config=None):
         done = False
         ep_step = 0
         ep_obs, ep_act, ep_lp, ep_rew = [], [], [], []
+        ep_speeds = []
         ep_end_reason = "max_steps"
         ep_goal = ep_success = False
         recurrent_state = agent.get_initial_state(batch_size=1)
@@ -439,6 +440,7 @@ def train(config=None):
             total_steps += 1
             ep_goal = ep_goal or bool(info.get("goal_reached", False))
             ep_success = bool(info.get("success", False))
+            ep_speeds.append(float(info.get("speed_norm", 0.0)))
             if done:
                 reason = info.get("reset_reason", "")
                 ep_end_reason = reason if reason else ("max_steps" if truncated else ep_end_reason)
@@ -476,6 +478,13 @@ def train(config=None):
         obs_stats = MetricsLogger.compute_obs_stats(ep_obs)
         ep_val_residual = MetricsLogger.compute_value_residual(ep_val_np, ep_ret)
 
+        # Learning rate warmup for first 50 episodes (extended from 10).
+        # Applied BEFORE the PPO update so that the update uses the correct warmup LR.
+        if episode < 50:
+            warmup_lr = config.learning_rate * (episode + 1) / 50.0
+            for pg in agent.optimizer.param_groups:
+                pg['lr'] = warmup_lr
+
         all_update_metrics = []
         if (episode + 1) % config.update_every == 0:
             batch_metrics = agent.update(rollout)
@@ -490,14 +499,10 @@ def train(config=None):
 
         agg_upd = MetricsLogger.aggregate_update_metrics(all_update_metrics)
 
-        # Learning rate warmup for first 50 episodes (extended from 10)
-        if episode < 50:
-            warmup_lr = config.learning_rate * (episode + 1) / 50.0
-            for pg in agent.optimizer.param_groups:
-                pg['lr'] = warmup_lr
-        # Entropy coefficient decays linearly over training to phase out exploration
+        # Entropy coefficient decays linearly over training, maintaining some
+        # exploration throughout to prevent premature convergence to poor policies.
         decay_frac = min(1.0, episode / max(1, config.episodes))
-        agent.config.entropy_coef = d.PPODefaults.entropy_coef * (1.0 - 0.9 * decay_frac)
+        agent.config.entropy_coef = d.PPODefaults.entropy_coef * (1.0 - 0.5 * decay_frac)
 
         ep_sum = sum(ep_rew)
         rew_w.append(ep_sum)
@@ -528,9 +533,10 @@ def train(config=None):
         g10 = float(np.mean(gol_w[-10:]))
         c10 = float(np.mean(col_w[-10:]))
         t10 = float(np.mean(to_w[-10:]))
+        avg_spd = float(np.mean(ep_speeds)) * config.max_speed if ep_speeds else 0.0
         elapsed = time.perf_counter() - start_time
         ckpt_note = f" ckpt={'+'.join(ckpt_flags)}" if ckpt_flags else ""
-        print(f"[TRAIN][PPO] ep={episode + 1:03d}/{config.episodes} r={ep_sum:8.2f} avg10={r10:8.2f} steps={ep_step:4d} succ10={s10:4.2f} touch10={g10:4.2f} col10={c10:4.2f} to10={t10:4.2f} min_d={env.min_episode_distance:5.2f} end={ep_end_reason} t={elapsed:7.1f}s{ckpt_note}", flush=True)
+        print(f"[TRAIN][PPO] ep={episode + 1:03d}/{config.episodes} r={ep_sum:8.2f} avg10={r10:8.2f} steps={ep_step:4d} succ10={s10:4.2f} touch10={g10:4.2f} col10={c10:4.2f} to10={t10:4.2f} min_d={env.min_episode_distance:5.2f} avg_spd={avg_spd:4.2f}m/s end={ep_end_reason} t={elapsed:7.1f}s{ckpt_note}", flush=True)
 
         metrics_logger.log_episode(
             episode=episode + 1,
@@ -543,7 +549,7 @@ def train(config=None):
             collision=int(ep_end_reason == "collision"),
             timeout=int(ep_end_reason == "max_steps"),
             min_dist=round(env.min_episode_distance, 4),
-            avg_speed_ms=0.0,
+            avg_speed_ms=round(avg_spd, 3),
             end_reason=ep_end_reason,
             elapsed_s=round(elapsed, 1),
             recurrent_cell=config.recurrent_cell,
