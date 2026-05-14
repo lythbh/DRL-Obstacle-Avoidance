@@ -1,4 +1,4 @@
-﻿"""Soft Actor-Critic controller for the ALTINO Webots task."""
+"""Soft Actor-Critic controller for the ALTINO Webots task."""
 from __future__ import annotations
 
 import sys, time

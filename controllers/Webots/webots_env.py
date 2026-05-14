@@ -22,8 +22,8 @@ from controllers.common.defaults import (
     REW_MOTION_SCALE as MOTION_REWARD_SCALE,
     REW_NEW_BEST_DISTANCE_BONUS as NEW_BEST_DISTANCE_BONUS,
     REW_PROGRESS_SCALE as PROGRESS_REWARD_SCALE,
-    REW_PROXIMITY_SCALE as PROXIMITY_REWARD_SCALE,
     REW_PROXIMITY_RADIUS as PROXIMITY_RADIUS,
+    REW_PROXIMITY_SCALE as PROXIMITY_REWARD_SCALE,
     REW_SAFETY_SCALE as SAFETY_REWARD_SCALE,
     REW_SLOW_SPEED_PENALTY as SLOW_SPEED_PENALTY,
     REW_SLOW_SPEED_THRESHOLD as SLOW_SPEED_THRESHOLD,
@@ -118,7 +118,7 @@ class SLAMProcessor:
 
     def reset_map(self) -> None:
         """Clear occupancy grid map and reset SLAM state."""
-        if self.enabled:
+        if self.save_episodes:
             self.slam_map = SLAMMap(map_resolution=0.05)
 
     def save_episode(self, run_folder: str, episode: int, reward: float = 0.0) -> None:
@@ -172,12 +172,6 @@ class SLAMProcessor:
         imu_state = self.imu_proc.step(gyro, accel)
         self.iekf.propagate_odom(cmd_speed_rads * self.WHEEL_RADIUS, float(gyro[2]), self._dt)
 
-        heading = self.iekf.state.heading
-        pos = gps_pos if gps_pos is not None else self.iekf.state.position
-        pts_2d = self._scan_to_world(raw_ranges, pos, heading)
-        self.slam_map.try_add_keyframe(
-            float(pos[0]), float(pos[1]), heading, scan_points=pts_2d
-        )
         if self.slam_map is not None:
             pos = gps_pos if gps_pos is not None else self.iekf.state.position
             pts_2d = self._scan_to_world(raw_ranges, pos, self.iekf.state.heading)
@@ -439,6 +433,8 @@ class RewardComputer:
         self.high_speed_threshold = float(getattr(config, "high_speed_threshold", HIGH_SPEED_THRESHOLD))
         self.high_speed_bonus = float(getattr(config, "high_speed_bonus", HIGH_SPEED_BONUS))
         self.new_best_distance_bonus = float(config.new_best_distance_bonus)
+        self.proximity_radius = float(getattr(config, "proximity_radius", PROXIMITY_RADIUS))
+        self.proximity_reward_scale = float(getattr(config, "proximity_reward_scale", PROXIMITY_REWARD_SCALE))
         self.step_penalty = float(config.step_penalty)
         self.goal_threshold = float(config.goal_threshold)
         self.goal_stop_speed_threshold = float(getattr(config, "goal_stop_speed_threshold", 0.1))
@@ -550,31 +546,6 @@ class WebotsEnv:
         self.backlights = self.robot.supervisor.getDevice("backlights")
 
         self.reward_computer = RewardComputer(config)
-        self.reward_computer = RewardComputer(
-            self._endpoint,
-            reference_distance=self._reference_distance,
-            collision_reward=config.collision_penalty,
-            progress_scale=config.progress_reward_scale,
-            distance_reward_scale=config.distance_reward_scale,
-            heading_reward_scale=config.heading_reward_scale,
-            safety_reward_scale=config.safety_reward_scale,
-            motion_reward_scale=config.motion_reward_scale,
-            slow_speed_threshold=float(getattr(config, "slow_speed_threshold", SLOW_SPEED_THRESHOLD)),
-            slow_speed_penalty=float(getattr(config, "slow_speed_penalty", SLOW_SPEED_PENALTY)),
-            high_speed_threshold=float(getattr(config, "high_speed_threshold", HIGH_SPEED_THRESHOLD)),
-            high_speed_bonus=float(getattr(config, "high_speed_bonus", HIGH_SPEED_BONUS)),
-            new_best_distance_bonus=config.new_best_distance_bonus,
-            proximity_reward_scale=float(getattr(config, "proximity_reward_scale", PROXIMITY_REWARD_SCALE)),
-            proximity_radius=float(getattr(config, "proximity_radius", PROXIMITY_RADIUS)),
-            step_penalty=config.step_penalty,
-            goal_threshold=config.goal_threshold,
-            goal_stop_speed_threshold=float(getattr(config, "goal_stop_speed_threshold", 0.1)),
-            goal_success_reward=config.goal_success_reward,
-            goal_stop_bonus=config.goal_stop_bonus,
-            goal_hold_reward=config.goal_hold_reward,
-            goal_speed_penalty=config.goal_speed_penalty,
-            goal_overshoot_penalty=config.goal_overshoot_penalty,
-        )
 
         self.current_step = 0
         self.episode_reward = 0.0
@@ -660,13 +631,12 @@ class WebotsEnv:
             quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
 
         observation = np.concatenate([
-            lidar_sectors, pos, direction_features, accel_norm, gyro_norm, quat,
-            self._occupancy_grid_observation(),
             lidar_sectors,
             direction_features,
             accel_norm,
             gyro_norm,
             quat,
+            self._occupancy_grid_observation(),
         ]).astype(np.float32)
         if observation.size != self.observation_size:
             raise RuntimeError(
@@ -678,7 +648,7 @@ class WebotsEnv:
         """Reset environment to start state, return initial observation and info."""
         self.robot.slam.reset_map()
         self._episode_count += 1
-        self.robot.motors.stop()
+        self.robot.stop()
 
         if getattr(self.config, "randomize_goal", False):
             y_range = float(getattr(self.config, "goal_y_range", 1.5))
@@ -686,6 +656,8 @@ class WebotsEnv:
             self._endpoint = new_goal
             self.reward_computer.endpoint = new_goal
             self.robot.slam._goal = tuple(new_goal.tolist())
+            start_xy = np.array(self.config.start_position[:2], dtype=np.float32)
+            self._reference_distance = float(np.linalg.norm(start_xy - new_goal))
 
         self.robot.randomize_obstacles()
         self.robot.reset_position()

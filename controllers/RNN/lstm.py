@@ -1,4 +1,4 @@
-﻿"""LSTM actor-critic used by shared RL controllers."""
+"""LSTM actor-critic used by shared RL controllers."""
 
 from typing import Optional, Tuple
 

@@ -1,4 +1,4 @@
-﻿"""Shared base class for GRU/LSTM actor-critic networks."""
+"""Shared base class for GRU/LSTM actor-critic networks."""
 
 from torch import nn
 from typing import Optional, Tuple, Union

@@ -1,4 +1,4 @@
-﻿"""GRU actor-critic used by shared RL controllers."""
+"""GRU actor-critic used by shared RL controllers."""
 
 from typing import Optional
 from torch import nn

@@ -1,4 +1,4 @@
-﻿"""PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
+"""PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
 import sys, time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -77,14 +77,8 @@ class Config:
     max_steering_angle: float = d.ENV_MAX_STEERING_ANGLE
     min_speed: float = d.ENV_MIN_SPEED
 
-    enable_slam: bool = ENABLE_SLAM
-    save_slam_plots: bool = SAVE_SLAM_PLOTS
-    randomize_goal: bool = False   # enable after robot reliably reaches the fixed goal (~20-30% success)
-    goal_y_range: float = 1.5      # goal y sampled from [-goal_y_range, +goal_y_range]
-    force_cpu: bool = FORCE_CPU
-    
-    max_steering_angle: float = MAX_STEERING_ANGLE
-    min_speed: float = MIN_SPEED
+    randomize_goal: bool = False
+    goal_y_range: float = 1.5
     start_position: Optional[List[float]] = None
     start_rotation: Optional[List[float]] = None
     start_position_noise: float = d.ENV_START_POSITION_NOISE
