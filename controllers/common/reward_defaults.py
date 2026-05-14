@@ -6,30 +6,30 @@ IMU_FEATURE_DIM = 10
 
 MAX_STEPS = 4000
 COLLISION_THRESHOLD = 0.1
-LOW_SCORE_THRESHOLD = -400.0
+LOW_SCORE_THRESHOLD = -10000.0  # effectively disabled — collision and max_steps handle termination
 ENDPOINT = (2.2, 0.0)
-GOAL_THRESHOLD = 0.3
-GOAL_STOP_SPEED_THRESHOLD = 0.15
+GOAL_THRESHOLD = 0.5
+GOAL_STOP_SPEED_THRESHOLD = 0.9
 
 COLLISION_PENALTY = -35.0
 PROGRESS_REWARD_SCALE = 1.2
 DISTANCE_REWARD_SCALE = 0.02
 HEADING_REWARD_SCALE = 0.03
-SAFETY_REWARD_SCALE = 0.03
+SAFETY_REWARD_SCALE = 0.01
 MOTION_REWARD_SCALE = 0.05
 SLOW_SPEED_THRESHOLD = 0.25   # speed_norm below this (< 25 % of max = 1.5 m/s) is "too slow"
-SLOW_SPEED_PENALTY = -0.04    # per-step penalty while speed_norm < SLOW_SPEED_THRESHOLD
+SLOW_SPEED_PENALTY = -0.015   # per-step penalty while speed_norm < SLOW_SPEED_THRESHOLD
 HIGH_SPEED_THRESHOLD = 0.6    # speed_norm above this (> 60 % of max = 3.6 m/s) earns a bonus
 HIGH_SPEED_BONUS = 0.03       # per-step bonus while speed_norm > HIGH_SPEED_THRESHOLD
 NEW_BEST_DISTANCE_BONUS = 0.02
-PROXIMITY_REWARD_SCALE = 0.06  # per-step bonus scaling with closeness when within 1.5 m of goal
+PROXIMITY_REWARD_SCALE = 0.1  # per-step bonus scaling with closeness when within 1.5 m of goal
 PROXIMITY_RADIUS = 1.5
 STEP_PENALTY = -0.003
-GOAL_SUCCESS_REWARD = 60.0
+GOAL_SUCCESS_REWARD = 600.0
 GOAL_STOP_BONUS = 40.0
 GOAL_HOLD_REWARD = 0.0
-GOAL_SPEED_PENALTY = -10.0
-GOAL_OVERSHOOT_PENALTY = -12.0
+GOAL_SPEED_PENALTY = 0
+GOAL_OVERSHOOT_PENALTY = 0
 REWARD_SCALE = 0.1  # Reward scaling for numerical stability (used by both PPO and SAC)
 
 ENABLE_SLAM = True

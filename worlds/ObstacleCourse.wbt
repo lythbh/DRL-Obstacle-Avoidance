@@ -267,12 +267,12 @@ DEF BARRIER_TOP Solid {
         roughness 0.8
       }
       geometry Box {
-        size 0.1 2.4 0.5
+        size 0.2 2.4 0.5
       }
     }
   ]
   boundingObject Box {
-    size 0.1 3.65 0.5
+    size 0.2 2.4 0.5
   }
   name "barrier_top"
 }
@@ -286,12 +286,12 @@ DEF BARRIER_BOTTOM Solid {
         roughness 0.8
       }
       geometry Box {
-        size 0.1 2.4 0.5
+        size 0.2 2.4 0.5
       }
     }
   ]
   boundingObject Box {
-    size 0.1 3.65 0.5
+    size 0.2 2.4 0.5
   }
   name "barrier_bottom"
 }
