@@ -1,4 +1,4 @@
-# Reproducible seed helpers shared across all controllers.
+"""Reproducible seed helpers shared across all controllers."""
 
 import random
 import numpy as np
