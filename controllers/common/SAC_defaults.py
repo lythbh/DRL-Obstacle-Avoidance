@@ -28,12 +28,12 @@ SLAM_SAVE_PLOTS = False
 SLAM_FORCE_CPU = True
 
 # --- Reward ---
-REW_COLLISION_PENALTY = -200.0      # CHANGED: -400 -> -200 (still 2x original; collision must hurt more than proximity)
+REW_COLLISION_PENALTY = -250.0      # CHANGED: -200 -> -250 (make crash costlier than a near-miss episode)
 REW_PROGRESS_SCALE = 3.0
 REW_DISTANCE_SCALE = 0.05
-REW_HEADING_SCALE = 0.35            # CHANGED: 0.25 -> 0.35 (restore goal-seeking signal; 0.5 was too strong, 0.25 too weak)
-REW_SAFETY_SCALE = 0.8              # CHANGED: 2.0 -> 0.8 (moderate increase over 0.5; 2.0 was lethal)
-REW_MOTION_SCALE = 0.2              # CHANGED: 0.1 -> 0.2 (compromise; keep some forward incentive)
+REW_HEADING_SCALE = 0.3             # CHANGED: 0.35 -> 0.3 (slightly less "beeline" pressure)
+REW_SAFETY_SCALE = 1.0              # CHANGED: 0.8 -> 1.0 (modest boost to obstacle aversion)
+REW_MOTION_SCALE = 0.15             # CHANGED: 0.2 -> 0.15 (less reward for driving fast)
 REW_SLOW_SPEED_THRESHOLD = 0.25
 REW_SLOW_SPEED_PENALTY = -0.02
 REW_HIGH_SPEED_THRESHOLD = 0.6
@@ -42,10 +42,10 @@ REW_NEW_BEST_DISTANCE_BONUS = 0.3   # CHANGED: 0.5 -> 0.3 (exploration nudge wit
 REW_STEP_PENALTY = -0.01            # CHANGED: -0.03 -> -0.01 (revert; time pressure was compounding the death spiral)
 REW_GOAL_SUCCESS = 100.0
 REW_GOAL_STOP_BONUS = 200.0
-REW_GOAL_SPEED_PENALTY = -10.0
+REW_GOAL_SPEED_PENALTY = -20.0      # CHANGED: -10 -> -20 (stronger incentive to brake in goal zone)
 REW_GOAL_OVERSHOOT_PENALTY = -12.0
 REW_SCALE = 0.5
-REW_PROXIMITY_SCALE = 0.8             # CHANGED: 0.6 -> 0.8
+REW_PROXIMITY_SCALE = 1.2           # CHANGED: 0.8 -> 1.2 (reward careful final approach more)
 REW_PROXIMITY_RADIUS = 2.0            # CHANGED: 1.5 -> 2.0 (earlier final-approach bonus)
 
 # --- Training ---
@@ -55,20 +55,20 @@ class RecurrentDefaults:
     sequence_stride = 16
 
 class SACDefaults:
-    episodes = 2500
+    episodes = 750
     seed = 42
     update_after_steps = 2000
-    gradient_steps_per_episode = 16       # CHANGED: 32 -> 16 (less overfitting)
+    gradient_steps_per_episode = 12   # CHANGED: 16 -> 12 (reduce replay overfitting)
     save_every = 100
     gamma = 0.99
-    tau = 0.005                           # CHANGED: 0.001 -> 0.005 (smoother target updates)
-    target_update_interval = 2            # CHANGED: 1 -> 2 (update targets less frequently)
+    tau = 0.003                       # CHANGED: 0.005 -> 0.003 (softer target networks)
+    target_update_interval = 4        # CHANGED: 2 -> 4 (halve target-update frequency)
     actor_lr = 2e-4                       # CHANGED: 3e-4 -> 2e-4 (slightly more conservative)
     critic_lr = 2e-4                      # CHANGED: 3e-4 -> 2e-4
-    alpha_lr = 0.0005                     # CHANGED: 0.0003 -> 0.0005 (slightly faster decay for precision)
-    initial_alpha = 0.5                   # CHANGED: 1 -> 0.5 (less initial noise, balanced by slower decay)
+    alpha_lr = 0.0002                 # CHANGED: 0.0005 -> 0.0002 (2.5x slower decay)
+    initial_alpha = 0.7               # CHANGED: 0.5 -> 0.7 (more initial policy noise)
     auto_entropy_tuning = True
-    target_entropy_scale = 0.5            # CHANGED: 0.4 -> 0.5 (maintain slightly more exploration)
+    target_entropy_scale = 0.6        # CHANGED: 0.5 -> 0.6 (higher entropy floor)
     hidden_size = 128
     latent_size = 128
     recurrent_cell = "gru"
