@@ -1,4 +1,4 @@
-"""Consolidated defaults for environment, SLAM, rewards, and training."""
+﻿"""Consolidated defaults for environment, SLAM, rewards, and training."""
 
 # --- Environment observation / physics ---
 ENV_LIDAR_SECTOR_DIM = 16
@@ -7,7 +7,7 @@ ENV_IMU_FEATURE_DIM = 10
 ENV_OCCUPANCY_GRID_SHAPE = None
 ENV_MAX_STEPS = 4000
 ENV_COLLISION_THRESHOLD = 0.1
-ENV_LOW_SCORE_THRESHOLD = -2000.0      # relaxed from -500 — let episodes run full duration to discover goal
+ENV_LOW_SCORE_THRESHOLD = -2000.0
 ENV_ENDPOINT = (2.0, 0.0)
 ENV_GOAL_THRESHOLD = 0.3
 ENV_GOAL_STOP_SPEED_THRESHOLD = 0.15
@@ -28,10 +28,10 @@ SLAM_SAVE_PLOTS = False
 SLAM_FORCE_CPU = True
 
 # --- Reward ---
-REW_COLLISION_PENALTY = -200.0
-REW_PROGRESS_SCALE = 5.0              # increased from 2.0 — stronger incentive for forward progress
-REW_DISTANCE_SCALE = 0.15              # increased from 0.15 — stronger penalty for distance from goal
-REW_HEADING_SCALE = 0.05               # increased from 0.05 — stronger heading alignment
+REW_COLLISION_PENALTY = -100.0
+REW_PROGRESS_SCALE = 3.0
+REW_DISTANCE_SCALE = 0.1
+REW_HEADING_SCALE = 0.05
 REW_SAFETY_SCALE = 0.15
 REW_MOTION_SCALE = 0.02
 REW_SLOW_SPEED_THRESHOLD = 0.25
@@ -39,53 +39,53 @@ REW_SLOW_SPEED_PENALTY = -0.02
 REW_HIGH_SPEED_THRESHOLD = 0.6
 REW_HIGH_SPEED_BONUS = 0.05
 REW_NEW_BEST_DISTANCE_BONUS = 0.05
-REW_STEP_PENALTY = -0.01              # was 0.0 — time pressure to reach goal faster
-REW_GOAL_SUCCESS = 200.0
-REW_GOAL_STOP_BONUS = 100.0
+REW_STEP_PENALTY = -0.005
+REW_GOAL_SUCCESS = 500.0
+REW_GOAL_STOP_BONUS = 200.0
 REW_GOAL_HOLD = 0.0
 REW_GOAL_SPEED_PENALTY = -10.0
 REW_GOAL_OVERSHOOT_PENALTY = -12.0
-REW_SCALE = 1.0                       # full reward signal � per-step progress rewards need magnitude to guide critic
-REW_PROXIMITY_SCALE = 0.6              # doubled from 0.3 — stronger incentive in final approach zone
+REW_SCALE = 1.0
+REW_PROXIMITY_SCALE = 0.6
 REW_PROXIMITY_RADIUS = 1.5
 
 # --- Training ---
 class RecurrentDefaults:
-    sequence_length = 16
-    burn_in = 8                         # increased from 4 � more steps for recurrent state to warm up from zero-init
-    sequence_stride = 8
+    sequence_length = 32
+    burn_in = 8
+    sequence_stride = 16
 
 class PPODefaults:
     episodes = 2500
-    update_every = 4                    # was 1 � collect multiple episodes for more diverse gradient estimates
+    update_every = 4
     epochs = 2
     batch_size = 64
     save_every = 100
     learning_rate = 5e-4
-    entropy_coef = 0.01                 # was 0.005 � more exploration; critical before critic converges
+    entropy_coef = 0.01
     gae_lambda = 0.95
     hidden_size = 128
     latent_size = 128
     lstm_hidden_size = 128
     lstm_layers = 1
     recurrent_cell = "gru"
-    clip_value_loss = False            # was True — value clipping blocks critic gradient when returns are large
+    clip_value_loss = False
     max_grad_norm = 0.5
 
 class SACDefaults:
     episodes = 2500
     update_after_steps = 2000
     updates_per_step = 2
-    gradient_steps_per_episode = 2
+    gradient_steps_per_episode = 4
     save_every = 100
     gamma = 0.99
-    tau = 0.01                          # reduced from 0.01 � slower target tracking for more stable Q-learning
-    actor_lr = 5e-4                      # was 3e-4 � faster actor learning
-    critic_lr = 1e-4                     # was 3e-4 � faster critic learning
-    alpha_lr = 0.001                     # reduced from 0.003 � slower alpha decay to maintain exploration longer
-    initial_alpha = 0.5                # increased from 0.2 — start with more exploration that decays
+    tau = 0.01
+    actor_lr = 5e-4
+    critic_lr = 1e-4
+    alpha_lr = 0.001
+    initial_alpha = 0.5
     auto_entropy_tuning = True
-    target_entropy_scale = 0.8           # increased from 0.5 � maintain more entropy/stochasticity in policy
+    target_entropy_scale = 0.8
     hidden_size = 128
     latent_size = 128
     recurrent_cell = "gru"

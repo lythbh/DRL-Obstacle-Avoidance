@@ -1,0 +1,2 @@
+algorithm,recurrent_cell,hidden_size,latent_size,lstm_hidden_size,lstm_layers,sequence_length,burn_in,sequence_stride,gamma,gae_lambda,epsilon,learning_rate,entropy_coef,epochs,batch_size,update_every,actor_lr,critic_lr,alpha_lr,initial_alpha,auto_entropy_tuning,target_entropy_scale,tau,replay_capacity,replay_batch_size,min_replay_sequences,update_after_steps,log_std_min,log_std_max,obs_size,action_dim
+ppo,gru,128,128,128,1,16,8,8,0.99,0.95,0.1,0.0005,0.01,2,64,4,,,,,,,,,,,,,,31,2

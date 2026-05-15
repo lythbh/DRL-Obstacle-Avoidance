@@ -1,4 +1,4 @@
-"""PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
+﻿"""PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
 import sys, time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -34,7 +34,7 @@ class Config:
     save_every: int = d.PPODefaults.save_every
     gamma: float = 0.99
     gae_lambda: float = d.PPODefaults.gae_lambda
-    epsilon: float = 0.1  # reduced from 0.2 — tighter clipping for more stable updates
+    epsilon: float = 0.1  # reduced from 0.2 â€” tighter clipping for more stable updates
     learning_rate: float = d.PPODefaults.learning_rate
     entropy_coef: float = d.PPODefaults.entropy_coef
     clip_value_loss: bool = d.PPODefaults.clip_value_loss
@@ -288,7 +288,7 @@ class PPOAgent:
         encoder_clip = [p for n, p in self.model.named_parameters()
                         if "policy_head" not in n and "value_head" not in n and rnn_attr not in n]
         nn.utils.clip_grad_norm_(actor_clip, max_norm=0.5)
-        nn.utils.clip_grad_norm_(critic_clip, max_norm=5.0)  # raised from 1.0 — critic has only 2 params, needs more room
+        nn.utils.clip_grad_norm_(critic_clip, max_norm=5.0)  # raised from 1.0 â€” critic has only 2 params, needs more room
         nn.utils.clip_grad_norm_(rnn_clip, max_norm=1.0)
         nn.utils.clip_grad_norm_(encoder_clip, max_norm=0.5)
         self.optimizer.step()
@@ -453,7 +453,7 @@ def train(config=None):
         ep_obs_arr = np.array(ep_obs, dtype=np.float32)
         with torch.no_grad():
             _, ep_values, _ = agent.model(
-                ep_obs_arr, recurrent_state=agent.get_initial_state(batch_size=1),
+                ep_obs_arr, recurrent_state=None,
                 done_mask=np.concatenate(([1.0], np.zeros(len(ep_rew) - 1, dtype=np.float32))),
             )
             ep_val_np = ep_values.detach().cpu().numpy().reshape(-1)

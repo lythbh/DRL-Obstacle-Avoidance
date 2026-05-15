@@ -1,4 +1,4 @@
-"""Soft Actor-Critic controller for the ALTINO Webots task."""
+﻿"""Soft Actor-Critic controller for the ALTINO Webots task."""
 from __future__ import annotations
 
 import sys, time
@@ -354,7 +354,7 @@ class SACAgent:
         critic_loss.backward()
         critic_params = list(self.q1_enc.parameters()) + list(self.q1_head.parameters()) + list(self.q2_enc.parameters()) + list(self.q2_head.parameters())
         grad_norm_critic = MetricsLogger.compute_grad_norm(critic_params)
-        nn.utils.clip_grad_norm_(critic_params, max_norm=1.0)  # reduced from 5.0 — tighter clipping to prevent Q-value drift
+        nn.utils.clip_grad_norm_(critic_params, max_norm=1.0)  # reduced from 5.0 â€” tighter clipping to prevent Q-value drift
         self.critic_optimizer.step()
 
         new_action, log_prob, _ = self._sample_policy(batch["obs"], done_mask=done_mask_obs, deterministic=False)
@@ -485,11 +485,6 @@ def train(config=None):
         ep_step = 0
 
         while not done:
-            # Reset recurrent state at sequence boundaries to match training context window.
-            # Without this, actor uses full-episode context (4000 steps) while critic was
-            # trained on zero-initialized 16-step sequences, creating a mismatch.
-            if ep_step > 0 and ep_step % config.sequence_length == 0:
-                actor_state = agent.get_initial_state(batch_size=1)
             action, actor_state = agent.select_action(obs, actor_state, done=prev_done, deterministic=False)
             next_obs, reward, terminated, truncated, info = env.step(action)
             ep_step += 1
@@ -604,6 +599,9 @@ def train(config=None):
 
 if __name__ == "__main__":
     train()
+
+
+
 
 
 
