@@ -33,9 +33,9 @@ class Config:
     epochs: int = d.PPODefaults.epochs
     batch_size: int = d.PPODefaults.batch_size
     save_every: int = d.PPODefaults.save_every
-    gamma: float = 0.99
+    gamma: float = d.PPODefaults.gamma
     gae_lambda: float = d.PPODefaults.gae_lambda
-    epsilon: float = 0.1  # reduced from 0.2 â€” tighter clipping for more stable updates
+    epsilon: float = d.PPODefaults.epsilon 
     learning_rate: float = d.PPODefaults.learning_rate
     entropy_coef: float = d.PPODefaults.entropy_coef
     clip_value_loss: bool = d.PPODefaults.clip_value_loss
