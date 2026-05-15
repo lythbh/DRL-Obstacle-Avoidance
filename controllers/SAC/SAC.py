@@ -12,9 +12,10 @@ from torch import nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from controllers.Webots import WebotsEnv, _init_supervisor
+from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
+from controllers.common.SAC_rewards import SACRewardComputer
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
-import controllers.common.defaults as d
+import controllers.common.SAC_defaults as d
 from controllers.common.checkpoints import (
     run_checkpoint_dir as _run_checkpoint_dir,
     run_checkpoint_path as _run_checkpoint_path,
@@ -313,7 +314,7 @@ class SACAgent:
                 action = action.squeeze(1)
             elif features.ndim == 3 and action.ndim == 2:
                 action = action.unsqueeze(1)
-        q_val = q_head(torch.cat([features, action], dim=-1)); return torch.clamp(q_val, -200.0, 300.0), next_state
+        q_val = q_head(torch.cat([features, action], dim=-1)); return q_val, next_state
 
     def update(self, batch):
         """Perform SAC training update, returning a dict with all loss components, gradient norms, and diagnostics."""
@@ -324,7 +325,7 @@ class SACAgent:
         learn_mask = self._sequence_loss_mask(valid_mask, min(self.config.burn_in, batch["obs"].shape[1] - 1))
         done_flags = batch["dones"].squeeze(-1)
         done_mask_obs = torch.zeros_like(done_flags)
-        done_mask_obs[:, 0] = 1.0
+        done_mask_obs[:, 0] = done_flags[:, 0]
         if done_flags.shape[1] > 1:
             done_mask_obs[:, 1:] = done_flags[:, :-1]
         done_mask_next = torch.cat([torch.ones_like(done_flags[:, :1]), done_flags], dim=1)
@@ -365,7 +366,7 @@ class SACAgent:
 
         alpha_loss = torch.tensor(0.0, device=self.device)
         if self.config.auto_entropy_tuning:
-            alpha_loss = -self._masked_mean(self.log_alpha * (log_prob + self.target_entropy).detach(), learn_mask)
+            alpha_loss = self._masked_mean(self.log_alpha * (log_prob + self.target_entropy).detach(), learn_mask)
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
@@ -452,7 +453,31 @@ def train(config=None):
         config = Config()
 
     _init_supervisor()
-    env = WebotsEnv(config)
+    reward_computer = SACRewardComputer(
+        endpoint=config.endpoint,
+        collision_penalty=config.collision_penalty,
+        progress_reward_scale=config.progress_reward_scale,
+        distance_reward_scale=config.distance_reward_scale,
+        heading_reward_scale=config.heading_reward_scale,
+        safety_reward_scale=config.safety_reward_scale,
+        motion_reward_scale=config.motion_reward_scale,
+        slow_speed_threshold=config.slow_speed_threshold,
+        slow_speed_penalty=config.slow_speed_penalty,
+        high_speed_threshold=config.high_speed_threshold,
+        high_speed_bonus=config.high_speed_bonus,
+        new_best_distance_bonus=config.new_best_distance_bonus,
+        proximity_radius=getattr(config, "proximity_radius", d.REW_PROXIMITY_RADIUS),
+        proximity_reward_scale=getattr(config, "proximity_reward_scale", d.REW_PROXIMITY_SCALE),
+        step_penalty=config.step_penalty,
+        goal_threshold=config.goal_threshold,
+        goal_stop_speed_threshold=config.goal_stop_speed_threshold,
+        goal_success_reward=config.goal_success_reward,
+        goal_stop_bonus=config.goal_stop_bonus,
+        goal_hold_reward=config.goal_hold_reward,
+        goal_speed_penalty=config.goal_speed_penalty,
+        goal_overshoot_penalty=config.goal_overshoot_penalty,
+    )
+    env = WebotsEnv(config, reward_computer)
     env.reset()
     run_id = Path(env.run_folder).name
     agent = SACAgent(env.observation_size, env.action_dim, config)
@@ -507,6 +532,14 @@ def train(config=None):
                 ep_end_reason = reason if reason else ("max_steps" if truncated else ep_end_reason)
 
         replay.add_episode(ep_obs, ep_act, ep_rew, ep_next, ep_done)
+
+        if episode < 25:
+            warmup_lr = config.actor_lr * (0.25 + 0.75 * (episode + 1) / 25.0)
+            for pg in agent.actor_optimizer.param_groups:
+                pg['lr'] = warmup_lr
+            warmup_lr_c = config.critic_lr * (0.25 + 0.75 * (episode + 1) / 25.0)
+            for pg in agent.critic_optimizer.param_groups:
+                pg['lr'] = warmup_lr_c
 
         all_update_metrics = []
         if total_steps >= config.update_after_steps and replay.can_sample(config.replay_batch_size, config.min_replay_sequences):
@@ -599,6 +632,9 @@ def train(config=None):
 
 if __name__ == "__main__":
     train()
+
+
+
 
 
 

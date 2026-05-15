@@ -2,7 +2,6 @@
 
 from .webots_env import (
     AltinoDriver,
-    RewardComputer,
     SLAMProcessor,
     WebotsEnv,
     _init_supervisor,
