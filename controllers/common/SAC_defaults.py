@@ -1,11 +1,11 @@
-﻿"""Consolidated defaults for environment, SLAM, rewards, and training."""
+"""Consolidated defaults for environment, SLAM, rewards, and training."""
 
 # --- Environment observation / physics ---
 ENV_LIDAR_SECTOR_DIM = 16
 ENV_POSE_GOAL_DIM = 5
 ENV_IMU_FEATURE_DIM = 10
 ENV_OCCUPANCY_GRID_SHAPE = None
-ENV_MAX_STEPS = 4000
+ENV_MAX_STEPS = 5000
 ENV_COLLISION_THRESHOLD = 0.1
 ENV_LOW_SCORE_THRESHOLD = -2000.0
 ENV_ENDPOINT = (2.0, 0.0)
@@ -28,24 +28,23 @@ SLAM_SAVE_PLOTS = False
 SLAM_FORCE_CPU = True
 
 # --- Reward ---
-REW_COLLISION_PENALTY = -100.0
+REW_COLLISION_PENALTY = -75.0       # Scaled down to prevent gradient spikes
 REW_PROGRESS_SCALE = 3.0
-REW_DISTANCE_SCALE = 0.1
-REW_HEADING_SCALE = 0.05
-REW_SAFETY_SCALE = 0.15
-REW_MOTION_SCALE = 0.02
+REW_DISTANCE_SCALE = 0.05            # Increased to encourage global attraction
+REW_HEADING_SCALE = 0.5
+REW_SAFETY_SCALE = 0.3
+REW_MOTION_SCALE = 0.02              # Encourage moving forward safely
 REW_SLOW_SPEED_THRESHOLD = 0.25
 REW_SLOW_SPEED_PENALTY = -0.02
 REW_HIGH_SPEED_THRESHOLD = 0.6
 REW_HIGH_SPEED_BONUS = 0.05
 REW_NEW_BEST_DISTANCE_BONUS = 0.05
-REW_STEP_PENALTY = -0.005
-REW_GOAL_SUCCESS = 500.0
+REW_STEP_PENALTY = -0.01
+REW_GOAL_SUCCESS = 100.0             # Scaled down to match entropy ranges cleanly
 REW_GOAL_STOP_BONUS = 200.0
-REW_GOAL_HOLD = 0.0
 REW_GOAL_SPEED_PENALTY = -10.0
 REW_GOAL_OVERSHOOT_PENALTY = -12.0
-REW_SCALE = 1.0
+REW_SCALE = 0.01                    # Highly recommended to compress inputs to SAC
 REW_PROXIMITY_SCALE = 0.6
 REW_PROXIMITY_RADIUS = 1.5
 
@@ -58,17 +57,17 @@ class RecurrentDefaults:
 class SACDefaults:
     episodes = 2500
     update_after_steps = 2000
-    updates_per_step = 2
-    gradient_steps_per_episode = 4
+    gradient_steps_per_episode = 8
     save_every = 100
-    gamma = 0.99
-    tau = 0.01
-    actor_lr = 5e-4
-    critic_lr = 1e-4
-    alpha_lr = 0.001
-    initial_alpha = 0.5
+    gamma = 0.99                    # CRITICAL: Deepens temporal lookahead horizons
+    tau = 0.0025                    # Slower target tracking stabilizes off-policy networks
+    target_update_interval = 1
+    actor_lr = 3e-4                 # Standard, stable baseline learning rate
+    critic_lr = 3e-4
+    alpha_lr = 0.005
+    initial_alpha = 0.8             # Let it start exploratory and adapt downward
     auto_entropy_tuning = True
-    target_entropy_scale = 0.8
+    target_entropy_scale = 0.4
     hidden_size = 128
     latent_size = 128
     recurrent_cell = "gru"
@@ -78,6 +77,6 @@ class SACDefaults:
     lstm_layers = 1
     log_std_min = -5.0
     log_std_max = 2.0
-    replay_capacity = 65536
-    replay_batch_size = 64
-    min_replay_sequences = 256
+    replay_capacity = 8192
+    replay_batch_size = 128
+    min_replay_sequences = 512

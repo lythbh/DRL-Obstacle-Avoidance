@@ -9,12 +9,14 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import torch
 from torch import nn
+import math
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
 from controllers.common.SAC_rewards import SACRewardComputer
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
+from controllers.SAC.replay import SequenceReplayBuffer
 import controllers.common.SAC_defaults as d
 from controllers.common.checkpoints import (
     run_checkpoint_dir as _run_checkpoint_dir,
@@ -23,6 +25,7 @@ from controllers.common.checkpoints import (
     save_checkpoint_file as _save_checkpoint_file,
 )
 from controllers.common.metrics_logger import MetricsLogger
+from controllers.SAC.agent import SACAgent
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
@@ -32,11 +35,11 @@ _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 class Config:
     episodes: int = d.SACDefaults.episodes
     update_after_steps: int = d.SACDefaults.update_after_steps
-    updates_per_step: int = d.SACDefaults.updates_per_step
     gradient_steps_per_episode: int = d.SACDefaults.gradient_steps_per_episode
     save_every: int = d.SACDefaults.save_every
     gamma: float = d.SACDefaults.gamma
     tau: float = d.SACDefaults.tau
+    target_update_interval: int = d.SACDefaults.target_update_interval
     actor_lr: float = d.SACDefaults.actor_lr
     critic_lr: float = d.SACDefaults.critic_lr
     alpha_lr: float = d.SACDefaults.alpha_lr
@@ -82,7 +85,6 @@ class Config:
     goal_stop_speed_threshold: float = d.ENV_GOAL_STOP_SPEED_THRESHOLD
     goal_success_reward: float = d.REW_GOAL_SUCCESS
     goal_stop_bonus: float = d.REW_GOAL_STOP_BONUS
-    goal_hold_reward: float = d.REW_GOAL_HOLD
     goal_speed_penalty: float = d.REW_GOAL_SPEED_PENALTY
     goal_overshoot_penalty: float = d.REW_GOAL_OVERSHOOT_PENALTY
     reference_distance: Optional[float] = None
@@ -114,337 +116,8 @@ class Config:
             endpoint_xy = np.array(self.endpoint, dtype=np.float32)
             self.reference_distance = float(np.linalg.norm(start_xy - endpoint_xy))
 
+# `SequenceReplayBuffer` moved to controllers.SAC.replay
 
-class SequenceReplayBuffer:
-    def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
-        """Initialize replay buffer with fixed capacity for storing episode sequences."""
-        self.capacity = config.replay_capacity
-        self.seq_len = config.sequence_length
-        self.buffer: List[Dict[str, np.ndarray]] = []
-        self.pos = 0
-
-    def __len__(self) -> int:
-        """Return the current number of sequences in the replay buffer."""
-        return len(self.buffer)
-
-    def add_episode(self, ep_obs, ep_act, ep_rew, ep_next, ep_done) -> None:
-        """Add an episode as fixed-length sequences to the replay buffer, cycling when at capacity."""
-        if not ep_obs:
-            return
-        obs = np.asarray(ep_obs, dtype=np.float32)
-        actions = np.asarray(ep_act, dtype=np.float32)
-        rewards = np.asarray(ep_rew, dtype=np.float32).reshape(-1, 1)
-        next_obs = np.asarray(ep_next, dtype=np.float32)
-        dones = np.asarray(ep_done, dtype=np.float32).reshape(-1, 1)
-        total = obs.shape[0]
-        for start in range(0, total, self.seq_len):
-            end = min(start + self.seq_len, total)
-            entry = {
-                "obs": obs[start:end].copy(),
-                "actions": actions[start:end].copy(),
-                "rewards": rewards[start:end].copy(),
-                "next_obs": next_obs[start:end].copy(),
-                "dones": dones[start:end].copy(),
-                "valid_mask": np.ones(end - start, dtype=np.float32),
-            }
-            if len(self.buffer) < self.capacity:
-                self.buffer.append(entry)
-            else:
-                self.buffer[self.pos] = entry
-            self.pos = (self.pos + 1) % self.capacity
-
-    def can_sample(self, batch_size: int, min_sequences: int) -> bool:
-        """Check if buffer has enough sequences to sample a batch."""
-        return len(self.buffer) >= max(batch_size, min_sequences)
-
-    def sample(self, batch_size: int, device: torch.device) -> Dict[str, torch.Tensor]:
-        """Sample random sequences from buffer, padding to uniform length."""
-        indices = np.random.randint(0, len(self.buffer), size=batch_size)
-        keys = ["obs", "actions", "rewards", "next_obs", "dones", "valid_mask"]
-        result = {}
-        for k in keys:
-            tensors = []
-            for i in indices:
-                arr = self.buffer[i][k]
-                t = torch.as_tensor(arr, dtype=torch.float32, device=device)
-                if len(t) < self.seq_len:
-                    pad = [(0, self.seq_len - len(t))] + [(0, 0)] * (t.ndim - 1)
-                    flat_pads = [p for pad_dim in reversed(pad) for p in pad_dim]
-                    t = nn.functional.pad(t, flat_pads)
-                tensors.append(t)
-            result[k] = torch.stack(tensors)
-        return result
-
-
-class SACAgent:
-    def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
-        """Initialize SAC agent with actor, dual critic networks, and entropy regularization."""
-        self.config = config
-        self.device = self._get_device()
-        self.obs_size = obs_size
-        self.action_dim = action_dim
-        encoder_cls = LSTMActorCritic if config.recurrent_cell.lower().strip() == "lstm" else GRUActorCritic
-
-        def _make_encoder():
-            return encoder_cls(obs_size, action_dim, config).to(self.device)
-
-        self.actor_enc = _make_encoder()
-        self.actor_mean = nn.Linear(self.actor_enc.recurrent_hidden_size, action_dim).to(self.device)
-        self.actor_log_std_head = nn.Linear(self.actor_enc.recurrent_hidden_size, action_dim).to(self.device)
-
-        def _make_critic():
-            enc = _make_encoder()
-            head = nn.Sequential(
-                nn.Linear(enc.recurrent_hidden_size + action_dim, config.hidden_size), nn.ReLU(),
-                nn.Linear(config.hidden_size, config.hidden_size), nn.ReLU(),
-                nn.Linear(config.hidden_size, 1),
-            ).to(self.device)
-            return enc, head
-
-        self.q1_enc, self.q1_head = _make_critic()
-        self.q2_enc, self.q2_head = _make_critic()
-        self.target_q1_enc, self.target_q1_head = _make_critic()
-        self.target_q2_enc, self.target_q2_head = _make_critic()
-        self.target_q1_enc.load_state_dict(self.q1_enc.state_dict())
-        self.target_q1_head.load_state_dict(self.q1_head.state_dict())
-        self.target_q2_enc.load_state_dict(self.q2_enc.state_dict())
-        self.target_q2_head.load_state_dict(self.q2_head.state_dict())
-
-        self.actor_optimizer = torch.optim.Adam(
-                    list(self.actor_enc.parameters()) + list(self.actor_mean.parameters()) + list(self.actor_log_std_head.parameters()),
-                    lr=config.actor_lr,
-                )
-        self.critic_optimizer = torch.optim.Adam(
-            list(self.q1_enc.parameters()) + list(self.q1_head.parameters()) +
-            list(self.q2_enc.parameters()) + list(self.q2_head.parameters()),
-            lr=config.critic_lr,
-        )
-        self.log_alpha = torch.tensor(np.log(config.initial_alpha), dtype=torch.float32, device=self.device, requires_grad=True)
-        self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
-        self.target_entropy = -float(action_dim) * float(config.target_entropy_scale)
-
-        self.action_low = torch.tensor([-config.max_steering_angle, config.min_speed], dtype=torch.float32, device=self.device)
-        self.action_high = torch.tensor([config.max_steering_angle, config.max_speed], dtype=torch.float32, device=self.device)
-        self.action_center = (self.action_high + self.action_low) / 2.0
-        self.action_scale = (self.action_high - self.action_low) / 2.0
-
-    def _get_device(self) -> torch.device:
-        """Determine whether to use CPU or CUDA GPU for training."""
-        if self.config.force_cpu or not torch.cuda.is_available():
-            return torch.device("cpu")
-        return torch.device("cuda")
-
-    def get_initial_state(self, batch_size: int = 1):
-        """Get initial hidden state for the recurrent actor network."""
-        return self.actor_enc.get_initial_state(batch_size, self.device)
-
-    @property
-    def alpha(self) -> torch.Tensor:
-        """Get entropy regularization coefficient (exponential of log_alpha)."""
-        return self.log_alpha.exp()
-
-    def _checkpoint_metadata(self):
-        """Return observation and action dimensions for checkpoint validation."""
-        return {"obs_size": self.obs_size, "action_dim": self.action_dim}
-
-    def _validate_checkpoint_metadata(self, checkpoint):
-        """Verify checkpoint observation and action dimensions match current agent."""
-        for key in ("obs_size", "action_dim"):
-            saved = checkpoint.get(key)
-            if saved is not None and int(saved) != getattr(self, key):
-                raise ValueError(f"Checkpoint {key}={saved} != current {getattr(self, key)}")
-
-    def _tensor_obs(self, obs: np.ndarray) -> torch.Tensor:
-        """Convert numpy observation to device tensor with batch dimension."""
-        return torch.as_tensor(obs, dtype=torch.float32, device=self.device).view(1, -1)
-
-    def _sample_policy(self, obs, recurrent_state=None, done_mask=None, deterministic=False):
-        """Sample action from squashed normal distribution with proper log probability."""
-        features, next_state = self.actor_enc.encode_only(obs, recurrent_state=recurrent_state, done_mask=done_mask)
-        mean = self.actor_mean(features)
-        log_std = self.actor_log_std_head(features).clamp(self.config.log_std_min, self.config.log_std_max)
-        std = log_std.exp()
-        dist = torch.distributions.Normal(mean, std)
-        pre_tanh = mean if deterministic else dist.rsample()
-        tanh_action = torch.tanh(pre_tanh)
-        log_prob = dist.log_prob(pre_tanh)
-        log_prob -= torch.log(self.action_scale + 1e-6)
-        log_prob -= torch.log(1.0 - tanh_action.pow(2) + 1e-6)
-        return tanh_action * self.action_scale + self.action_center, log_prob.sum(dim=-1, keepdim=True), next_state
-
-    def select_action(self, obs: np.ndarray, recurrent_state=None, done=False, deterministic=False):
-        """Select action given observation and recurrent state for environment execution."""
-        done_mask = torch.tensor([float(done)], dtype=torch.float32, device=self.device)
-        with torch.no_grad():
-            action, _, next_state = self._sample_policy(self._tensor_obs(obs), recurrent_state, done_mask, deterministic)
-        return action.squeeze().cpu().numpy(), next_state
-
-    def _soft_update(self, source_enc, source_head, target_enc, target_head) -> float:
-        """Perform soft update of target networks using EMA; return L2 magnitude of parameter changes."""
-        tau = self.config.tau
-        total_change_sq = 0.0
-        for tp, sp in zip(target_enc.parameters(), source_enc.parameters()):
-            delta = sp.data * tau - tp.data * tau
-            total_change_sq += float(delta.norm(2).item() ** 2)
-            tp.data.mul_(1.0 - tau).add_(sp.data, alpha=tau)
-        for tp, sp in zip(target_head.parameters(), source_head.parameters()):
-            delta = sp.data * tau - tp.data * tau
-            total_change_sq += float(delta.norm(2).item() ** 2)
-            tp.data.mul_(1.0 - tau).add_(sp.data, alpha=tau)
-        import math
-        return float(math.sqrt(total_change_sq))
-
-    @staticmethod
-    def _sequence_loss_mask(valid_mask: torch.Tensor, burn_in: int) -> torch.Tensor:
-        """Create learning mask that excludes burn-in steps and invalid positions from gradient computation."""
-        valid_lengths = valid_mask.sum(dim=1).to(dtype=torch.long)
-        start_index = torch.minimum(torch.full_like(valid_lengths, burn_in), torch.clamp(valid_lengths - 1, min=0))
-        return valid_mask * (torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0) >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)
-
-    @staticmethod
-    def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        """Compute mean of values, ignoring masked (invalid) positions."""
-        return (values * mask.unsqueeze(-1).to(dtype=values.dtype)).sum() / mask.sum().clamp_min(1.0)
-
-    def _critic_forward(self, q_enc, q_head, obs, action, done_mask=None):
-        """Forward pass through critic encoder and head, handling shape mismatches."""
-        features, next_state = q_enc.encode_only(obs, None, done_mask)
-        if features.ndim != action.ndim:
-            if features.ndim == 2 and action.ndim == 3 and action.shape[1] == 1:
-                action = action.squeeze(1)
-            elif features.ndim == 3 and action.ndim == 2:
-                action = action.unsqueeze(1)
-        q_val = q_head(torch.cat([features, action], dim=-1)); return q_val, next_state
-
-    def update(self, batch):
-        """Perform SAC training update, returning a dict with all loss components, gradient norms, and diagnostics."""
-        if batch["obs"].shape[1] <= 0:
-            return None
-
-        valid_mask = batch["valid_mask"]
-        learn_mask = self._sequence_loss_mask(valid_mask, min(self.config.burn_in, batch["obs"].shape[1] - 1))
-        done_flags = batch["dones"].squeeze(-1)
-        done_mask_obs = torch.zeros_like(done_flags)
-        done_mask_obs[:, 0] = done_flags[:, 0]
-        if done_flags.shape[1] > 1:
-            done_mask_obs[:, 1:] = done_flags[:, :-1]
-        done_mask_next = torch.cat([torch.ones_like(done_flags[:, :1]), done_flags], dim=1)
-
-        scaled_rewards = batch["rewards"] * d.REW_SCALE
-
-        with torch.no_grad():
-            cat_obs = torch.cat([batch["obs"][:, :1], batch["next_obs"]], dim=1)
-            na, nlp, _ = self._sample_policy(cat_obs, done_mask=done_mask_next, deterministic=False)
-            na = na[:, 1:]
-            nlp = nlp[:, 1:]
-            ta = torch.cat([torch.zeros_like(batch["actions"][:, :1]), na], dim=1)
-            tq1, _ = self._critic_forward(self.target_q1_enc, self.target_q1_head, cat_obs, ta, done_mask=done_mask_next)
-            tq2, _ = self._critic_forward(self.target_q2_enc, self.target_q2_head, cat_obs, ta, done_mask=done_mask_next)
-            tq = torch.min(tq1, tq2)[:, 1:]
-            tq = tq - self.alpha.detach() * nlp
-            target_q = scaled_rewards + (1.0 - batch["dones"]) * self.config.gamma * tq
-
-        cq1, _ = self._critic_forward(self.q1_enc, self.q1_head, batch["obs"], batch["actions"], done_mask=done_mask_obs)
-        cq2, _ = self._critic_forward(self.q2_enc, self.q2_head, batch["obs"], batch["actions"], done_mask=done_mask_obs)
-        critic_loss = self._masked_mean(nn.functional.smooth_l1_loss(cq1, target_q, reduction='none'), learn_mask)
-        critic_loss += self._masked_mean(nn.functional.smooth_l1_loss(cq2, target_q, reduction='none'), learn_mask)
-
-        td_error = self._masked_mean(torch.abs(cq1 - target_q), learn_mask)
-
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        critic_params = list(self.q1_enc.parameters()) + list(self.q1_head.parameters()) + list(self.q2_enc.parameters()) + list(self.q2_head.parameters())
-        grad_norm_critic = MetricsLogger.compute_grad_norm(critic_params)
-        nn.utils.clip_grad_norm_(critic_params, max_norm=1.0)  # reduced from 5.0 â€” tighter clipping to prevent Q-value drift
-        self.critic_optimizer.step()
-
-        new_action, log_prob, _ = self._sample_policy(batch["obs"], done_mask=done_mask_obs, deterministic=False)
-        q1_pi, _ = self._critic_forward(self.q1_enc, self.q1_head, batch["obs"], new_action, done_mask=done_mask_obs)
-        q2_pi, _ = self._critic_forward(self.q2_enc, self.q2_head, batch["obs"], new_action, done_mask=done_mask_obs)
-        actor_loss = self._masked_mean(self.alpha.detach() * log_prob - torch.min(q1_pi, q2_pi), learn_mask)
-        policy_entropy = self._masked_mean(-log_prob, learn_mask)
-
-        alpha_loss = torch.tensor(0.0, device=self.device)
-        if self.config.auto_entropy_tuning:
-            alpha_loss = self._masked_mean(self.log_alpha * (log_prob + self.target_entropy).detach(), learn_mask)
-
-        self.actor_optimizer.zero_grad()
-        actor_loss.backward()
-        actor_params = list(self.actor_enc.parameters()) + list(self.actor_mean.parameters()) + list(self.actor_log_std_head.parameters())
-        grad_norm_actor = MetricsLogger.compute_grad_norm(actor_params)
-        nn.utils.clip_grad_norm_(actor_params, max_norm=1.0)
-        self.actor_optimizer.step()
-
-        if self.config.auto_entropy_tuning:
-            self.alpha_optimizer.zero_grad()
-            alpha_loss.backward()
-            self.alpha_optimizer.step()
-
-        target_update_mag = self._soft_update(self.q1_enc, self.q1_head, self.target_q1_enc, self.target_q1_head)
-        target_update_mag += self._soft_update(self.q2_enc, self.q2_head, self.target_q2_enc, self.target_q2_head)
-
-        return {
-            "critic_loss": float(critic_loss.item()),
-            "actor_loss": float(actor_loss.item()),
-            "alpha_loss": float(alpha_loss.item()),
-            "alpha": float(self.alpha.item()),
-            "policy_entropy": float(policy_entropy.item()),
-            "value_residual": float(td_error.item()),
-            "grad_norm_actor": round(grad_norm_actor, 6),
-            "grad_norm_critic": round(grad_norm_critic, 6),
-            "target_update_magnitude": round(target_update_mag, 6),
-            "lr_actor": round(float(self.actor_optimizer.param_groups[0]["lr"]), 8),
-            "lr_critic": round(float(self.critic_optimizer.param_groups[0]["lr"]), 8),
-        }
-
-    def checkpoint(self, episode, reward):
-        """Create checkpoint dictionary with all network weights, optimizers, and training state."""
-        ckpt = {
-            "episode": episode, "reward": reward, "algorithm": "sac",
-            "actor_enc": self.actor_enc.state_dict(),
-            "actor_mean": self.actor_mean.state_dict(),
-            "actor_log_std": self.actor_log_std_head.state_dict(),
-            "critic1_enc": self.q1_enc.state_dict(), "critic1_head": self.q1_head.state_dict(),
-            "critic2_enc": self.q2_enc.state_dict(), "critic2_head": self.q2_head.state_dict(),
-            "target_critic1_enc": self.target_q1_enc.state_dict(), "target_critic1_head": self.target_q1_head.state_dict(),
-            "target_critic2_enc": self.target_q2_enc.state_dict(), "target_critic2_head": self.target_q2_head.state_dict(),
-            "actor_optimizer": self.actor_optimizer.state_dict(),
-            "critic_optimizer": self.critic_optimizer.state_dict(),
-            "alpha_optimizer": self.alpha_optimizer.state_dict(),
-            "log_alpha": self.log_alpha.detach().cpu(),
-        }
-        ckpt.update(self._checkpoint_metadata())
-        ckpt["config"] = asdict(self.config)
-        return ckpt
-
-    def save(self, path, episode, reward):
-        """Save checkpoint to disk."""
-        torch.save(self.checkpoint(episode, reward), path)
-
-    def load(self, path):
-        """Load checkpoint from disk and restore all network weights and optimizer states."""
-        checkpoint = _load_checkpoint(path, self.device)
-        algo = str(checkpoint.get("algorithm", "sac")).lower().strip()
-        assert algo == "sac", f"Checkpoint algorithm '{algo}' does not match SAC."
-        self._validate_checkpoint_metadata(checkpoint)
-        self.actor_enc.load_state_dict(checkpoint["actor_enc"])
-        self.actor_mean.load_state_dict(checkpoint["actor_mean"])
-        self.actor_log_std_head.load_state_dict(checkpoint["actor_log_std"])
-        self.q1_enc.load_state_dict(checkpoint["critic1_enc"])
-        self.q1_head.load_state_dict(checkpoint["critic1_head"])
-        self.q2_enc.load_state_dict(checkpoint["critic2_enc"])
-        self.q2_head.load_state_dict(checkpoint["critic2_head"])
-        self.target_q1_enc.load_state_dict(checkpoint.get("target_critic1_enc", checkpoint["critic1_enc"]))
-        self.target_q1_head.load_state_dict(checkpoint.get("target_critic1_head", checkpoint["critic1_head"]))
-        self.target_q2_enc.load_state_dict(checkpoint.get("target_critic2_enc", checkpoint["critic2_enc"]))
-        self.target_q2_head.load_state_dict(checkpoint.get("target_critic2_head", checkpoint["critic2_head"]))
-        self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer"])
-        self.critic_optimizer.load_state_dict(checkpoint["critic_optimizer"])
-        if self.config.auto_entropy_tuning and "alpha_optimizer" in checkpoint:
-            self.alpha_optimizer.load_state_dict(checkpoint["alpha_optimizer"])
-        if "log_alpha" in checkpoint:
-            self.log_alpha.data.copy_(checkpoint["log_alpha"].to(self.device))
-        return checkpoint
 
 
 def train(config=None):
@@ -473,7 +146,6 @@ def train(config=None):
         goal_stop_speed_threshold=config.goal_stop_speed_threshold,
         goal_success_reward=config.goal_success_reward,
         goal_stop_bonus=config.goal_stop_bonus,
-        goal_hold_reward=config.goal_hold_reward,
         goal_speed_penalty=config.goal_speed_penalty,
         goal_overshoot_penalty=config.goal_overshoot_penalty,
     )
@@ -497,12 +169,18 @@ def train(config=None):
     metrics_logger.log_hyperparams(asdict(config), recurrent_cell=config.recurrent_cell,
                                    obs_size=env.observation_size, action_dim=env.action_dim)
 
+    def _snapshot_recurrent_state(state):
+        if isinstance(state, tuple):
+            return tuple(_snapshot_recurrent_state(part) for part in state)
+        return state.detach().cpu().clone()
+
     for episode in range(config.episodes):
         obs, _ = env.reset()
         done = False
         episode_reward = 0.0
         ep_end_reason = "max_steps"
         ep_obs, ep_act, ep_rew, ep_next, ep_done = [], [], [], [], []
+        ep_states = []
         ep_goal = ep_success = False
         ep_speeds = []
         actor_state = agent.get_initial_state(batch_size=1)
@@ -510,10 +188,11 @@ def train(config=None):
         ep_step = 0
 
         while not done:
+            ep_states.append(_snapshot_recurrent_state(actor_state))
             action, actor_state = agent.select_action(obs, actor_state, done=prev_done, deterministic=False)
             next_obs, reward, terminated, truncated, info = env.step(action)
             ep_step += 1
-            transition_done = bool(terminated or truncated)
+            transition_done = bool(terminated)
             ep_obs.append(np.asarray(obs, dtype=np.float32))
             ep_act.append(np.asarray(action, dtype=np.float32))
             ep_rew.append(float(reward))
@@ -524,20 +203,23 @@ def train(config=None):
             ep_speeds.append(float(info.get("speed_norm", 0.0)))
             ep_goal = ep_goal or bool(info.get("goal_reached", False))
             ep_success = bool(info.get("success", False))
-            done = transition_done
+            done = bool(terminated or truncated)
             prev_done = done
             total_steps += 1
             if done:
                 reason = info.get("reset_reason", "")
                 ep_end_reason = reason if reason else ("max_steps" if truncated else ep_end_reason)
 
-        replay.add_episode(ep_obs, ep_act, ep_rew, ep_next, ep_done)
+        replay.add_episode(ep_obs, ep_act, ep_rew, ep_next, ep_done, ep_states=ep_states)
+        for _obs in ep_obs:
+            agent.obs_rms.update(_obs)
 
-        if episode < 25:
-            warmup_lr = config.actor_lr * (0.25 + 0.75 * (episode + 1) / 25.0)
+        warmup_episodes = max(5, config.update_after_steps // 200)
+        if episode < warmup_episodes:
+            warmup_lr = config.actor_lr * (0.25 + 0.75 * (episode + 1) / warmup_episodes)
             for pg in agent.actor_optimizer.param_groups:
                 pg['lr'] = warmup_lr
-            warmup_lr_c = config.critic_lr * (0.25 + 0.75 * (episode + 1) / 25.0)
+            warmup_lr_c = config.critic_lr * (0.25 + 0.75 * (episode + 1) / warmup_episodes)
             for pg in agent.critic_optimizer.param_groups:
                 pg['lr'] = warmup_lr_c
 
@@ -555,7 +237,6 @@ def train(config=None):
 
         act_stats = MetricsLogger.compute_action_stats(ep_act)
         obs_stats = MetricsLogger.compute_obs_stats(ep_obs)
-        ep_val_residual = 0.0
         agg_upd = MetricsLogger.aggregate_update_metrics(all_update_metrics)
 
         rew_w.append(episode_reward)
@@ -632,14 +313,4 @@ def train(config=None):
 
 if __name__ == "__main__":
     train()
-
-
-
-
-
-
-
-
-
-
 
