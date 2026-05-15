@@ -272,18 +272,19 @@ class PPOAgent:
                 self.optimizer.zero_grad()
                 return None
 
-        actor_params = [self.model.policy_head.weight, self.model.policy_head.bias, self.actor_log_std]
-        critic_params = [self.model.value_head.weight, self.model.value_head.bias]
-        all_params = list(self.model.parameters()) + [self.actor_log_std]
+        policy_head = self.model.policy_head
+        value_head = self.model.value_head
+        if policy_head is None or value_head is None:
+            raise RuntimeError("PPO model requires policy_head and value_head.")
+
+        actor_params = list(policy_head.parameters()) + [self.actor_log_std]
+        critic_params = list(value_head.parameters())
 
         grad_norm_actor = MetricsLogger.compute_grad_norm(actor_params)
         grad_norm_critic = MetricsLogger.compute_grad_norm(critic_params)
 
-        # Per-module gradient clipping for stability:
-        # - Actor params get conservative clipping (max_norm=0.5)
-        # - Critic and RNN params get looser clipping (max_norm=1.0)
-        actor_clip = list(self.model.policy_head.parameters()) + [self.actor_log_std]
-        critic_clip = list(self.model.value_head.parameters())
+        actor_clip = list(policy_head.parameters()) + [self.actor_log_std]
+        critic_clip = list(value_head.parameters())
         rnn_attr = "gru" if hasattr(self.model, "gru") else "lstm"
         rnn_clip = list(getattr(self.model, rnn_attr).parameters())
         encoder_clip = [p for n, p in self.model.named_parameters()
@@ -417,7 +418,6 @@ def train(config=None):
         goal_stop_bonus=config.goal_stop_bonus,
         goal_hold_reward=config.goal_hold_reward,
         goal_speed_penalty=config.goal_speed_penalty,
-        goal_overshoot_penalty=config.goal_overshoot_penalty,
     )
     env = WebotsEnv(config, reward_computer)
     env.reset()

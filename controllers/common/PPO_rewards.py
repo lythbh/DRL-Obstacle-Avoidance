@@ -8,7 +8,6 @@ from controllers.common.PPO_defaults import (
     REW_COLLISION_PENALTY,
     REW_DISTANCE_SCALE,
     REW_GOAL_HOLD,
-    REW_GOAL_OVERSHOOT_PENALTY,
     REW_GOAL_SPEED_PENALTY,
     REW_GOAL_STOP_BONUS,
     REW_GOAL_SUCCESS,
@@ -54,7 +53,6 @@ class PPORewardComputer:
         goal_stop_bonus: float = REW_GOAL_STOP_BONUS,
         goal_hold_reward: float = REW_GOAL_HOLD,
         goal_speed_penalty: float = REW_GOAL_SPEED_PENALTY,
-        goal_overshoot_penalty: float = REW_GOAL_OVERSHOOT_PENALTY,
     ) -> None:
         self.endpoint = np.array(endpoint, dtype=np.float32)
         self.reference_distance = float(reference_distance)
@@ -78,7 +76,6 @@ class PPORewardComputer:
         self.goal_stop_bonus = float(goal_stop_bonus)
         self.goal_hold_reward = float(goal_hold_reward)
         self.goal_speed_penalty = float(goal_speed_penalty)
-        self.goal_overshoot_penalty = float(goal_overshoot_penalty)
 
     def compute(
         self,
@@ -90,7 +87,6 @@ class PPORewardComputer:
         min_lidar_norm: float,
         speed_norm: float,
         reached_new_best_distance: bool,
-        accel: np.ndarray,
     ) -> Tuple[float, Optional[float]]:
         """Compute reward from collision, progress, heading, safety, speed, and goal bonus components."""
         if collision:

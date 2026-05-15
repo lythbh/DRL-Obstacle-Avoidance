@@ -16,7 +16,7 @@ def build_critic_pair(obs_size: int, action_dim: int, config: d.SACDefaults, dev
     Returns (enc, head) moved to `device`.
     """
     encoder_cls = LSTMActorCritic if config.recurrent_cell.lower().strip() == "lstm" else GRUActorCritic
-    enc = encoder_cls(obs_size, action_dim, config).to(device)
+    enc = encoder_cls(obs_size, action_dim, config, use_heads=False).to(device)
     head = nn.Sequential(
         nn.Linear(enc.recurrent_hidden_size + action_dim, config.hidden_size),
         nn.ReLU(),

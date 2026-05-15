@@ -25,6 +25,7 @@ from controllers.common.checkpoints import (
     save_checkpoint_file as _save_checkpoint_file,
 )
 from controllers.common.metrics_logger import MetricsLogger
+from controllers.common.seed import set_all_seeds
 from controllers.SAC.agent import SACAgent
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
@@ -34,6 +35,7 @@ _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 @dataclass
 class Config:
     episodes: int = d.SACDefaults.episodes
+    seed: int = d.SACDefaults.seed
     update_after_steps: int = d.SACDefaults.update_after_steps
     gradient_steps_per_episode: int = d.SACDefaults.gradient_steps_per_episode
     save_every: int = d.SACDefaults.save_every
@@ -125,6 +127,7 @@ def train(config=None):
     if config is None:
         config = Config()
 
+    set_all_seeds(config.seed)
     _init_supervisor()
     reward_computer = SACRewardComputer(
         endpoint=config.endpoint,
@@ -147,7 +150,6 @@ def train(config=None):
         goal_success_reward=config.goal_success_reward,
         goal_stop_bonus=config.goal_stop_bonus,
         goal_speed_penalty=config.goal_speed_penalty,
-        goal_overshoot_penalty=config.goal_overshoot_penalty,
     )
     env = WebotsEnv(config, reward_computer)
     env.reset()
@@ -222,6 +224,16 @@ def train(config=None):
             warmup_lr_c = config.critic_lr * (0.25 + 0.75 * (episode + 1) / warmup_episodes)
             for pg in agent.critic_optimizer.param_groups:
                 pg['lr'] = warmup_lr_c
+            warmup_lr_a = config.alpha_lr * (0.25 + 0.75 * (episode + 1) / warmup_episodes)
+            for pg in agent.alpha_optimizer.param_groups:
+                pg['lr'] = warmup_lr_a
+        else:
+            for pg in agent.actor_optimizer.param_groups:
+                pg['lr'] = config.actor_lr
+            for pg in agent.critic_optimizer.param_groups:
+                pg['lr'] = config.critic_lr
+            for pg in agent.alpha_optimizer.param_groups:
+                pg['lr'] = config.alpha_lr
 
         all_update_metrics = []
         if total_steps >= config.update_after_steps and replay.can_sample(config.replay_batch_size, config.min_replay_sequences):

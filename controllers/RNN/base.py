@@ -14,10 +14,11 @@ class RecurrentActorCriticBase(nn.Module):
     Subclasses override `get_initial_state` and `_run_recurrent`.
     """
 
-    def __init__(self, obs_size: int, action_dim: int, config) -> None:
+    def __init__(self, obs_size: int, action_dim: int, config, use_heads: bool = True) -> None:
         super().__init__()
         self.obs_size = obs_size
         self.action_dim = action_dim
+        self.use_heads = bool(use_heads)
         self.grid_shape = config.occupancy_grid_shape
         self.obstacle_dim = config.lidar_sector_dim
         self.pose_goal_dim = config.pose_goal_dim
@@ -70,8 +71,8 @@ class RecurrentActorCriticBase(nn.Module):
         )
         self.recurrent_hidden_size = config.lstm_hidden_size
         self.recurrent_layers = config.lstm_layers
-        self.policy_head = nn.Linear(self.recurrent_hidden_size, action_dim)
-        self.value_head = nn.Linear(self.recurrent_hidden_size, 1)
+        self.policy_head = nn.Linear(self.recurrent_hidden_size, action_dim) if self.use_heads else None
+        self.value_head = nn.Linear(self.recurrent_hidden_size, 1) if self.use_heads else None
 
     def get_initial_state(self, batch_size: int, device: Optional[torch.device] = None) -> RecurrentState:
         """Get initial hidden state for the recurrent network (implemented by subclasses)."""
@@ -147,6 +148,8 @@ class RecurrentActorCriticBase(nn.Module):
 
     def forward(self, observation, recurrent_state=None, done_mask=None):
         """Forward pass: encode observation, run recurrent network, compute policy and value outputs."""
+        if not self.use_heads or self.policy_head is None or self.value_head is None:
+            raise RuntimeError("forward() requires policy/value heads; instantiate with use_heads=True.")
         latent, batch_size, seq_len = self._encode_observation(observation, recurrent_state, done_mask)
         device = latent.device
         if recurrent_state is None:

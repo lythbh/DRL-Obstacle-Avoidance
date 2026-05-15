@@ -32,6 +32,7 @@ class SequenceReplayBuffer:
         """Initialize replay buffer with fixed capacity for storing episode sequences."""
         self.capacity = config.replay_capacity
         self.seq_len = config.sequence_length
+        self.seq_stride = int(getattr(config, "sequence_stride", self.seq_len))
         self.recurrent_cell = str(getattr(config, "recurrent_cell", "gru")).lower().strip()
         self.recurrent_layers = int(getattr(config, "recurrent_layers", getattr(config, "lstm_layers", 1)))
         self.recurrent_hidden_size = int(getattr(config, "recurrent_hidden_size", getattr(config, "lstm_hidden_size", 1)))
@@ -61,7 +62,7 @@ class SequenceReplayBuffer:
         if ep_states is None:
             ep_states = [self._zero_state() for _ in range(len(obs))]
         total = obs.shape[0]
-        for start in range(0, total, self.seq_len):
+        for start in range(0, total, self.seq_stride):
             end = min(start + self.seq_len, total)
             entry = {
                 "obs": obs[start:end].copy(),
@@ -71,7 +72,7 @@ class SequenceReplayBuffer:
                 "dones": dones[start:end].copy(),
                 "valid_mask": np.ones(end - start, dtype=np.float32),
                 "init_state": _clone_state(ep_states[start]),
-                "sequence_start": np.float32(1.0 if start == 0 else 0.0),
+                "sequence_start": np.float32(1.0 if (start == 0 or bool(dones[start - 1])) else 0.0),
             }
             if len(self.buffer) < self.capacity:
                 self.buffer.append(entry)

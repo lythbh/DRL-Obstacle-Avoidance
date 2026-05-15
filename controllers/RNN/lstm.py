@@ -11,8 +11,8 @@ from .base import RecurrentActorCriticBase
 class LSTMActorCritic(RecurrentActorCriticBase):
     """Actor-critic network with lightweight feature branches and an LSTM core."""
 
-    def __init__(self, obs_size: int, action_dim: int, config) -> None:
-        super().__init__(obs_size, action_dim, config)
+    def __init__(self, obs_size: int, action_dim: int, config, use_heads: bool = True) -> None:
+        super().__init__(obs_size, action_dim, config, use_heads=use_heads)
         self.lstm = nn.LSTM(
             input_size=config.latent_size,
             hidden_size=self.recurrent_hidden_size,

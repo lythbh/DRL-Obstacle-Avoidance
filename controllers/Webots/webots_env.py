@@ -604,17 +604,13 @@ class WebotsEnv:
         self.current_speed_norm = speed_norm
         goal_reached = self.current_distance < self.config.goal_threshold
 
-        accel_for_reward = (imu_state.accel_body
-                            if (_SLAM_AVAILABLE and imu_state is not None)
-                            else np.zeros(3, dtype=np.float32))
-
         terminated = False
         truncated = self.current_step >= self.config.max_steps
         info: Dict[str, Any] = {}
 
         reward, new_distance = self.reward_computer.compute(
             collision, self.current_pos, self.current_step, self.prev_distance,
-            goal_error, min_lidar_norm, speed_norm, reached_new_best_distance, accel_for_reward,
+            goal_error, min_lidar_norm, speed_norm, reached_new_best_distance,
         )
         self.prev_distance = new_distance
         self.episode_reward += reward

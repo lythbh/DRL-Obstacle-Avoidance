@@ -119,7 +119,7 @@ class SACAgent:
     @property
     def alpha(self) -> torch.Tensor:
         """Get entropy regularization coefficient (exponential of log_alpha)."""
-        return self.log_alpha.exp().clamp(min=1e-4)
+        return self.log_alpha.exp().clamp(min=1e-3)
 
     def _checkpoint_metadata(self):
         """Return observation and action dimensions for checkpoint validation."""
@@ -147,7 +147,7 @@ class SACAgent:
         tanh_action = torch.tanh(pre_tanh)
         log_prob = dist.log_prob(pre_tanh)
         log_prob -= torch.log(self.action_scale + 1e-6)
-        log_prob -= torch.log(1.0 - tanh_action.pow(2) + 1e-6)
+        log_prob -= 2.0 * (math.log(2.0) - pre_tanh - nn.functional.softplus(-2.0 * pre_tanh))
         return tanh_action * self.action_scale + self.action_center, log_prob.sum(dim=-1, keepdim=True), next_state
 
     def select_action(self, obs: np.ndarray, recurrent_state=None, done=False, deterministic=False):
@@ -219,13 +219,42 @@ class SACAgent:
         batch["obs"] = (batch["obs"] - obs_mean_t) / obs_std_t
         batch["next_obs"] = (batch["next_obs"] - obs_mean_t) / obs_std_t
 
-    def _compute_target_q(self, batch, recurrent_state=None):
+    @staticmethod
+    def _truncate_batch_to_valid(batch):
+        """Trim right-padded tail timesteps shared by all sequences in the batch."""
+        valid_mask = batch["valid_mask"]
+        max_valid_len = int(valid_mask.sum(dim=1).max().item())
+        if max_valid_len <= 0 or max_valid_len >= valid_mask.shape[1]:
+            return
+        for key in ("obs", "actions", "rewards", "next_obs", "dones", "valid_mask"):
+            batch[key] = batch[key][:, :max_valid_len]
+
+    def _compute_target_q(self, batch, done_mask_next, recurrent_state=None):
         """Compute target Q-values using target networks (no gradient tracking)."""
         scaled_rewards = batch["rewards"] * d.REW_SCALE
         with torch.no_grad():
-            na, nlp, _ = self._sample_policy(batch["next_obs"], recurrent_state=recurrent_state, deterministic=False)
-            tq1, _ = self._critic_forward(self.target_q1_enc, self.target_q1_head, batch["next_obs"], na, recurrent_state=recurrent_state)
-            tq2, _ = self._critic_forward(self.target_q2_enc, self.target_q2_head, batch["next_obs"], na, recurrent_state=recurrent_state)
+            na, nlp, _ = self._sample_policy(
+                batch["next_obs"],
+                recurrent_state=recurrent_state,
+                done_mask=done_mask_next,
+                deterministic=False,
+            )
+            tq1, _ = self._critic_forward(
+                self.target_q1_enc,
+                self.target_q1_head,
+                batch["next_obs"],
+                na,
+                recurrent_state=recurrent_state,
+                done_mask=done_mask_next,
+            )
+            tq2, _ = self._critic_forward(
+                self.target_q2_enc,
+                self.target_q2_head,
+                batch["next_obs"],
+                na,
+                recurrent_state=recurrent_state,
+                done_mask=done_mask_next,
+            )
             tq = torch.min(tq1, tq2)
             tq = tq - self.alpha.detach() * nlp
             target_q = scaled_rewards + (1.0 - batch["dones"]) * self.config.gamma * tq
@@ -288,13 +317,17 @@ class SACAgent:
         if batch["obs"].shape[1] <= 0:
             return None
 
+        self._truncate_batch_to_valid(batch)
+        if batch["obs"].shape[1] <= 0:
+            return None
+
         valid_mask = batch["valid_mask"]
         learn_mask = self._sequence_loss_mask(valid_mask, min(self.config.burn_in, batch["obs"].shape[1] - 1))
-        done_mask_obs, _ = self._prepare_done_masks(batch)
+        done_mask_obs, done_mask_next = self._prepare_done_masks(batch)
         recurrent_state = batch.get("init_state")
 
         self._normalize_obs_batch(batch)
-        target_q = self._compute_target_q(batch, recurrent_state=recurrent_state)
+        target_q = self._compute_target_q(batch, done_mask_next, recurrent_state=recurrent_state)
 
         critic_loss, td_error, grad_norm_critic = self._update_critic(batch, target_q, learn_mask, done_mask_obs, recurrent_state=recurrent_state)
         log_prob, policy_entropy, actor_loss, grad_norm_actor = self._update_actor(batch, learn_mask, done_mask_obs, recurrent_state=recurrent_state)
