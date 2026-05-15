@@ -15,7 +15,6 @@ dist/
 *.egg-info/
 .eggs/
 controllers/PPO/slam_runs
-plots
 
 # Machine learning outputs
 *.h5
@@ -29,7 +28,6 @@ logs/
 runs/
 controllers/PPO/slam_runs/
 controllers/PPO/checkpoints/
-plots/
 
 # Jupyter
 .ipynb_checkpoints/

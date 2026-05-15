@@ -78,7 +78,6 @@ class SACRewardComputer:
         self,
         collision: bool,
         current_pos: np.ndarray,
-        current_step: int,
         prev_distance: Optional[float],
         goal_error: float,
         min_lidar_norm: float,

@@ -206,10 +206,7 @@ class SACAgent:
         done_mask_obs[:, 0] = sequence_start
         if done_flags.shape[1] > 1:
             done_mask_obs[:, 1:] = done_flags[:, :-1]
-        done_mask_next = torch.zeros_like(done_flags)
-        done_mask_next[:, 0] = sequence_start
-        if done_flags.shape[1] > 1:
-            done_mask_next[:, 1:] = done_flags[:, :-1]
+        done_mask_next = done_flags.clone()
         return done_mask_obs, done_mask_next
 
     def _normalize_obs_batch(self, batch):
@@ -266,6 +263,7 @@ class SACAgent:
         cq2, _ = self._critic_forward(self.q2_enc, self.q2_head, batch["obs"], batch["actions"], recurrent_state=recurrent_state, done_mask=done_mask_obs)
         critic_loss = self._masked_mean(nn.functional.smooth_l1_loss(cq1, target_q, reduction='none'), learn_mask)
         critic_loss += self._masked_mean(nn.functional.smooth_l1_loss(cq2, target_q, reduction='none'), learn_mask)
+        critic_loss = 0.5 * critic_loss
         td_error = self._masked_mean(torch.abs(cq1 - target_q), learn_mask)
 
         self.critic_optimizer.zero_grad()

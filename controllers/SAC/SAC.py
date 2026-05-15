@@ -1,15 +1,13 @@
 ﻿"""Soft Actor-Critic controller for the ALTINO Webots task."""
 from __future__ import annotations
 
+from collections import deque
 import sys, time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
-import torch
-from torch import nn
-import math
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -118,8 +116,6 @@ class Config:
             endpoint_xy = np.array(self.endpoint, dtype=np.float32)
             self.reference_distance = float(np.linalg.norm(start_xy - endpoint_xy))
 
-# `SequenceReplayBuffer` moved to controllers.SAC.replay
-
 
 
 def train(config=None):
@@ -129,8 +125,10 @@ def train(config=None):
 
     set_all_seeds(config.seed)
     _init_supervisor()
+    reference_distance = float(config.reference_distance if config.reference_distance is not None else 4.0)
     reward_computer = SACRewardComputer(
         endpoint=config.endpoint,
+        reference_distance=reference_distance,
         collision_penalty=config.collision_penalty,
         progress_reward_scale=config.progress_reward_scale,
         distance_reward_scale=config.distance_reward_scale,
@@ -165,7 +163,7 @@ def train(config=None):
     best_reward = float("-inf")
     best_goal_reward = float("-inf")
     best_goal_episode = None
-    rew_w, suc_w, gol_w, col_w, to_w = [], [], [], [], []
+    rew_w, suc_w, gol_w, col_w, to_w = (deque(maxlen=10) for _ in range(5))
     start_time = time.perf_counter()
     metrics_logger = MetricsLogger(env.run_folder, algorithm="sac")
     metrics_logger.log_hyperparams(asdict(config), recurrent_cell=config.recurrent_cell,
@@ -280,11 +278,11 @@ def train(config=None):
             _save_checkpoint_file(_CHECKPOINT_DIR, run_id, "checkpoint", ckpt)
             ckpt_flags.append("latest")
 
-        r10 = float(np.mean(rew_w[-10:]))
-        s10 = float(np.mean(suc_w[-10:]))
-        g10 = float(np.mean(gol_w[-10:]))
-        c10 = float(np.mean(col_w[-10:]))
-        t10 = float(np.mean(to_w[-10:]))
+        r10 = float(np.mean(rew_w))
+        s10 = float(np.mean(suc_w))
+        g10 = float(np.mean(gol_w))
+        c10 = float(np.mean(col_w))
+        t10 = float(np.mean(to_w))
         avg_spd = float(np.mean(ep_speeds)) * config.max_speed if ep_speeds else 0.0
         elapsed = time.perf_counter() - start_time
         ckpt_note = f" ckpt={'+'.join(ckpt_flags)}" if ckpt_flags else ""

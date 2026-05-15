@@ -26,6 +26,63 @@ def _default_model_path(algorithm: str) -> str:
     return str(checkpoint_root.parent / "best_model.pth")
 
 
+def _build_reward_computer(algorithm: str, train_config: Any):
+    """Construct the algorithm-specific reward computer used by WebotsEnv."""
+    if algorithm == "ppo":
+        from controllers.common.PPO_rewards import PPORewardComputer
+
+        return PPORewardComputer(
+            endpoint=train_config.endpoint,
+            reference_distance=train_config.reference_distance,
+            collision_penalty=train_config.collision_penalty,
+            progress_reward_scale=train_config.progress_reward_scale,
+            distance_reward_scale=train_config.distance_reward_scale,
+            heading_reward_scale=train_config.heading_reward_scale,
+            safety_reward_scale=train_config.safety_reward_scale,
+            motion_reward_scale=train_config.motion_reward_scale,
+            slow_speed_threshold=train_config.slow_speed_threshold,
+            slow_speed_penalty=train_config.slow_speed_penalty,
+            high_speed_threshold=train_config.high_speed_threshold,
+            high_speed_bonus=train_config.high_speed_bonus,
+            new_best_distance_bonus=train_config.new_best_distance_bonus,
+            proximity_radius=getattr(train_config, "proximity_radius", 1.5),
+            proximity_reward_scale=getattr(train_config, "proximity_reward_scale", 0.6),
+            step_penalty=train_config.step_penalty,
+            goal_threshold=train_config.goal_threshold,
+            goal_stop_speed_threshold=train_config.goal_stop_speed_threshold,
+            goal_success_reward=train_config.goal_success_reward,
+            goal_stop_bonus=train_config.goal_stop_bonus,
+            goal_hold_reward=train_config.goal_hold_reward,
+            goal_speed_penalty=train_config.goal_speed_penalty,
+        )
+
+    from controllers.common.SAC_rewards import SACRewardComputer
+
+    return SACRewardComputer(
+        endpoint=train_config.endpoint,
+        reference_distance=train_config.reference_distance,
+        collision_penalty=train_config.collision_penalty,
+        progress_reward_scale=train_config.progress_reward_scale,
+        distance_reward_scale=train_config.distance_reward_scale,
+        heading_reward_scale=train_config.heading_reward_scale,
+        safety_reward_scale=train_config.safety_reward_scale,
+        motion_reward_scale=train_config.motion_reward_scale,
+        slow_speed_threshold=train_config.slow_speed_threshold,
+        slow_speed_penalty=train_config.slow_speed_penalty,
+        high_speed_threshold=train_config.high_speed_threshold,
+        high_speed_bonus=train_config.high_speed_bonus,
+        new_best_distance_bonus=train_config.new_best_distance_bonus,
+        proximity_radius=getattr(train_config, "proximity_radius", 1.5),
+        proximity_reward_scale=getattr(train_config, "proximity_reward_scale", 0.6),
+        step_penalty=train_config.step_penalty,
+        goal_threshold=train_config.goal_threshold,
+        goal_stop_speed_threshold=train_config.goal_stop_speed_threshold,
+        goal_success_reward=train_config.goal_success_reward,
+        goal_stop_bonus=train_config.goal_stop_bonus,
+        goal_speed_penalty=train_config.goal_speed_penalty,
+    )
+
+
 def run_inference(config=None):
     """Load trained model, run episodes in Webots, and report performance metrics."""
     if config is None:
@@ -79,16 +136,16 @@ def run_inference(config=None):
     if algorithm == "ppo":
         train_config = PPOConfig(**{k: v for k, v in saved_config.items() if k in {f.name for f in fields(PPOConfig)}})
         train_config.recurrent_cell = str(checkpoint.get("recurrent_cell", "gru")).lower().strip()
-        env = WebotsEnv(train_config)
+        reward_computer = _build_reward_computer(algorithm, train_config)
+        env = WebotsEnv(train_config, reward_computer)
         obs_size = env.observation_size
         n_actions = env.action_dim
         agent = cast(Any, PPOAgent(obs_size, n_actions, train_config))
     else:
         train_config = SACConfig(**{k: v for k, v in saved_config.items() if k in {f.name for f in fields(SACConfig)}})
-        architecture = checkpoint.get("architecture", {})
-        if isinstance(architecture, dict):
-            train_config.recurrent_cell = str(architecture.get("recurrent_cell", "gru")).lower().strip()
-        env = WebotsEnv(train_config)
+        train_config.recurrent_cell = str(saved_config.get("recurrent_cell", "gru")).lower().strip()
+        reward_computer = _build_reward_computer(algorithm, train_config)
+        env = WebotsEnv(train_config, reward_computer)
         obs_size = env.observation_size
         n_actions = env.action_dim
         agent = cast(Any, SACAgent(obs_size, n_actions, train_config))

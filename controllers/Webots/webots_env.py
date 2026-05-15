@@ -609,7 +609,7 @@ class WebotsEnv:
         info: Dict[str, Any] = {}
 
         reward, new_distance = self.reward_computer.compute(
-            collision, self.current_pos, self.current_step, self.prev_distance,
+            collision, self.current_pos, self.prev_distance,
             goal_error, min_lidar_norm, speed_norm, reached_new_best_distance,
         )
         self.prev_distance = new_distance

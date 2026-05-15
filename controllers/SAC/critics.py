@@ -1,8 +1,6 @@
 """Critic network builders for SAC controller."""
 from __future__ import annotations
 
-from typing import Tuple
-
 import torch
 from torch import nn
 
