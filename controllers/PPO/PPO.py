@@ -13,7 +13,8 @@ from torch.nn.utils.rnn import pad_sequence
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic, RecurrentState
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
-import controllers.common.defaults as d
+from controllers.common.PPO_rewards import PPORewardComputer
+import controllers.common.PPO_defaults as d
 from controllers.common.checkpoints import (
     run_checkpoint_dir, run_checkpoint_path, load_checkpoint,
     make_checkpoint_header as _make_checkpoint_header,
@@ -398,7 +399,27 @@ def train(config=None):
     if config is None:
         config = Config()
     _init_supervisor()
-    env = WebotsEnv(config)
+    reward_computer = PPORewardComputer(
+        endpoint=config.endpoint,
+        collision_penalty=config.collision_penalty,
+        progress_reward_scale=config.progress_reward_scale,
+        distance_reward_scale=config.distance_reward_scale,
+        heading_reward_scale=config.heading_reward_scale,
+        safety_reward_scale=config.safety_reward_scale,
+        motion_reward_scale=config.motion_reward_scale,
+        new_best_distance_bonus=config.new_best_distance_bonus,
+        proximity_radius=getattr(config, "proximity_radius", d.REW_PROXIMITY_RADIUS),
+        proximity_reward_scale=getattr(config, "proximity_reward_scale", d.REW_PROXIMITY_SCALE),
+        step_penalty=config.step_penalty,
+        goal_threshold=config.goal_threshold,
+        goal_stop_speed_threshold=config.goal_stop_speed_threshold,
+        goal_success_reward=config.goal_success_reward,
+        goal_stop_bonus=config.goal_stop_bonus,
+        goal_hold_reward=config.goal_hold_reward,
+        goal_speed_penalty=config.goal_speed_penalty,
+        goal_overshoot_penalty=config.goal_overshoot_penalty,
+    )
+    env = WebotsEnv(config, reward_computer)
     env.reset()
     run_id = Path(env.run_folder).name
     obs_size = env.observation_size
@@ -575,3 +596,5 @@ def train(config=None):
 
 if __name__ == "__main__":
     train()
+
+

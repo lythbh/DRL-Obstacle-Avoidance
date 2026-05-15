@@ -71,30 +71,3 @@ class PPODefaults:
     recurrent_cell = "gru"
     clip_value_loss = False
     max_grad_norm = 0.5
-
-class SACDefaults:
-    episodes = 2500
-    update_after_steps = 2000
-    updates_per_step = 2
-    gradient_steps_per_episode = 4
-    save_every = 100
-    gamma = 0.99
-    tau = 0.01
-    actor_lr = 5e-4
-    critic_lr = 1e-4
-    alpha_lr = 0.001
-    initial_alpha = 0.5
-    auto_entropy_tuning = True
-    target_entropy_scale = 0.8
-    hidden_size = 128
-    latent_size = 128
-    recurrent_cell = "gru"
-    recurrent_hidden_size = None
-    recurrent_layers = 1
-    lstm_hidden_size = 128
-    lstm_layers = 1
-    log_std_min = -5.0
-    log_std_max = 2.0
-    replay_capacity = 65536
-    replay_batch_size = 64
-    min_replay_sequences = 256

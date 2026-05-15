@@ -8,27 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from controller import Supervisor  # pyright: ignore[reportMissingImports]
-from controllers.common.defaults import (
-    REW_COLLISION_PENALTY as COLLISION_PENALTY,
-    REW_DISTANCE_SCALE as DISTANCE_REWARD_SCALE,
-    REW_GOAL_HOLD as GOAL_HOLD_REWARD,
-    REW_GOAL_OVERSHOOT_PENALTY as GOAL_OVERSHOOT_PENALTY,
-    REW_GOAL_SPEED_PENALTY as GOAL_SPEED_PENALTY,
-    REW_GOAL_STOP_BONUS as GOAL_STOP_BONUS,
-    REW_GOAL_SUCCESS as GOAL_SUCCESS_REWARD,
-    REW_HEADING_SCALE as HEADING_REWARD_SCALE,
-    REW_HIGH_SPEED_BONUS as HIGH_SPEED_BONUS,
-    REW_HIGH_SPEED_THRESHOLD as HIGH_SPEED_THRESHOLD,
-    REW_MOTION_SCALE as MOTION_REWARD_SCALE,
-    REW_NEW_BEST_DISTANCE_BONUS as NEW_BEST_DISTANCE_BONUS,
-    REW_PROGRESS_SCALE as PROGRESS_REWARD_SCALE,
-    REW_PROXIMITY_RADIUS as PROXIMITY_RADIUS,
-    REW_PROXIMITY_SCALE as PROXIMITY_REWARD_SCALE,
-    REW_SAFETY_SCALE as SAFETY_REWARD_SCALE,
-    REW_SLOW_SPEED_PENALTY as SLOW_SPEED_PENALTY,
-    REW_SLOW_SPEED_THRESHOLD as SLOW_SPEED_THRESHOLD,
-    REW_STEP_PENALTY as STEP_PENALTY,
-)
 
 _SLAM_IMPORT_ERROR: Optional[Exception] = None
 try:
@@ -99,7 +78,6 @@ class SLAMProcessor:
         if self.enabled:
             self.imu_proc: Any = IMUProcessor(dt=dt)
             self.iekf: Any = IEKFBackend()
-            # Occupancy map only built when save_episodes=True (visualization only, not used in obs)
             self.slam_map: Any = SLAMMap(map_resolution=0.05) if self.save_episodes else None
         else:
             self.imu_proc = None
@@ -318,7 +296,6 @@ class AltinoDriver:
                    else self._get_heading())
         return lidar_sectors, pos, heading, imu_state, collision
 
-    # Movable obstacles: (DEF name, z height to restore after XY randomisation)
     _OBSTACLE_DEFS: List[Tuple[str, float]] = [
         ("OBS_BARREL",   0.0),
         ("OBS_CONE",     0.0),
@@ -338,15 +315,11 @@ class AltinoDriver:
     ]
 
     def randomize_goal(self, y_range: float = 1.5) -> np.ndarray:
-        """Randomise goal y-position and move the barrier wall gap to match.
-
-        The goal x stays fixed (far end of arena). Only y varies so travel
-        distance stays consistent. Returns the new goal [x, y].
-        """
+        """Randomise goal y-position and move the barrier wall gap to match."""
         goal_x = float(self.config.endpoint[0])
         goal_y = float(np.random.uniform(-y_range, y_range))
-        wall_x = goal_x - 0.5          # barrier sits 0.5 m in front of goal
-        half_span = 1.55               # half-length of each wall segment (5Ã—5 arena)
+        wall_x = goal_x - 0.5
+        half_span = 1.55
 
         top = self.supervisor.getFromDef("BARRIER_TOP")
         bot = self.supervisor.getFromDef("BARRIER_BOTTOM")
@@ -370,7 +343,6 @@ class AltinoDriver:
             field = node.getField("translation")
             for _ in range(60):
                 if np.random.random() < 0.75:
-                    # bias toward the travel corridor between start and barrier
                     x = float(np.random.uniform(-1.5, 2.3))
                     y = float(np.random.uniform(-1.2, 1.2))
                 else:
@@ -415,98 +387,10 @@ class AltinoDriver:
             print("[ENV] WARNING: cannot reset; ALTINO node not accessible!", flush=True)
 
 
-class RewardComputer:
-    """Computes rewards for the obstacle avoidance task."""
-
-    def __init__(self, config: Any) -> None:
-        """Initialize reward computer with configured reward coefficients."""
-        self.endpoint = np.array(config.endpoint, dtype=np.float32)
-        self.reference_distance = float(config.reference_distance)
-        self.collision_reward = float(config.collision_penalty)
-        self.progress_scale = float(config.progress_reward_scale)
-        self.distance_reward_scale = float(config.distance_reward_scale)
-        self.heading_reward_scale = float(config.heading_reward_scale)
-        self.safety_reward_scale = float(config.safety_reward_scale)
-        self.motion_reward_scale = float(config.motion_reward_scale)
-        self.slow_speed_threshold = float(getattr(config, "slow_speed_threshold", SLOW_SPEED_THRESHOLD))
-        self.slow_speed_penalty = float(getattr(config, "slow_speed_penalty", SLOW_SPEED_PENALTY))
-        self.high_speed_threshold = float(getattr(config, "high_speed_threshold", HIGH_SPEED_THRESHOLD))
-        self.high_speed_bonus = float(getattr(config, "high_speed_bonus", HIGH_SPEED_BONUS))
-        self.new_best_distance_bonus = float(config.new_best_distance_bonus)
-        self.proximity_radius = float(getattr(config, "proximity_radius", PROXIMITY_RADIUS))
-        self.proximity_reward_scale = float(getattr(config, "proximity_reward_scale", PROXIMITY_REWARD_SCALE))
-        self.step_penalty = float(config.step_penalty)
-        self.goal_threshold = float(config.goal_threshold)
-        self.goal_stop_speed_threshold = float(getattr(config, "goal_stop_speed_threshold", 0.1))
-        self.goal_success_reward = float(config.goal_success_reward)
-        self.goal_stop_bonus = float(config.goal_stop_bonus)
-        self.goal_hold_reward = float(config.goal_hold_reward)
-        self.goal_speed_penalty = float(config.goal_speed_penalty)
-        self.goal_overshoot_penalty = float(config.goal_overshoot_penalty)
-
-    def compute(
-        self,
-        collision: bool,
-        current_pos: np.ndarray,
-        current_step: int,
-        prev_distance: Optional[float],
-        goal_error: float,
-        min_lidar_norm: float,
-        speed_norm: float,
-        reached_new_best_distance: bool,
-        accel: np.ndarray,
-    ) -> Tuple[float, Optional[float]]:
-        """Compute reward from collision, progress, heading, safety, speed, and goal bonus components."""
-        if collision:
-            return self.collision_reward, None
-
-        distance_to_end = float(np.linalg.norm(current_pos - self.endpoint))
-
-        if distance_to_end < self.goal_threshold:
-            if speed_norm <= self.goal_stop_speed_threshold:
-                return self.goal_success_reward + self.goal_stop_bonus + self.goal_hold_reward, distance_to_end
-            return self.goal_speed_penalty * speed_norm + self.goal_hold_reward, distance_to_end
-
-        progress = 0.0
-        if prev_distance is not None:
-            delta = float(prev_distance - distance_to_end)
-            progress = delta * self.progress_scale if delta >= 0.0 else delta * (0.25 * self.progress_scale)
-        distance_ratio = float(np.clip(distance_to_end / max(self.reference_distance, 1e-6), 0.0, 2.0))
-        distance_penalty = -distance_ratio * self.distance_reward_scale
-        heading_alignment = float(np.cos(goal_error))
-        heading_reward = heading_alignment * self.heading_reward_scale
-        safety_penalty = -(1.0 - float(np.clip(min_lidar_norm, 0.0, 1.0))) * self.safety_reward_scale
-        motion_reward = float(np.clip(speed_norm, 0.0, 1.0)) * self.motion_reward_scale
-        slow_penalty = self.slow_speed_penalty if speed_norm < self.slow_speed_threshold else 0.0
-        high_speed_reward = self.high_speed_bonus if speed_norm > self.high_speed_threshold else 0.0
-        new_best_bonus = self.new_best_distance_bonus if reached_new_best_distance else 0.0
-
-        accel_magnitude = float(np.linalg.norm(accel))
-        accel_penalty = 0.0
-        proximity_bonus = 0.0
-        if distance_to_end < self.proximity_radius and distance_to_end >= self.goal_threshold:
-# accel_penalty removed — let the agent maneuver freely near the goal
-            proximity_bonus = self.proximity_reward_scale * (1.0 - distance_to_end / self.proximity_radius)
-
-        return (
-            progress
-           
-            + distance_penalty
-            + heading_reward
-            + safety_penalty
-            + motion_reward
-            + slow_penalty
-            + high_speed_reward
-            + new_best_bonus
-            + proximity_bonus
-            + self.step_penalty
-        ), distance_to_end
-
-
 class WebotsEnv:
     """Webots simulation environment for ALTINO obstacle avoidance."""
 
-    def __init__(self, config: Any):
+    def __init__(self, config: Any, reward_computer: Any):
         """Initialize Webots environment with robot, reward computer, and observation builders."""
         _report_slam_status()
         self.config = config
@@ -544,7 +428,7 @@ class WebotsEnv:
         self.headlights = self.robot.supervisor.getDevice("headlights")
         self.backlights = self.robot.supervisor.getDevice("backlights")
 
-        self.reward_computer = RewardComputer(config)
+        self.reward_computer = reward_computer
 
         self.current_step = 0
         self.episode_reward = 0.0
@@ -774,7 +658,3 @@ class WebotsEnv:
 
         observation = self._build_observation(lidar_sectors, pos, heading, imu_state)
         return observation, reward, terminated, truncated, info
-
-
-
-
