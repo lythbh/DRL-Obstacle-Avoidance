@@ -9,7 +9,7 @@ ENV_MAX_STEPS = 5000
 ENV_COLLISION_THRESHOLD = 0.1
 ENV_LOW_SCORE_THRESHOLD = -3000.0   # CHANGED: -2000 -> -3000 (more exploration room)
 ENV_ENDPOINT = (2.0, 0.0)
-ENV_GOAL_THRESHOLD = 0.3
+ENV_GOAL_THRESHOLD = 0.5            # CHANGED: 0.3 -> 0.5 (speed-penalty zone starts earlier; forces deceleration)
 ENV_GOAL_STOP_SPEED_THRESHOLD = 0.15
 ENV_MAX_STEERING_ANGLE = 0.9
 ENV_MAX_SPEED = 6.0
@@ -28,24 +28,24 @@ SLAM_SAVE_PLOTS = False
 SLAM_FORCE_CPU = True
 
 # --- Reward ---
-REW_COLLISION_PENALTY = -250.0      # CHANGED: -200 -> -250 (make crash costlier than a near-miss episode)
+REW_COLLISION_PENALTY = -600.0      # CHANGED: -250 -> -600 (collision must be the dominant negative event)
 REW_PROGRESS_SCALE = 3.0
-REW_DISTANCE_SCALE = 0.05
-REW_HEADING_SCALE = 0.3             # CHANGED: 0.35 -> 0.3 (slightly less "beeline" pressure)
-REW_SAFETY_SCALE = 1.0              # CHANGED: 0.8 -> 1.0 (modest boost to obstacle aversion)
-REW_MOTION_SCALE = 0.15             # CHANGED: 0.2 -> 0.15 (less reward for driving fast)
+REW_DISTANCE_SCALE = 0.02           # CHANGED: 0.05 -> 0.02 (progress already covers distance; weaken redundant signal)
+REW_HEADING_SCALE = 0.2             # CHANGED: 0.3 -> 0.2 (reduce blind "face the goal" pressure)
+REW_SAFETY_SCALE = 0.3              # CHANGED: 1.0 -> 0.3 (per-step obstacle tax is the #1 cause of variance)
+REW_MOTION_SCALE = 0.1              # CHANGED: 0.15 -> 0.1 (drive fast only when path is clear)
 REW_SLOW_SPEED_THRESHOLD = 0.25
 REW_SLOW_SPEED_PENALTY = -0.02
 REW_HIGH_SPEED_THRESHOLD = 0.6
 REW_HIGH_SPEED_BONUS = 0.05
 REW_NEW_BEST_DISTANCE_BONUS = 0.3   # CHANGED: 0.5 -> 0.3 (exploration nudge without inflation)
-REW_STEP_PENALTY = -0.01            # CHANGED: -0.03 -> -0.01 (revert; time pressure was compounding the death spiral)
+REW_STEP_PENALTY = -0.005           # CHANGED: -0.01 -> -0.005 (very mild time pressure)
 REW_GOAL_SUCCESS = 100.0
 REW_GOAL_STOP_BONUS = 200.0
 REW_GOAL_SPEED_PENALTY = -20.0      # CHANGED: -10 -> -20 (stronger incentive to brake in goal zone)
 REW_GOAL_OVERSHOOT_PENALTY = -12.0
 REW_SCALE = 0.5
-REW_PROXIMITY_SCALE = 1.2           # CHANGED: 0.8 -> 1.2 (reward careful final approach more)
+REW_PROXIMITY_SCALE = 0.6           # CHANGED: 1.2 -> 0.6 (halve the goal attractor; fewer high-speed crashes near goal)
 REW_PROXIMITY_RADIUS = 2.0            # CHANGED: 1.5 -> 2.0 (earlier final-approach bonus)
 
 # --- Training ---
@@ -55,8 +55,8 @@ class RecurrentDefaults:
     sequence_stride = 16
 
 class SACDefaults:
-    episodes = 750
-    seed = 42
+    episodes = 1000
+    #seed = 42                        #Optional
     update_after_steps = 2000
     gradient_steps_per_episode = 12   # CHANGED: 16 -> 12 (reduce replay overfitting)
     save_every = 100

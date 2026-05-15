@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import deque
+import random
 import sys, time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -33,7 +34,7 @@ _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 @dataclass
 class Config:
     episodes: int = d.SACDefaults.episodes
-    seed: int = d.SACDefaults.seed
+    seed: Optional[int] = None
     update_after_steps: int = d.SACDefaults.update_after_steps
     gradient_steps_per_episode: int = d.SACDefaults.gradient_steps_per_episode
     save_every: int = d.SACDefaults.save_every
@@ -103,6 +104,8 @@ class Config:
     reset_settle_steps: int = d.ENV_RESET_SETTLE_STEPS
 
     def __post_init__(self):
+        if self.seed is None:
+            self.seed = random.SystemRandom().randrange(0, 2**32)
         self.recurrent_cell = self.recurrent_cell.lower().strip()
         assert self.recurrent_cell in {"gru", "lstm"}, f"Unsupported recurrent_cell: {self.recurrent_cell}"
         if self.recurrent_hidden_size is None:
@@ -123,6 +126,7 @@ def train(config=None):
     if config is None:
         config = Config()
 
+    assert config.seed is not None
     set_all_seeds(config.seed)
     _init_supervisor()
     reference_distance = float(config.reference_distance if config.reference_distance is not None else 4.0)
