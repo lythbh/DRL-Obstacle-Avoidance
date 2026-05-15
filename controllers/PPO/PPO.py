@@ -1,4 +1,4 @@
-"""PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
+﻿"""PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
 import sys, time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -34,9 +34,10 @@ class Config:
     save_every: int = d.PPODefaults.save_every
     gamma: float = 0.99
     gae_lambda: float = d.PPODefaults.gae_lambda
-    epsilon: float = 0.2
+    epsilon: float = 0.1  # reduced from 0.2 â€” tighter clipping for more stable updates
     learning_rate: float = d.PPODefaults.learning_rate
     entropy_coef: float = d.PPODefaults.entropy_coef
+    clip_value_loss: bool = d.PPODefaults.clip_value_loss
     hidden_size: int = d.PPODefaults.hidden_size
     latent_size: int = d.PPODefaults.latent_size
     lstm_hidden_size: int = d.PPODefaults.lstm_hidden_size
@@ -128,9 +129,6 @@ class PPOAgent:
         model_class = GRUActorCritic if recurrent_cell.lower().strip() == "gru" else LSTMActorCritic
         self.model = model_class(self.obs_size, self.action_dim, self.config).to(self.device)
         self.actor = self.model.policy_head
-        with torch.no_grad():
-            if self.actor.bias is not None and self.action_dim > 1:
-                self.actor.bias[1] = -0.8
         self.actor_log_std = nn.Parameter(torch.full((self.action_dim,), -0.5, dtype=torch.float32, device=self.device))
         params = list(self.model.parameters()) + [self.actor_log_std]
         self.optimizer = torch.optim.Adam(params, lr=self.config.learning_rate)
@@ -226,6 +224,8 @@ class PPOAgent:
         adv_std = float(all_adv.std() + 1e-8)
         for t in trajectories:
             t["advantages"] = ((t["advantages"] - adv_mean) / adv_std).astype(np.float32)
+            # Clip normalized advantages to prevent extreme ratio outliers
+            t["advantages"] = np.clip(t["advantages"], -5.0, 5.0)
 
     @staticmethod
     def _sequence_loss_mask(valid_mask, burn_in):
@@ -249,6 +249,7 @@ class PPOAgent:
         surr1 = ratio * batch["advantages"]
         surr2 = torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon) * batch["advantages"]
         surrogate = torch.where(mask_bool, torch.min(surr1, surr2), torch.zeros_like(surr1))
+        # Value loss: simple smooth_l1_loss without clipping (clip_value_loss disabled to allow critic gradient flow)
         value_error = nn.functional.smooth_l1_loss(values, batch["returns"], reduction="none")
         entropy_term = torch.where(mask_bool, entropy, torch.zeros_like(entropy))
         valid_count = learn_mask.sum().clamp_min(1.0)
@@ -277,7 +278,19 @@ class PPOAgent:
         grad_norm_actor = MetricsLogger.compute_grad_norm(actor_params)
         grad_norm_critic = MetricsLogger.compute_grad_norm(critic_params)
 
-        nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
+        # Per-module gradient clipping for stability:
+        # - Actor params get conservative clipping (max_norm=0.5)
+        # - Critic and RNN params get looser clipping (max_norm=1.0)
+        actor_clip = list(self.model.policy_head.parameters()) + [self.actor_log_std]
+        critic_clip = list(self.model.value_head.parameters())
+        rnn_attr = "gru" if hasattr(self.model, "gru") else "lstm"
+        rnn_clip = list(getattr(self.model, rnn_attr).parameters())
+        encoder_clip = [p for n, p in self.model.named_parameters()
+                        if "policy_head" not in n and "value_head" not in n and rnn_attr not in n]
+        nn.utils.clip_grad_norm_(actor_clip, max_norm=0.5)
+        nn.utils.clip_grad_norm_(critic_clip, max_norm=5.0)  # raised from 1.0 â€” critic has only 2 params, needs more room
+        nn.utils.clip_grad_norm_(rnn_clip, max_norm=1.0)
+        nn.utils.clip_grad_norm_(encoder_clip, max_norm=0.5)
         self.optimizer.step()
         with torch.no_grad():
             self.actor_log_std.data.copy_(torch.nan_to_num(self.actor_log_std.data, nan=-0.5, posinf=2.0, neginf=-5.0).clamp(-5.0, 2.0))
@@ -331,7 +344,10 @@ class PPOAgent:
             return []
         update_metrics = []
         num = len(trajectories)
-        for _ in range(self.config.epochs):
+        early_stop = False
+        for epoch in range(self.config.epochs):
+            if early_stop:
+                break
             indices = torch.randperm(num).tolist()
             for start in range(0, num, self.config.batch_size):
                 batch_indices = indices[start: start + self.config.batch_size]
@@ -339,6 +355,10 @@ class PPOAgent:
                 metrics = self._update_batch(batch)
                 if metrics is not None:
                     update_metrics.append(metrics)
+                    # Early stopping if KL divergence is too large
+                    if metrics.get("approx_kl", 0) > 0.05:
+                        early_stop = True
+                        break
         return update_metrics
 
     def load_model(self, model_path: str) -> None:
@@ -405,6 +425,7 @@ def train(config=None):
         done = False
         ep_step = 0
         ep_obs, ep_act, ep_lp, ep_rew = [], [], [], []
+        ep_speeds = []
         ep_end_reason = "max_steps"
         ep_goal = ep_success = False
         recurrent_state = agent.get_initial_state(batch_size=1)
@@ -419,6 +440,7 @@ def train(config=None):
             total_steps += 1
             ep_goal = ep_goal or bool(info.get("goal_reached", False))
             ep_success = bool(info.get("success", False))
+            ep_speeds.append(float(info.get("speed_norm", 0.0)))
             if done:
                 reason = info.get("reset_reason", "")
                 ep_end_reason = reason if reason else ("max_steps" if truncated else ep_end_reason)
@@ -431,7 +453,7 @@ def train(config=None):
         ep_obs_arr = np.array(ep_obs, dtype=np.float32)
         with torch.no_grad():
             _, ep_values, _ = agent.model(
-                ep_obs_arr, recurrent_state=agent.get_initial_state(batch_size=1),
+                ep_obs_arr, recurrent_state=None,
                 done_mask=np.concatenate(([1.0], np.zeros(len(ep_rew) - 1, dtype=np.float32))),
             )
             ep_val_np = ep_values.detach().cpu().numpy().reshape(-1)
@@ -456,6 +478,13 @@ def train(config=None):
         obs_stats = MetricsLogger.compute_obs_stats(ep_obs)
         ep_val_residual = MetricsLogger.compute_value_residual(ep_val_np, ep_ret)
 
+        # Learning rate warmup: ramp from 25% to 100% over first 25 episodes.
+        # Avoids freezing the model when exploration is strongest.
+        if episode < 25:
+            warmup_lr = config.learning_rate * (0.25 + 0.75 * (episode + 1) / 25.0)
+            for pg in agent.optimizer.param_groups:
+                pg['lr'] = warmup_lr
+
         all_update_metrics = []
         if (episode + 1) % config.update_every == 0:
             batch_metrics = agent.update(rollout)
@@ -469,6 +498,11 @@ def train(config=None):
                 )
 
         agg_upd = MetricsLogger.aggregate_update_metrics(all_update_metrics)
+
+        # Entropy coefficient decays linearly over training, maintaining some
+        # exploration throughout to prevent premature convergence to poor policies.
+        decay_frac = min(1.0, episode / max(1, config.episodes))
+        agent.config.entropy_coef = d.PPODefaults.entropy_coef * (1.0 - 0.15 * decay_frac)
 
         ep_sum = sum(ep_rew)
         rew_w.append(ep_sum)
@@ -499,9 +533,10 @@ def train(config=None):
         g10 = float(np.mean(gol_w[-10:]))
         c10 = float(np.mean(col_w[-10:]))
         t10 = float(np.mean(to_w[-10:]))
+        avg_spd = float(np.mean(ep_speeds)) * config.max_speed if ep_speeds else 0.0
         elapsed = time.perf_counter() - start_time
         ckpt_note = f" ckpt={'+'.join(ckpt_flags)}" if ckpt_flags else ""
-        print(f"[TRAIN][PPO] ep={episode + 1:03d}/{config.episodes} r={ep_sum:8.2f} avg10={r10:8.2f} steps={ep_step:4d} succ10={s10:4.2f} touch10={g10:4.2f} col10={c10:4.2f} to10={t10:4.2f} min_d={env.min_episode_distance:5.2f} end={ep_end_reason} t={elapsed:7.1f}s{ckpt_note}", flush=True)
+        print(f"[TRAIN][PPO] ep={episode + 1:03d}/{config.episodes} r={ep_sum:8.2f} avg10={r10:8.2f} steps={ep_step:4d} succ10={s10:4.2f} touch10={g10:4.2f} col10={c10:4.2f} to10={t10:4.2f} min_d={env.min_episode_distance:5.2f} avg_spd={avg_spd:4.2f}m/s end={ep_end_reason} t={elapsed:7.1f}s{ckpt_note}", flush=True)
 
         metrics_logger.log_episode(
             episode=episode + 1,
@@ -514,7 +549,7 @@ def train(config=None):
             collision=int(ep_end_reason == "collision"),
             timeout=int(ep_end_reason == "max_steps"),
             min_dist=round(env.min_episode_distance, 4),
-            avg_speed_ms=0.0,
+            avg_speed_ms=round(avg_spd, 3),
             end_reason=ep_end_reason,
             elapsed_s=round(elapsed, 1),
             recurrent_cell=config.recurrent_cell,

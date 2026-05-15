@@ -1,4 +1,4 @@
-"""Consolidated defaults for environment, SLAM, rewards, and training."""
+﻿"""Consolidated defaults for environment, SLAM, rewards, and training."""
 
 # --- Environment observation / physics ---
 ENV_LIDAR_SECTOR_DIM = 16
@@ -7,7 +7,7 @@ ENV_IMU_FEATURE_DIM = 10
 ENV_OCCUPANCY_GRID_SHAPE = None
 ENV_MAX_STEPS = 4000
 ENV_COLLISION_THRESHOLD = 0.1
-ENV_LOW_SCORE_THRESHOLD = -200.0
+ENV_LOW_SCORE_THRESHOLD = -2000.0
 ENV_ENDPOINT = (2.0, 0.0)
 ENV_GOAL_THRESHOLD = 0.3
 ENV_GOAL_STOP_SPEED_THRESHOLD = 0.15
@@ -28,62 +28,64 @@ SLAM_SAVE_PLOTS = False
 SLAM_FORCE_CPU = True
 
 # --- Reward ---
-REW_COLLISION_PENALTY = -35.0
-REW_PROGRESS_SCALE = 1.2
-REW_DISTANCE_SCALE = 0.02
-REW_HEADING_SCALE = 0.03
-REW_SAFETY_SCALE = 0.03
-REW_MOTION_SCALE = 0.05
+REW_COLLISION_PENALTY = -100.0
+REW_PROGRESS_SCALE = 3.0
+REW_DISTANCE_SCALE = 0.1
+REW_HEADING_SCALE = 0.05
+REW_SAFETY_SCALE = 0.15
+REW_MOTION_SCALE = 0.02
 REW_SLOW_SPEED_THRESHOLD = 0.25
-REW_SLOW_SPEED_PENALTY = -0.04
+REW_SLOW_SPEED_PENALTY = -0.02
 REW_HIGH_SPEED_THRESHOLD = 0.6
-REW_HIGH_SPEED_BONUS = 0.03
-REW_NEW_BEST_DISTANCE_BONUS = 0.02
-REW_STEP_PENALTY = -0.003
-REW_GOAL_SUCCESS = 60.0
-REW_GOAL_STOP_BONUS = 40.0
+REW_HIGH_SPEED_BONUS = 0.05
+REW_NEW_BEST_DISTANCE_BONUS = 0.05
+REW_STEP_PENALTY = -0.005
+REW_GOAL_SUCCESS = 500.0
+REW_GOAL_STOP_BONUS = 200.0
 REW_GOAL_HOLD = 0.0
 REW_GOAL_SPEED_PENALTY = -10.0
 REW_GOAL_OVERSHOOT_PENALTY = -12.0
-REW_SCALE = 0.1
-REW_PROXIMITY_SCALE = 0.1
+REW_SCALE = 1.0
+REW_PROXIMITY_SCALE = 0.6
 REW_PROXIMITY_RADIUS = 1.5
 
 # --- Training ---
 class RecurrentDefaults:
-    sequence_length = 16
-    burn_in = 4
-    sequence_stride = 8
+    sequence_length = 32
+    burn_in = 8
+    sequence_stride = 16
 
 class PPODefaults:
     episodes = 2500
-    update_every = 5
-    epochs = 4
+    update_every = 4
+    epochs = 2
     batch_size = 64
     save_every = 100
-    learning_rate = 1e-4
-    entropy_coef = 0.02
+    learning_rate = 5e-4
+    entropy_coef = 0.01
     gae_lambda = 0.95
     hidden_size = 128
     latent_size = 128
     lstm_hidden_size = 128
     lstm_layers = 1
     recurrent_cell = "gru"
+    clip_value_loss = False
+    max_grad_norm = 0.5
 
 class SACDefaults:
     episodes = 2500
     update_after_steps = 2000
     updates_per_step = 2
-    gradient_steps_per_episode = 10
+    gradient_steps_per_episode = 4
     save_every = 100
     gamma = 0.99
-    tau = 0.005
-    actor_lr = 3e-4
-    critic_lr = 3e-4
-    alpha_lr = 3e-4
-    initial_alpha = 0.2
+    tau = 0.01
+    actor_lr = 5e-4
+    critic_lr = 1e-4
+    alpha_lr = 0.001
+    initial_alpha = 0.5
     auto_entropy_tuning = True
-    target_entropy_scale = 1.0
+    target_entropy_scale = 0.8
     hidden_size = 128
     latent_size = 128
     recurrent_cell = "gru"
@@ -93,6 +95,6 @@ class SACDefaults:
     lstm_layers = 1
     log_std_min = -5.0
     log_std_max = 2.0
-    replay_capacity = 16384
-    replay_batch_size = 32
+    replay_capacity = 65536
+    replay_batch_size = 64
     min_replay_sequences = 256

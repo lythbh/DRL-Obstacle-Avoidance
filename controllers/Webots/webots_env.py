@@ -1,4 +1,4 @@
-"""Webots simulation stack for the ALTINO robot."""
+﻿"""Webots simulation stack for the ALTINO robot."""
 
 import os
 from datetime import datetime
@@ -346,7 +346,7 @@ class AltinoDriver:
         goal_x = float(self.config.endpoint[0])
         goal_y = float(np.random.uniform(-y_range, y_range))
         wall_x = goal_x - 0.5          # barrier sits 0.5 m in front of goal
-        half_span = 1.55               # half-length of each wall segment (5×5 arena)
+        half_span = 1.55               # half-length of each wall segment (5Ã—5 arena)
 
         top = self.supervisor.getFromDef("BARRIER_TOP")
         bot = self.supervisor.getFromDef("BARRIER_BOTTOM")
@@ -471,7 +471,6 @@ class RewardComputer:
         if prev_distance is not None:
             delta = float(prev_distance - distance_to_end)
             progress = delta * self.progress_scale if delta >= 0.0 else delta * (0.25 * self.progress_scale)
-
         distance_ratio = float(np.clip(distance_to_end / max(self.reference_distance, 1e-6), 0.0, 2.0))
         distance_penalty = -distance_ratio * self.distance_reward_scale
         heading_alignment = float(np.cos(goal_error))
@@ -486,11 +485,12 @@ class RewardComputer:
         accel_penalty = 0.0
         proximity_bonus = 0.0
         if distance_to_end < self.proximity_radius and distance_to_end >= self.goal_threshold:
-            accel_penalty = -0.05 * accel_magnitude
+# accel_penalty removed — let the agent maneuver freely near the goal
             proximity_bonus = self.proximity_reward_scale * (1.0 - distance_to_end / self.proximity_radius)
 
         return (
             progress
+           
             + distance_penalty
             + heading_reward
             + safety_penalty
@@ -498,7 +498,6 @@ class RewardComputer:
             + slow_penalty
             + high_speed_reward
             + new_best_bonus
-            + accel_penalty
             + proximity_bonus
             + self.step_penalty
         ), distance_to_end
@@ -775,3 +774,7 @@ class WebotsEnv:
 
         observation = self._build_observation(lidar_sectors, pos, heading, imu_state)
         return observation, reward, terminated, truncated, info
+
+
+
+
