@@ -29,7 +29,7 @@ SLAM_FORCE_CPU = True
 
 # --- Reward ---
 REW_COLLISION_PENALTY = -100.0  
-REW_PROGRESS_SCALE = 0.0
+REW_PROGRESS_SCALE = 1.0
 REW_DISTANCE_SCALE = 0.0
 REW_HEADING_SCALE = 1.0
 REW_SAFETY_SCALE = 1.0
@@ -60,7 +60,7 @@ class SACDefaults:
     update_after_steps = 2000
     gradient_steps_per_episode = 16
     save_every = 100
-    gamma = 0.95
+    gamma = 0.995
     tau = 0.003
     target_update_interval = 2
     actor_lr = 1e-4

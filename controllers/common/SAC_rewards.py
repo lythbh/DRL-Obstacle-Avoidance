@@ -96,7 +96,14 @@ class SACRewardComputer:
 
         distance_to_end = float(np.linalg.norm(current_pos - self.endpoint))
 
-        if distance_to_end < self.goal_threshold and speed_norm <= self.goal_stop_speed_threshold:
-            return heading_reward + self.goal_success_reward, distance_to_end
+        progress = 0.0
+        if prev_distance is not None and self.progress_scale > 0.0:
+            delta = float(prev_distance - distance_to_end)
+            progress = delta * self.progress_scale if delta >= 0.0 else delta * 0.25 * self.progress_scale
 
-        return heading_reward, distance_to_end
+        reward = heading_reward + progress
+
+        if distance_to_end < self.goal_threshold and speed_norm <= self.goal_stop_speed_threshold:
+            return reward + self.goal_success_reward, distance_to_end
+
+        return reward, distance_to_end
