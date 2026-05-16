@@ -84,45 +84,19 @@ class SACRewardComputer:
         speed_norm: float,
         reached_new_best_distance: bool,
     ) -> Tuple[float, Optional[float]]:
-        """Compute reward from collision, progress, heading, safety, speed, and goal bonus components."""
+        """Compute the simplified SAC reward signal."""
         if collision:
             return self.collision_penalty, None
 
+        heading_reward = float(np.cos(goal_error)) * self.heading_reward_scale
+
+        if self.safety_reward_scale > 0.0:
+            safety_penalty = -(1.0 - float(np.clip(min_lidar_norm, 0.0, 1.0))) * self.safety_reward_scale
+            heading_reward += safety_penalty
+
         distance_to_end = float(np.linalg.norm(current_pos - self.endpoint))
 
-        # 1. Base Shaping Calculations (Evaluated continuously)
-        progress = 0.0
-        if prev_distance is not None:
-            delta = float(prev_distance - distance_to_end)
-            progress = delta * self.progress_scale if delta >= 0.0 else delta * (0.25 * self.progress_scale)
-            
-        distance_ratio = float(np.clip(distance_to_end / max(self.reference_distance, 1e-6), 0.0, 2.0))
-        distance_penalty = -distance_ratio * self.distance_reward_scale
-        heading_alignment = float(np.cos(goal_error))
-        heading_reward = heading_alignment * self.heading_reward_scale
-        safety_penalty = -(1.0 - float(np.clip(min_lidar_norm, 0.0, 1.0))) * self.safety_reward_scale
-        motion_reward = float(np.clip(speed_norm, 0.0, 1.0)) * self.motion_reward_scale
-        slow_penalty = self.slow_speed_penalty if speed_norm < self.slow_speed_threshold else 0.0
-        high_speed_reward = self.high_speed_bonus if speed_norm > self.high_speed_threshold else 0.0
-        new_best_bonus = self.new_best_distance_bonus if reached_new_best_distance else 0.0
+        if distance_to_end < self.goal_threshold and speed_norm <= self.goal_stop_speed_threshold:
+            return heading_reward + self.goal_success_reward, distance_to_end
 
-        proximity_bonus = 0.0
-        if distance_to_end < self.proximity_radius and distance_to_end >= self.goal_threshold:
-            proximity_bonus = self.proximity_reward_scale * (1.0 - distance_to_end / self.proximity_radius)
-
-        base_shaping = (
-            progress + distance_penalty + heading_reward + safety_penalty +
-            motion_reward + slow_penalty + high_speed_reward + new_best_bonus +
-            proximity_bonus + self.step_penalty
-        )
-
-        # 2. Add Goal Logic smoothly without erasing the base shaping rewards
-        if distance_to_end < self.goal_threshold:
-            if speed_norm <= self.goal_stop_speed_threshold:
-                # Absolute success: reached position and matching velocity profile
-                return base_shaping + self.goal_success_reward + self.goal_stop_bonus, distance_to_end
-            else:
-                # Inside goal zone but moving too fast: apply mild penalty while maintaining shaping drive
-                return base_shaping + (self.goal_speed_penalty * speed_norm), distance_to_end
-
-        return base_shaping, distance_to_end
+        return heading_reward, distance_to_end
