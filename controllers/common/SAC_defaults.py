@@ -17,7 +17,7 @@ ENV_MIN_SPEED = 0.0
 ENV_START_POSITION = (-2.0, 0.0, 0.02)
 ENV_START_ROTATION = (0.0, 0.0, 1.0, 0.0)
 ENV_START_POSITION_NOISE = 0.08
-ENV_START_YAW_NOISE = 0.8
+ENV_START_YAW_NOISE = 0.4
 ENV_RESET_SETTLE_STEPS = 10
 
 # --- SLAM ---
@@ -28,17 +28,17 @@ SLAM_SAVE_PLOTS = False
 SLAM_FORCE_CPU = True
 
 # --- Reward ---
-REW_COLLISION_PENALTY = -600.0      # CHANGED: -250 -> -600 (collision must be the dominant negative event)
+REW_COLLISION_PENALTY = -1000.0      # CHANGED: -600 -> -1000 (collision must be the dominant negative event)
 REW_PROGRESS_SCALE = 3.0
 REW_DISTANCE_SCALE = 0.02           # CHANGED: 0.05 -> 0.02 (progress already covers distance; weaken redundant signal)
-REW_HEADING_SCALE = 0.2             # CHANGED: 0.3 -> 0.2 (reduce blind "face the goal" pressure)
-REW_SAFETY_SCALE = 0.3              # CHANGED: 1.0 -> 0.3 (per-step obstacle tax is the #1 cause of variance)
+REW_HEADING_SCALE = 1             # CHANGED: 0.2 -> 1 (reduincrease blind "face the goal" pressure)
+REW_SAFETY_SCALE = 0.3              # CHANGED: 0.15 -> 0.3 (per-step obstacle tax is the #1 cause of variance)
 REW_MOTION_SCALE = 0.1              # CHANGED: 0.15 -> 0.1 (drive fast only when path is clear)
 REW_SLOW_SPEED_THRESHOLD = 0.25
 REW_SLOW_SPEED_PENALTY = -0.02
 REW_HIGH_SPEED_THRESHOLD = 0.6
 REW_HIGH_SPEED_BONUS = 0.05
-REW_NEW_BEST_DISTANCE_BONUS = 0.3   # CHANGED: 0.5 -> 0.3 (exploration nudge without inflation)
+REW_NEW_BEST_DISTANCE_BONUS = 0.1   # CHANGED: 0.3 -> 0.1 (exploration nudge without inflation)
 REW_STEP_PENALTY = -0.005           # CHANGED: -0.01 -> -0.005 (very mild time pressure)
 REW_GOAL_SUCCESS = 100.0
 REW_GOAL_STOP_BONUS = 200.0
@@ -55,17 +55,17 @@ class RecurrentDefaults:
     sequence_stride = 16
 
 class SACDefaults:
-    episodes = 1000
+    episodes = 500
     #seed = 42                        #Optional
     update_after_steps = 2000
-    gradient_steps_per_episode = 12   # CHANGED: 16 -> 12 (reduce replay overfitting)
+    gradient_steps_per_episode = 16   # CHANGED: 16 -> 12 (reduce replay overfitting)
     save_every = 100
     gamma = 0.99
     tau = 0.003                       # CHANGED: 0.005 -> 0.003 (softer target networks)
-    target_update_interval = 4        # CHANGED: 2 -> 4 (halve target-update frequency)
-    actor_lr = 2e-4                       # CHANGED: 3e-4 -> 2e-4 (slightly more conservative)
-    critic_lr = 2e-4                      # CHANGED: 3e-4 -> 2e-4
-    alpha_lr = 0.0002                 # CHANGED: 0.0005 -> 0.0002 (2.5x slower decay)
+    target_update_interval = 2        # CHANGED: 2 -> 4 (halve target-update frequency)
+    actor_lr = 1e-4                       # CHANGED: 2e-4 -> 1e-4 (slightly more conservative)
+    critic_lr = 1e-4                      # CHANGED: 2e-4 -> 1e-4
+    alpha_lr = 0.0001                 # CHANGED: 0.0002 -> 0.0001 (2x slower decay)
     initial_alpha = 0.7               # CHANGED: 0.5 -> 0.7 (more initial policy noise)
     auto_entropy_tuning = True
     target_entropy_scale = 0.6        # CHANGED: 0.5 -> 0.6 (higher entropy floor)
