@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Union
 
 import torch
+import os
 
 
 def checkpoint_path(controller_dir: Path, filename: str) -> str:
@@ -66,5 +67,17 @@ def save_checkpoint_file(controller_checkpoints_dir: Path, run_id: str, prefix: 
     `torch.save`.
     """
     path = run_checkpoint_path(controller_checkpoints_dir, run_id, prefix)
-    torch.save(checkpoint, path)
+    temp_path = str(path) + ".tmp"
+
+    # Save to a temporary file first to avoid Windows file-locking issues
+    torch.save(checkpoint, temp_path)
+
+    # Atomically move into place; fall back to rename if necessary
+    try:
+        os.replace(temp_path, path)
+    except OSError:
+        if os.path.exists(path):
+            os.remove(path)
+        os.rename(temp_path, path)
+
     return path

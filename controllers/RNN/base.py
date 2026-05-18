@@ -69,8 +69,8 @@ class RecurrentActorCriticBase(nn.Module):
             nn.Linear(fusion_input_dim, config.hidden_size), nn.ReLU(),
             nn.Linear(config.hidden_size, config.latent_size), nn.ReLU(),
         )
-        self.recurrent_hidden_size = config.lstm_hidden_size
-        self.recurrent_layers = config.lstm_layers
+        self.recurrent_hidden_size = config.recurrent_hidden_size
+        self.recurrent_layers = config.recurrent_layers
         self.policy_head = nn.Linear(self.recurrent_hidden_size, action_dim) if self.use_heads else None
         self.value_head = nn.Linear(self.recurrent_hidden_size, 1) if self.use_heads else None
 

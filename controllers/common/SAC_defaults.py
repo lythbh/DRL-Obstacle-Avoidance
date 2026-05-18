@@ -44,31 +44,31 @@ REW_GOAL_SUCCESS = 100.0
 REW_GOAL_STOP_BONUS = 0.0
 REW_GOAL_SPEED_PENALTY = 0.0
 REW_GOAL_OVERSHOOT_PENALTY = 0.0
-REW_SCALE = 1.0
+REW_SCALE = 5.0
 REW_PROXIMITY_SCALE = 0.0
 REW_PROXIMITY_RADIUS = 0.0
 
 # --- Training ---
 class RecurrentDefaults:
-    sequence_length = 32
-    burn_in = 8
-    sequence_stride = 16
+    sequence_length = 64
+    burn_in = 16
+    sequence_stride = 32
 
 class SACDefaults:
-    episodes = 500
+    episodes = 1000
     #seed = 42                        #Optional
-    update_after_steps = 2000
-    gradient_steps_per_episode = 16
+    update_after_steps = 4000
+    gradient_steps_per_episode = 128
     save_every = 100
-    gamma = 0.995
+    gamma = 0.999
     tau = 0.003
     target_update_interval = 2
     actor_lr = 1e-4
     critic_lr = 1e-4
-    alpha_lr = 0.0001
-    initial_alpha = 0.7
+    alpha_lr = 3e-4
+    initial_alpha = 0.1
     auto_entropy_tuning = True
-    target_entropy_scale = 0.6
+    target_entropy_scale = 1
     hidden_size = 128
     latent_size = 128
     recurrent_cell = "gru"
@@ -79,5 +79,5 @@ class SACDefaults:
     log_std_min = -3.0
     log_std_max = 2.0
     replay_capacity = 50000
-    replay_batch_size = 128
+    replay_batch_size = 64
     min_replay_sequences = 128

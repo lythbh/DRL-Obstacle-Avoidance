@@ -183,15 +183,29 @@ class SACAgent:
         """Compute mean of values, ignoring masked (invalid) positions."""
         return (values * mask.unsqueeze(-1).to(dtype=values.dtype)).sum() / mask.sum().clamp_min(1.0)
 
+    @staticmethod
+    def _clone_recurrent_state(state):
+        """Clone a recurrent state so independent network paths cannot share storage."""
+        if state is None:
+            return None
+        if isinstance(state, tuple):
+            return tuple(SACAgent._clone_recurrent_state(part) for part in state)
+        if torch.is_tensor(state):
+            return state.clone()
+        return torch.as_tensor(state).clone()
+
     def _critic_forward(self, q_enc, q_head, obs, action, recurrent_state=None, done_mask=None):
-        """Forward pass through critic encoder and head, handling shape mismatches."""
-        features, next_state = q_enc.encode_only(obs, recurrent_state=recurrent_state, done_mask=done_mask)
-        if features.ndim != action.ndim:
-            if features.ndim == 2 and action.ndim == 3 and action.shape[1] == 1:
-                action = action.squeeze(1)
-            elif features.ndim == 3 and action.ndim == 2:
-                action = action.unsqueeze(1)
-        q_val = q_head(torch.cat([features, action], dim=-1))
+        """Forward pass through the action-conditioned recurrent critic."""
+        features, next_state = q_enc.encode_only(
+            obs,
+            recurrent_state=recurrent_state,
+            done_mask=done_mask,
+        )
+        action_tensor = action if torch.is_tensor(action) else torch.as_tensor(action, dtype=torch.float32, device=features.device)
+        if action_tensor.ndim == 2:
+            action_tensor = action_tensor.unsqueeze(1)
+        combined_features = torch.cat([features, action_tensor], dim=-1)
+        q_val = q_head(combined_features)
         return q_val, next_state
 
     def _prepare_done_masks(self, batch):
@@ -226,41 +240,58 @@ class SACAgent:
         for key in ("obs", "actions", "rewards", "next_obs", "dones", "valid_mask"):
             batch[key] = batch[key][:, :max_valid_len]
 
-    def _compute_target_q(self, batch, done_mask_next, recurrent_state=None):
+    def _compute_target_q(self, batch, done_mask_next, done_mask_obs, actor_state=None, target_state=None):
         """Compute target Q-values using target networks (no gradient tracking)."""
         scaled_rewards = batch["rewards"] * d.REW_SCALE
+        target_recurrent_state = self._clone_recurrent_state(target_state)
+        next_obs_sequence = torch.cat([batch["obs"], batch["next_obs"][:, -1:]], dim=1)
+        next_done_mask = torch.cat([done_mask_obs[:, :1], done_mask_next], dim=1)
         with torch.no_grad():
             na, nlp, _ = self._sample_policy(
-                batch["next_obs"],
-                recurrent_state=recurrent_state,
-                done_mask=done_mask_next,
+                next_obs_sequence,
+                recurrent_state=self._clone_recurrent_state(actor_state),
+                done_mask=next_done_mask,
                 deterministic=False,
             )
             tq1, _ = self._critic_forward(
                 self.target_q1_enc,
                 self.target_q1_head,
-                batch["next_obs"],
+                next_obs_sequence,
                 na,
-                recurrent_state=recurrent_state,
-                done_mask=done_mask_next,
+                recurrent_state=self._clone_recurrent_state(target_recurrent_state),
+                done_mask=next_done_mask,
             )
             tq2, _ = self._critic_forward(
                 self.target_q2_enc,
                 self.target_q2_head,
-                batch["next_obs"],
+                next_obs_sequence,
                 na,
-                recurrent_state=recurrent_state,
-                done_mask=done_mask_next,
+                recurrent_state=self._clone_recurrent_state(target_recurrent_state),
+                done_mask=next_done_mask,
             )
-            tq = torch.min(tq1, tq2)
-            tq = tq - self.alpha.detach() * nlp
+            tq = torch.min(tq1[:, 1:], tq2[:, 1:])
+            tq = tq - self.alpha.detach() * nlp[:, 1:]
             target_q = scaled_rewards + (1.0 - batch["dones"]) * self.config.gamma * tq
         return target_q
 
     def _update_critic(self, batch, target_q, learn_mask, done_mask_obs, recurrent_state=None):
         """Update both Q-networks, return loss, TD error, and gradient norm."""
-        cq1, _ = self._critic_forward(self.q1_enc, self.q1_head, batch["obs"], batch["actions"], recurrent_state=recurrent_state, done_mask=done_mask_obs)
-        cq2, _ = self._critic_forward(self.q2_enc, self.q2_head, batch["obs"], batch["actions"], recurrent_state=recurrent_state, done_mask=done_mask_obs)
+        cq1, _ = self._critic_forward(
+            self.q1_enc,
+            self.q1_head,
+            batch["obs"],
+            batch["actions"],
+            recurrent_state=self._clone_recurrent_state(recurrent_state),
+            done_mask=done_mask_obs,
+        )
+        cq2, _ = self._critic_forward(
+            self.q2_enc,
+            self.q2_head,
+            batch["obs"],
+            batch["actions"],
+            recurrent_state=self._clone_recurrent_state(recurrent_state),
+            done_mask=done_mask_obs,
+        )
         critic_loss = self._masked_mean(nn.functional.smooth_l1_loss(cq1, target_q, reduction='none'), learn_mask)
         critic_loss += self._masked_mean(nn.functional.smooth_l1_loss(cq2, target_q, reduction='none'), learn_mask)
         critic_loss = 0.5 * critic_loss
@@ -274,11 +305,30 @@ class SACAgent:
 
         return critic_loss, td_error, grad_norm_critic
 
-    def _update_actor(self, batch, learn_mask, done_mask_obs, recurrent_state=None):
+    def _update_actor(self, batch, learn_mask, done_mask_obs, actor_state=None, critic_state=None):
         """Update actor network, return log_prob, entropy, loss, and gradient norm."""
-        new_action, log_prob, _ = self._sample_policy(batch["obs"], recurrent_state=recurrent_state, done_mask=done_mask_obs, deterministic=False)
-        q1_pi, _ = self._critic_forward(self.q1_enc, self.q1_head, batch["obs"], new_action, recurrent_state=recurrent_state, done_mask=done_mask_obs)
-        q2_pi, _ = self._critic_forward(self.q2_enc, self.q2_head, batch["obs"], new_action, recurrent_state=recurrent_state, done_mask=done_mask_obs)
+        new_action, log_prob, _ = self._sample_policy(
+            batch["obs"],
+            recurrent_state=self._clone_recurrent_state(actor_state),
+            done_mask=done_mask_obs,
+            deterministic=False,
+        )
+        q1_pi, _ = self._critic_forward(
+            self.q1_enc,
+            self.q1_head,
+            batch["obs"],
+            new_action,
+            recurrent_state=self._clone_recurrent_state(critic_state),
+            done_mask=done_mask_obs,
+        )
+        q2_pi, _ = self._critic_forward(
+            self.q2_enc,
+            self.q2_head,
+            batch["obs"],
+            new_action,
+            recurrent_state=self._clone_recurrent_state(critic_state),
+            done_mask=done_mask_obs,
+        )
         actor_loss = self._masked_mean(self.alpha.detach() * log_prob - torch.min(q1_pi, q2_pi), learn_mask)
         policy_entropy = self._masked_mean(-log_prob, learn_mask)
 
@@ -322,13 +372,27 @@ class SACAgent:
         valid_mask = batch["valid_mask"]
         learn_mask = self._sequence_loss_mask(valid_mask, min(self.config.burn_in, batch["obs"].shape[1] - 1))
         done_mask_obs, done_mask_next = self._prepare_done_masks(batch)
-        recurrent_state = batch.get("init_state")
+        batch_size = batch["obs"].shape[0]
+        actor_state = self._clone_recurrent_state(batch.get("init_state"))
+        critic_state = self.q1_enc.get_initial_state(batch_size, self.device)
+        target_state = self.target_q1_enc.get_initial_state(batch_size, self.device)
 
         self._normalize_obs_batch(batch)
-        target_q = self._compute_target_q(batch, done_mask_next, recurrent_state=recurrent_state)
-
-        critic_loss, td_error, grad_norm_critic = self._update_critic(batch, target_q, learn_mask, done_mask_obs, recurrent_state=recurrent_state)
-        log_prob, policy_entropy, actor_loss, grad_norm_actor = self._update_actor(batch, learn_mask, done_mask_obs, recurrent_state=recurrent_state)
+        target_q = self._compute_target_q(
+            batch,
+            done_mask_next,
+            done_mask_obs,
+            actor_state=actor_state,
+            target_state=target_state,
+        )
+        critic_loss, td_error, grad_norm_critic = self._update_critic(batch, target_q, learn_mask, done_mask_obs, recurrent_state=critic_state)
+        log_prob, policy_entropy, actor_loss, grad_norm_actor = self._update_actor(
+            batch,
+            learn_mask,
+            done_mask_obs,
+            actor_state=actor_state,
+            critic_state=critic_state,
+        )
         alpha_loss = self._update_alpha(log_prob, learn_mask)
         target_update_mag = self._update_target_networks()
 
