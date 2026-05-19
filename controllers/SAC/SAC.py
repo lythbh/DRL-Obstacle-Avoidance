@@ -36,7 +36,8 @@ class Config:
     episodes: int = d.SACDefaults.episodes
     seed: Optional[int] = None
     update_after_steps: int = d.SACDefaults.update_after_steps
-    gradient_steps_per_episode: int = d.SACDefaults.gradient_steps_per_episode
+    update_freq: int = getattr(d.SACDefaults, 'update_freq', 32)
+    action_repeat: int = getattr(d.SACDefaults, 'action_repeat', 2)
     save_every: int = d.SACDefaults.save_every
     gamma: float = d.SACDefaults.gamma
     tau: float = d.SACDefaults.tau
@@ -190,33 +191,7 @@ def train(config=None):
         actor_state = agent.get_initial_state(batch_size=1)
         prev_done = True
         ep_step = 0
-
-        while not done:
-            ep_states.append(_snapshot_recurrent_state(actor_state))
-            action, actor_state = agent.select_action(obs, actor_state, done=prev_done, deterministic=False)
-            next_obs, reward, terminated, truncated, info = env.step(action)
-            ep_step += 1
-            transition_done = bool(terminated)
-            ep_obs.append(np.asarray(obs, dtype=np.float32))
-            ep_act.append(np.asarray(action, dtype=np.float32))
-            ep_rew.append(float(reward))
-            ep_next.append(np.asarray(next_obs, dtype=np.float32))
-            ep_done.append(transition_done)
-            obs = next_obs
-            episode_reward += reward
-            ep_speeds.append(float(info.get("speed_norm", 0.0)))
-            ep_goal = ep_goal or bool(info.get("goal_reached", False))
-            ep_success = bool(info.get("success", False))
-            done = bool(terminated or truncated)
-            prev_done = done
-            total_steps += 1
-            if done:
-                reason = info.get("reset_reason", "")
-                ep_end_reason = reason if reason else ("max_steps" if truncated else ep_end_reason)
-
-        replay.add_episode(ep_obs, ep_act, ep_rew, ep_next, ep_done, ep_states=ep_states)
-        for _obs in ep_obs:
-            agent.obs_rms.update(_obs)
+        all_update_metrics = []
 
         warmup_episodes = max(5, config.update_after_steps // 200)
         if episode < warmup_episodes:
@@ -237,17 +212,48 @@ def train(config=None):
             for pg in agent.alpha_optimizer.param_groups:
                 pg['lr'] = config.alpha_lr
 
-        all_update_metrics = []
-        if total_steps >= config.update_after_steps and replay.can_sample(config.replay_batch_size, config.min_replay_sequences):
-            for _ in range(config.gradient_steps_per_episode):
-                upd = agent.update(replay.sample(config.replay_batch_size, agent.device))
-                if upd is not None:
-                    all_update_metrics.append(upd)
-                    metrics_logger.log_update(
-                        global_step=total_steps, episode=episode + 1,
-                        recurrent_cell=config.recurrent_cell,
-                        **upd,
-                    )
+        while not done:
+            ep_states.append(_snapshot_recurrent_state(actor_state))
+            action, actor_state = agent.select_action(obs, actor_state, done=prev_done, deterministic=False)
+
+            # 1. Step the environment
+            next_obs, reward, terminated, truncated, info = env.step(action)
+
+            ep_step += 1
+            transition_done = bool(terminated)
+            ep_obs.append(np.asarray(obs, dtype=np.float32))
+            ep_act.append(np.asarray(action, dtype=np.float32))
+            ep_rew.append(float(reward))
+            ep_next.append(np.asarray(next_obs, dtype=np.float32))
+            ep_done.append(transition_done)
+            obs = next_obs
+            episode_reward += reward
+            ep_speeds.append(float(info.get("speed_norm", 0.0)))
+            ep_goal = ep_goal or bool(info.get("goal_reached", False))
+            ep_success = bool(info.get("success", False))
+            done = bool(terminated or truncated)
+            prev_done = done
+            total_steps += 1
+
+            # --- NEW: DO UPDATES DURING THE SIMULATION LOOP ---
+            if total_steps >= config.update_after_steps and replay.can_sample(config.replay_batch_size, config.min_replay_sequences):
+                if total_steps % config.update_freq == 0:
+                    upd = agent.update(replay.sample(config.replay_batch_size, agent.device))
+                    if upd is not None:
+                        all_update_metrics.append(upd)
+                        metrics_logger.log_update(
+                            global_step=total_steps, episode=episode + 1,
+                            recurrent_cell=config.recurrent_cell,
+                            **upd,
+                        )
+
+            if done:
+                reason = info.get("reset_reason", "")
+                ep_end_reason = reason if reason else ("max_steps" if truncated else ep_end_reason)
+
+        replay.add_episode(ep_obs, ep_act, ep_rew, ep_next, ep_done, ep_states=ep_states)
+        for _obs in ep_obs:
+            agent.obs_rms.update(_obs)
 
         act_stats = MetricsLogger.compute_action_stats(ep_act)
         obs_stats = MetricsLogger.compute_obs_stats(ep_obs)

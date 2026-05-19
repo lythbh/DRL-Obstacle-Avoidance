@@ -584,73 +584,83 @@ class WebotsEnv:
         steering_factor = float(np.clip(1.0 - 0.55 * steering_norm, 0.45, 1.0))
         adaptive_speed_cap = self.config.max_speed * obstacle_factor * steering_factor
         speed = float(np.clip(min(requested_speed, adaptive_speed_cap), self.config.min_speed, self.config.max_speed))
-        self.robot.set_steering(steering)
-        self.robot.set_speed(speed)
-        self.robot.step(self.timestep)
-        self.current_step += 1
-
-        lidar_sectors, pos, heading, imu_state, collision = self.robot.read_sensors()
-        self.current_pos = pos
-        self.current_heading = heading
-        self.collision = collision
-        self.current_distance, goal_error = self._goal_geometry(pos, heading)
-        reached_new_best_distance = self.current_distance + 1e-6 < self.min_episode_distance
-        if reached_new_best_distance:
-            self.min_episode_distance = self.current_distance
-
-        min_lidar_norm = float(lidar_sectors.min())
-        self.last_min_lidar_norm = min_lidar_norm
-        speed_norm = float(speed / max(self.config.max_speed, 1e-6))
-        self.current_speed_norm = speed_norm
-        goal_reached = self.current_distance < self.config.goal_threshold
-
+        action_repeat = int(max(1, getattr(self.config, "action_repeat", 2)))
+        total_reward = 0.0
         terminated = False
-        truncated = self.current_step >= self.config.max_steps
+        truncated = False
         info: Dict[str, Any] = {}
+        lidar_sectors = np.zeros(self._lidar_sector_dim, dtype=np.float32)
+        pos = self.current_pos
+        heading = self.current_heading
+        imu_state = None
 
-        reward, new_distance = self.reward_computer.compute(
-            collision, self.current_pos, self.prev_distance,
-            goal_error, min_lidar_norm, speed_norm, reached_new_best_distance,
-        )
-        self.prev_distance = new_distance
-        self.episode_reward += reward
+        for _ in range(action_repeat):
+            self.robot.set_steering(steering)
+            self.robot.set_speed(speed)
+            self.robot.step(self.timestep)
+            self.current_step += 1
 
-        if self.was_in_goal and not goal_reached and speed_norm > 0.05:
-            reward += self.config.goal_overshoot_penalty
-            self.episode_reward += self.config.goal_overshoot_penalty
+            lidar_sectors, pos, heading, imu_state, collision = self.robot.read_sensors()
+            self.current_pos = pos
+            self.current_heading = heading
+            self.collision = collision
+            self.current_distance, goal_error = self._goal_geometry(pos, heading)
+            reached_new_best_distance = self.current_distance + 1e-6 < self.min_episode_distance
+            if reached_new_best_distance:
+                self.min_episode_distance = self.current_distance
 
-        goal_stopped = goal_reached and speed_norm <= float(getattr(self.config, "goal_stop_speed_threshold", 0.1))
-        if goal_stopped:
-            terminated = True
-            info["reset_reason"] = "goal"
+            min_lidar_norm = float(lidar_sectors.min())
+            self.last_min_lidar_norm = min_lidar_norm
+            speed_norm = float(speed / max(self.config.max_speed, 1e-6))
+            self.current_speed_norm = speed_norm
+            goal_reached = self.current_distance < self.config.goal_threshold
 
-        self.was_in_goal = goal_reached
+            reward, new_distance = self.reward_computer.compute(
+                collision, self.current_pos, self.prev_distance,
+                goal_error, min_lidar_norm, speed_norm, reached_new_best_distance,
+            )
+            self.prev_distance = new_distance
+            self.episode_reward += reward
+            total_reward += reward
 
-        info["goal_reached"] = goal_reached
-        info["goal_stopped"] = goal_stopped
-        info["success"] = goal_stopped
-        info["speed_norm"] = speed_norm
-        info["distance_to_goal"] = self.current_distance
+            if self.was_in_goal and not goal_reached and speed_norm > 0.05:
+                reward += self.config.goal_overshoot_penalty
+                self.episode_reward += self.config.goal_overshoot_penalty
+                total_reward += self.config.goal_overshoot_penalty
 
-        if collision:
-            terminated = True
-            info["reset_reason"] = "collision"
-            info["success"] = False
-        elif self.episode_reward <= self.config.low_score_threshold:
-            terminated = True
-            info["reset_reason"] = "low_score"
-            info["success"] = False
+            goal_stopped = goal_reached and speed_norm <= float(getattr(self.config, "goal_stop_speed_threshold", 0.1))
+            if goal_reached:
+                terminated = True
+                info["reset_reason"] = "goal"
+            self.was_in_goal = goal_reached
+            info["goal_reached"] = goal_reached
+            info["goal_stopped"] = goal_stopped
+            info["success"] = goal_reached
+            info["speed_norm"] = speed_norm
+            info["distance_to_goal"] = self.current_distance
 
-        if truncated and not terminated:
-            distance_ratio = float(np.clip(self.current_distance / max(self._reference_distance, 1e-6), 0.0, 2.0))
-            timeout_penalty = -10.0 - 20.0 * distance_ratio
-            reward += timeout_penalty
-            self.episode_reward += timeout_penalty
-            info["reset_reason"] = "max_steps"
-            info["success"] = False
+            if collision:
+                terminated = True
+                info["reset_reason"] = "collision"
+                info["success"] = False
+            elif self.episode_reward <= self.config.low_score_threshold:
+                terminated = True
+                info["reset_reason"] = "low_score"
+                info["success"] = False
 
-        if terminated or truncated:
-            self.robot.stop()
+            truncated = self.current_step >= self.config.max_steps
+            if truncated and not terminated:
+                distance_ratio = float(np.clip(self.current_distance / max(self._reference_distance, 1e-6), 0.0, 2.0))
+                timeout_penalty = -10.0 - 20.0 * distance_ratio
+                reward += timeout_penalty
+                self.episode_reward += timeout_penalty
+                total_reward += timeout_penalty
+                info["reset_reason"] = "max_steps"
+                info["success"] = False
+
+            if terminated or truncated:
+                self.robot.stop()
+                break
 
         observation = self._build_observation(lidar_sectors, pos, heading, imu_state)
-        return observation, reward, terminated, truncated, info
+        return observation, total_reward, terminated, truncated, info

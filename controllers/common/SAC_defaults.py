@@ -35,12 +35,12 @@ REW_HEADING_SCALE = 1.0
 REW_SAFETY_SCALE = 1.0
 REW_MOTION_SCALE = 0.0
 REW_SLOW_SPEED_THRESHOLD = 0.25
-REW_SLOW_SPEED_PENALTY = 0.0
+REW_SLOW_SPEED_PENALTY = -0.01
 REW_HIGH_SPEED_THRESHOLD = 0.6
 REW_HIGH_SPEED_BONUS = 0.0
 REW_NEW_BEST_DISTANCE_BONUS = 0.0
 REW_STEP_PENALTY = 0.0
-REW_GOAL_SUCCESS = 100.0
+REW_GOAL_SUCCESS = 500.0
 REW_GOAL_STOP_BONUS = 0.0
 REW_GOAL_SPEED_PENALTY = 0.0
 REW_GOAL_OVERSHOOT_PENALTY = 0.0
@@ -50,17 +50,18 @@ REW_PROXIMITY_RADIUS = 0.0
 
 # --- Training ---
 class RecurrentDefaults:
-    sequence_length = 64
-    burn_in = 16
-    sequence_stride = 32
+    sequence_length = 32
+    burn_in = 8
+    sequence_stride = 16
 
 class SACDefaults:
     episodes = 1000
     #seed = 42                        #Optional
-    update_after_steps = 4000
-    gradient_steps_per_episode = 128
+    update_after_steps = 2000
+    update_freq = 64
+    action_repeat = 4
     save_every = 100
-    gamma = 0.999
+    gamma = 0.99
     tau = 0.003
     target_update_interval = 2
     actor_lr = 1e-4

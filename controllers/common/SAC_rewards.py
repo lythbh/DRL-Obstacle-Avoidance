@@ -101,9 +101,10 @@ class SACRewardComputer:
             delta = float(prev_distance - distance_to_end)
             progress = delta * self.progress_scale if delta >= 0.0 else delta * 0.25 * self.progress_scale
 
-        reward = heading_reward + progress
+        slow_penalty = self.slow_speed_penalty if speed_norm < self.slow_speed_threshold else 0.0
+        reward = heading_reward + progress + slow_penalty
 
-        if distance_to_end < self.goal_threshold and speed_norm <= self.goal_stop_speed_threshold:
+        if distance_to_end < self.goal_threshold:
             return reward + self.goal_success_reward, distance_to_end
 
         return reward, distance_to_end
