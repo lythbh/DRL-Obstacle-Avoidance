@@ -38,9 +38,9 @@ sympy==1.13.3
 tensorboardX==2.6.2.2
 tensordict==0.5.0
 torch==2.4.1
-torchaudio==0.13.1
+torchaudio==2.4.1
 torchrl==0.5.0
-torchvision==0.14.1
+torchvision==0.19.1
 tqdm==4.67.3
 typing_extensions==4.13.2
 urllib3==2.2.3
