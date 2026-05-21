@@ -9,7 +9,7 @@ MAX_STAGE_EPISODES = 2500
 @dataclass
 class StageConfig:
     num_obstacles: int
-    goal_y_range: float       # 0.0 = fixed goal at default position
+    goal_y_range: float
     start_yaw_noise: float
     start_position_noise: float
     description: str

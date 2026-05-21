@@ -1,6 +1,6 @@
 ﻿"""Consolidated defaults for environment, SLAM, rewards, and training."""
 
-# --- Environment observation / physics ---
+"""Environment observation / physics."""
 ENV_LIDAR_SECTOR_DIM = 16
 ENV_POSE_GOAL_DIM = 5
 ENV_IMU_FEATURE_DIM = 10
@@ -20,14 +20,14 @@ ENV_START_POSITION_NOISE = 0.08
 ENV_START_YAW_NOISE = 0.8
 ENV_RESET_SETTLE_STEPS = 10
 
-# --- SLAM ---
+"""SLAM."""
 SLAM_ENABLE = True
 SLAM_PROFILE = False
 SLAM_PROFILE_INTERVAL = 500
 SLAM_SAVE_PLOTS = False
 SLAM_FORCE_CPU = True
 
-# --- Reward ---
+"""Reward."""
 REW_COLLISION_PENALTY = -100.0
 REW_PROGRESS_SCALE = 3.0
 REW_DISTANCE_SCALE = 0.1
@@ -49,13 +49,16 @@ REW_SCALE = 1.0
 REW_PROXIMITY_SCALE = 0.6
 REW_PROXIMITY_RADIUS = 1.5
 
-# --- Training ---
+"""Training."""
 class RecurrentDefaults:
+    """Recurrent training sequence parameters shared across architectures."""
     sequence_length = 32
     burn_in = 8
     sequence_stride = 16
 
 class SACDefaults:
+    """SAC-specific training hyperparameters."""
+
     episodes = 2500
     update_after_steps = 2000
     updates_per_step = 2

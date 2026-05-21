@@ -16,7 +16,7 @@ import math
 import sys
 import traceback
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import numpy as np
 
@@ -53,22 +53,22 @@ class NavigatingController:
 
     def __init__(self) -> None:
         """Initialize robot, sensors, motors, and occupancy map."""
-        self.robot: any = Supervisor()
+        self.robot: Any = Supervisor()
         self.timestep = int(self.robot.getBasicTimeStep())
         self.dt = self.timestep / 1000.0
 
         # Sensors
-        self.lidar: any = self.robot.getDevice("lidar")
+        self.lidar: Any = self.robot.getDevice("lidar")
         self.lidar.enable(self.timestep)
         self.lidar_max_range: float = self.lidar.getMaxRange()
         self._h_res: int = self.lidar.getHorizontalResolution()
 
-        self.gps: any = self.robot.getDevice("gps")
+        self.gps: Any = self.robot.getDevice("gps")
         self.gps.enable(self.timestep)
 
         # Heading source — InertialUnit gives yaw directly; fall back to
         # Supervisor rotation field if the device is absent.
-        self._inertial: Optional[any] = None
+        self._inertial: Optional[Any] = None
         try:
             dev = self.robot.getDevice("inertial unit")
             if dev is not None:
@@ -77,7 +77,7 @@ class NavigatingController:
         except Exception:
             pass
 
-        self._rotation_field: Optional[any] = None
+        self._rotation_field: Optional[Any] = None
         if self._inertial is None:
             try:
                 self._rotation_field = self.robot.getFromDef("ALTINO").getField("rotation")
@@ -85,8 +85,8 @@ class NavigatingController:
                 pass
 
         # Motors
-        self._left_steer: any  = self.robot.getDevice("left_steer")
-        self._right_steer: any = self.robot.getDevice("right_steer")
+        self._left_steer: Any  = self.robot.getDevice("left_steer")
+        self._right_steer: Any = self.robot.getDevice("right_steer")
         for s in (self._left_steer, self._right_steer):
             s.setPosition(0.0)
             s.setVelocity(1.0)

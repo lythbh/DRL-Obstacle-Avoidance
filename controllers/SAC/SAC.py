@@ -14,7 +14,7 @@ from torch import nn
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
-from controllers.common.SAC_rewards import SACRewardComputer
+from controllers.SAC.SAC_rewards import SACRewardComputer
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
 import controllers.common.SAC_defaults as d
 from controllers.common.checkpoints import (
@@ -631,12 +631,4 @@ def train(config=None):
 
 if __name__ == "__main__":
     train()
-
-
-
-
-
-
-
-
 
