@@ -5,7 +5,7 @@ ENV_LIDAR_SECTOR_DIM = 16
 ENV_POSE_GOAL_DIM = 5
 ENV_IMU_FEATURE_DIM = 10
 ENV_OCCUPANCY_GRID_SHAPE = None
-ENV_MAX_STEPS = 4000
+ENV_MAX_STEPS = 6000
 ENV_COLLISION_THRESHOLD = 0.1
 ENV_LOW_SCORE_THRESHOLD = -2000.0
 ENV_ENDPOINT = (2.0, 0.0)
@@ -28,25 +28,23 @@ SLAM_SAVE_PLOTS = False
 SLAM_FORCE_CPU = True
 
 # --- Reward ---
-REW_COLLISION_PENALTY = -100.0
-REW_PROGRESS_SCALE = 3.0
-REW_DISTANCE_SCALE = 0.1
-REW_HEADING_SCALE = 0.05
-REW_SAFETY_SCALE = 0.15
-REW_MOTION_SCALE = 0.02
+REW_COLLISION_PENALTY = -50.0
+REW_PROGRESS_SCALE = 2.0
+REW_DISTANCE_SCALE = 0.05
+REW_HEADING_SCALE = 0.5
+REW_SAFETY_SCALE = 0.2
+REW_MOTION_SCALE = 0.05
 REW_SLOW_SPEED_THRESHOLD = 0.25
 REW_SLOW_SPEED_PENALTY = -0.02
 REW_HIGH_SPEED_THRESHOLD = 0.6
 REW_HIGH_SPEED_BONUS = 0.05
 REW_NEW_BEST_DISTANCE_BONUS = 0.05
-REW_STEP_PENALTY = -0.005
-REW_GOAL_SUCCESS = 500.0
-REW_GOAL_STOP_BONUS = 200.0
-REW_GOAL_HOLD = 0.0
+REW_STEP_PENALTY = -0.015
+REW_GOAL_SUCCESS = 200.0
+REW_GOAL_HOLD = 50.0
 REW_GOAL_SPEED_PENALTY = -10.0
 REW_GOAL_OVERSHOOT_PENALTY = -12.0
-REW_SCALE = 1.0
-REW_PROXIMITY_SCALE = 0.6
+REW_SCALE = 0.01
 REW_PROXIMITY_RADIUS = 1.5
 
 # --- Training ---
@@ -56,14 +54,16 @@ class RecurrentDefaults:
     sequence_stride = 16
 
 class PPODefaults:
-    episodes = 2500
+    episodes = 1000
     update_every = 4
-    epochs = 2
-    batch_size = 64
+    epochs = 4
+    batch_size = 128
     save_every = 100
-    learning_rate = 5e-4
-    entropy_coef = 0.01
-    gae_lambda = 0.95
+    learning_rate = 1e-4
+    entropy_coef = 0.005
+    gamma = 0.99
+    gae_lambda = 0.98
+    epsilon = 0.1
     hidden_size = 128
     latent_size = 128
     lstm_hidden_size = 128
