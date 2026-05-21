@@ -41,9 +41,10 @@ export EGL_PLATFORM=x11
 export LIBGL_ALWAYS_SOFTWARE=1
 
 # Start virtual display (Qt xcb plugin requires X11 — offscreen is not in Webots' Qt build)
-Xvfb :99 -screen 0 1024x768x24 -nolisten tcp &
+DISPLAY_NUM=$((90 + SLURM_JOB_ID % 900))
+Xvfb :$DISPLAY_NUM -screen 0 1024x768x24 -nolisten tcp &
 XVFB_PID=$!
-export DISPLAY=:99
+export DISPLAY=:$DISPLAY_NUM
 sleep 3
 
 if ! kill -0 $XVFB_PID 2>/dev/null; then
@@ -57,6 +58,20 @@ source /fp/homes01/u01/ec-esbrovol/fys5429/DRL-Obstacle-Avoidance/.venv/bin/acti
 # torch installed to ~/.local (venv site-packages was read-only), so include it explicitly
 export PYTHONPATH=/fp/homes01/u01/ec-esbrovol/.local/lib/python3.10/site-packages:/fp/homes01/u01/ec-esbrovol/fys5429/DRL-Obstacle-Avoidance:$WEBOTS_HOME/lib/controller/python:$PYTHONPATH
 export PYTHONUNBUFFERED=1
+export PPO_FORCE_CPU=${PPO_FORCE_CPU:-0}
+
+cleanup() {
+    kill $XVFB_PID 2>/dev/null || true
+    rm -rf $WEBOTS_TMPDIR
+}
+trap cleanup EXIT
+
+if [ -n "${PPO_RUN_COMMAND:-}" ]; then
+    echo "Running PPO command: $PPO_RUN_COMMAND"
+    eval "$PPO_RUN_COMMAND"
+    echo "PPO command finished."
+    exit 0
+fi
 
 # Launch Webots headlessly in background
 # --stdout --stderr: pipe the controller's stdout/stderr into this job's log
@@ -81,7 +96,3 @@ echo "Webots has been running for 20s..."
 # Just wait for Webots (and its controller) to finish.
 wait $WEBOTS_PID
 echo "Webots finished."
-
-# Cleanup
-kill $XVFB_PID 2>/dev/null || true
-rm -rf $WEBOTS_TMPDIR
