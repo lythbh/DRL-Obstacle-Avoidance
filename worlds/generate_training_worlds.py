@@ -301,7 +301,16 @@ lines = raw.splitlines(keepends=True)
 
 HEADER_STOP_RE = re.compile(r"^DEF (OBS_|BARRIER_|ALTINO )")
 header_end = next(i for i, ln in enumerate(lines) if HEADER_STOP_RE.match(ln))
-header = "".join(lines[:header_end])
+
+# Strip EXTERNPROTO lines for objects not used in training worlds.
+_UNUSED_PROTOS = {"WaterBottle", "WoodenChair", "BeerBottle", "OilBarrel"}
+header = "".join(
+    ln for ln in lines[:header_end]
+    if not any(p in ln for p in _UNUSED_PROTOS)
+)
+
+# Set physics timestep to 64 ms (default is 32 ms → halves simulation steps).
+header = header.replace("WorldInfo {\n}", "WorldInfo {\n  basicTimeStep 64\n}")
 
 altino_start = next(i for i, ln in enumerate(lines) if ln.startswith("DEF ALTINO Robot {"))
 altino = "".join(lines[altino_start:])
