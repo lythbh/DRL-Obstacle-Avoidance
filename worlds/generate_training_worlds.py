@@ -1,5 +1,6 @@
 """Generate 10 static PPO training worlds with increasing obstacle density."""
 
+import math
 import re
 from pathlib import Path
 
@@ -109,8 +110,6 @@ _POOL = [
     ("cyl",  1.30, -1.90, "0.8 0.4 0.6"),
 ]
 
-import math as _math
-
 _MIN_CENTRE_DIST = 0.70
 
 def _verify_pool():
@@ -119,7 +118,7 @@ def _verify_pool():
     violations = []
     for i in range(len(coords)):
         for j in range(i + 1, len(coords)):
-            d = _math.hypot(coords[i][0] - coords[j][0], coords[i][1] - coords[j][1])
+            d = math.hypot(coords[i][0] - coords[j][0], coords[i][1] - coords[j][1])
             if d < _MIN_CENTRE_DIST:
                 violations.append(
                     f"  obs {i+1} ({coords[i]}) ↔ obs {j+1} ({coords[j]}): "

@@ -7,13 +7,13 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from controller import Supervisor  # pyright: ignore[reportMissingImports]
+from controller import Supervisor
 
 _SLAM_IMPORT_ERROR: Optional[Exception] = None
 try:
-    from controllers.SLAM.imu_filter import IMUProcessor, IMUState                       # type: ignore
-    from controllers.SLAM.iekf_backend import IEKFBackend                                # type: ignore
-    from controllers.SLAM.slam_map import SLAMMap                                        # type: ignore
+    from controllers.SLAM.imu_filter import IMUProcessor, IMUState
+    from controllers.SLAM.iekf_backend import IEKFBackend
+    from controllers.SLAM.slam_map import SLAMMap
     _SLAM_AVAILABLE = True
 except ImportError as _slam_err:
     _SLAM_AVAILABLE = False
@@ -446,6 +446,7 @@ class WebotsEnv:
         self._episode_count = 0
 
     def _reset_episode_state(self) -> None:
+        """Reset all per-episode tracking variables to initial values."""
         self.current_step = 0
         self.prev_distance = None
         self.episode_reward = 0.0
