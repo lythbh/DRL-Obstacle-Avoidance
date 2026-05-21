@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 from typing import List, Optional, Tuple
+from matplotlib.patches import Circle
 
 
 class OccupancyMap:
@@ -129,7 +130,7 @@ class SLAMMap:
             prob = self.occ_map.probability
             ox, oy = self.occ_map.origin
             res = self.occ_map.resolution
-            extent = [ox, ox + self.occ_map.nx * res, oy, oy + self.occ_map.ny * res]
+            extent = (ox, ox + self.occ_map.nx * res, oy, oy + self.occ_map.ny * res)
             ax.imshow(prob, origin="lower", extent=extent, cmap="gray_r",
                       vmin=0.0, vmax=1.0, interpolation="nearest")
 
@@ -141,8 +142,8 @@ class SLAMMap:
 
             if goal is not None:
                 ax.scatter([goal[0]], [goal[1]], c="yellow", s=120, marker="*", zorder=6, label="goal")
-                ax.add_patch(plt.Circle(goal, 0.1, color="yellow", fill=False,
-                                        linewidth=1.5, linestyle="--"))
+                ax.add_patch(Circle(goal, 0.1, color="yellow", fill=False,
+                                    linewidth=1.5, linestyle="--"))
 
             ax.set_xlabel("x (m)"); ax.set_ylabel("y (m)")
             ax.set_title(f"Occupancy Map  ({len(self._trajectory)} keyframes)")

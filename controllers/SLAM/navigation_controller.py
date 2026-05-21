@@ -20,10 +20,7 @@ from typing import Optional, Any
 
 import numpy as np
 
-try:
-    from controller import Supervisor
-except ImportError:
-    Supervisor = object
+from controller import Supervisor  # type: ignore
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.SLAM.slam_map import OccupancyMap
@@ -172,7 +169,12 @@ class NavigatingController:
 
         eff = np.where(ranges > 0, ranges, self.lidar_max_range)
         closeness = np.clip(1.0 - eff / SAFE_DIST, 0.0, 1.0)
-        lidar_lateral = float(np.clip(np.sum(-np.sin(angles) * closeness), -3.0, 3.0))
+        if angles is None:
+            lidar_lateral = 0.0
+        else:
+            lidar_lateral = float(
+                np.clip(np.sum(-np.sin(angles) * closeness), -3.0, 3.0)
+            )
 
         front = eff[n // 4 : 3 * n // 4]
         front_min = float(front.min()) if len(front) > 0 else self.lidar_max_range

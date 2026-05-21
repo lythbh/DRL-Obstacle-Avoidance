@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from controller import Supervisor
+from controller import Supervisor # type: ignore
 
 _SLAM_IMPORT_ERROR: Optional[Exception] = None
 try:
