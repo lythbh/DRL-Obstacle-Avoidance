@@ -90,6 +90,7 @@ class Config:
     reset_settle_steps: int = d.ENV_RESET_SETTLE_STEPS
 
     def __post_init__(self):
+        """Initialize mutable fields and validate recurrent cell type."""
         self.recurrent_cell = self.recurrent_cell.lower().strip()
         aliases = {"mlp": "none", "feedforward": "none", "ff": "none"}
         self.recurrent_cell = aliases.get(self.recurrent_cell, self.recurrent_cell)
@@ -111,6 +112,7 @@ class FeedForwardActorCritic(nn.Module):
     """Feed-forward actor-critic with PPO's structured observation branches."""
 
     def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
+        """Initialize branch encoders, fusion network, and policy/value heads."""
         super().__init__()
         self.obs_size = obs_size
         self.action_dim = action_dim
@@ -147,9 +149,11 @@ class FeedForwardActorCritic(nn.Module):
         self.value_head = nn.Linear(config.latent_size, 1)
 
     def get_initial_state(self, batch_size: int, device: Optional[torch.device] = None):
+        """Return None as feed-forward has no recurrent state."""
         return None
 
     def forward(self, observation, recurrent_state=None, done_mask=None):
+        """Forward pass: encode observations through branches, output policy & value."""
         obs = torch.as_tensor(observation, dtype=torch.float32, device=next(self.parameters()).device)
         single_step = obs.ndim == 1
         if obs.ndim == 1:
@@ -307,7 +311,6 @@ class PPOAgent:
         adv_std = float(all_adv.std() + 1e-8)
         for t in trajectories:
             t["advantages"] = ((t["advantages"] - adv_mean) / adv_std).astype(np.float32)
-            # Clip normalized advantages to prevent extreme ratio outliers
             t["advantages"] = np.clip(t["advantages"], -5.0, 5.0)
 
     @staticmethod
@@ -332,7 +335,6 @@ class PPOAgent:
         surr1 = ratio * batch["advantages"]
         surr2 = torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon) * batch["advantages"]
         surrogate = torch.where(mask_bool, torch.min(surr1, surr2), torch.zeros_like(surr1))
-        # Value loss: simple smooth_l1_loss without clipping (clip_value_loss disabled to allow critic gradient flow)
         value_error = nn.functional.smooth_l1_loss(values, batch["returns"], reduction="none")
         entropy_term = torch.where(mask_bool, entropy, torch.zeros_like(entropy))
         valid_count = learn_mask.sum().clamp_min(1.0)
@@ -356,14 +358,10 @@ class PPOAgent:
 
         actor_params = [self.model.policy_head.weight, self.model.policy_head.bias, self.actor_log_std]
         critic_params = [self.model.value_head.weight, self.model.value_head.bias]
-        all_params = list(self.model.parameters()) + [self.actor_log_std]
 
         grad_norm_actor = MetricsLogger.compute_grad_norm(actor_params)
         grad_norm_critic = MetricsLogger.compute_grad_norm(critic_params)
 
-        # Per-module gradient clipping for stability:
-        # - Actor params get conservative clipping (max_norm=0.5)
-        # - Critic and RNN params get looser clipping (max_norm=1.0)
         actor_clip = list(self.model.policy_head.parameters()) + [self.actor_log_std]
         critic_clip = list(self.model.value_head.parameters())
         rnn_attr = "gru" if hasattr(self.model, "gru") else ("lstm" if hasattr(self.model, "lstm") else None)
@@ -371,7 +369,7 @@ class PPOAgent:
         encoder_clip = [p for n, p in self.model.named_parameters()
                         if "policy_head" not in n and "value_head" not in n and (rnn_attr is None or rnn_attr not in n)]
         nn.utils.clip_grad_norm_(actor_clip, max_norm=0.5)
-        nn.utils.clip_grad_norm_(critic_clip, max_norm=5.0)  # raised from 1.0 â€” critic has only 2 params, needs more room
+        nn.utils.clip_grad_norm_(critic_clip, max_norm=5.0)
         if rnn_clip:
             nn.utils.clip_grad_norm_(rnn_clip, max_norm=1.0)
         nn.utils.clip_grad_norm_(encoder_clip, max_norm=0.5)
@@ -439,7 +437,6 @@ class PPOAgent:
                 metrics = self._update_batch(batch)
                 if metrics is not None:
                     update_metrics.append(metrics)
-                    # Early stopping if KL divergence is too large
                     if metrics.get("approx_kl", 0) > 0.05:
                         early_stop = True
                         break
@@ -613,8 +610,6 @@ def train(config=None):
         act_stats = MetricsLogger.compute_action_stats(ep_act)
         obs_stats = MetricsLogger.compute_obs_stats(ep_obs)
 
-        # Learning rate warmup: ramp from 25% to 100% over first 25 episodes.
-        # Avoids freezing the model when exploration is strongest.
         if episode < 25:
             warmup_lr = config.learning_rate * (0.25 + 0.75 * (episode + 1) / 25.0)
             for pg in agent.optimizer.param_groups:

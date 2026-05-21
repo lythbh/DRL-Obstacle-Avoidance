@@ -52,6 +52,7 @@ class PPORewardComputer:
         goal_speed_penalty: float = REW_GOAL_SPEED_PENALTY,
         goal_overshoot_penalty: float = REW_GOAL_OVERSHOOT_PENALTY,
     ) -> None:
+        """Initialize reward computer with environment and tuning parameters."""
         self.endpoint = np.array(endpoint, dtype=np.float32)
         self.reference_distance = float(reference_distance)
         self.collision_reward = float(collision_penalty)
