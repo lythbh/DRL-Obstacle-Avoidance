@@ -1,4 +1,4 @@
-# IMU filtering: EKF-based orientation estimation with gyroscope bias tracking.
+"""IMU filtering: EKF-based orientation estimation with gyroscope bias tracking."""
 
 from __future__ import annotations
 
@@ -33,6 +33,7 @@ class IMUEKF:
         sigma_accel: float = 0.1,
         sigma_bias: float = 0.001,
     ) -> None:
+        """Initialize IMU EKF with process noise and accelerometer measurement noise."""
         self.dt = dt
         self.x = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
         self.P = np.eye(self.DIM) * 0.01
@@ -50,7 +51,6 @@ class IMUEKF:
         """EKF predict step: integrate gyroscope and propagate covariance."""
         q, b = self.x[:4], self.x[4:]
         gx, gy, gz = gyro_raw - b
-        # Quaternion kinematics: q_dot = 0.5 * Omega(ω) * q
         Omega = 0.5 * np.array([
             [0,   -gx, -gy, -gz],
             [gx,   0,   gz, -gy],
@@ -59,7 +59,6 @@ class IMUEKF:
         ])
         F = np.eye(self.DIM)
         F[:4, :4] += Omega * self.dt
-        # Jacobian of q w.r.t. gyro bias
         q_n = q / (np.linalg.norm(q) + 1e-10)
         qw, qx, qy, qz = q_n
         F[:4, 4:] = 0.5 * self.dt * np.array([
@@ -80,7 +79,6 @@ class IMUEKF:
         a_meas = accel_raw / a_norm
         q = self.x[:4] / (np.linalg.norm(self.x[:4]) + 1e-10)
         qw, qx, qy, qz = q
-        # Predicted gravity direction in body frame: R(q)^T [0,0,1]
         h = np.array([
             2.0 * (qx * qz - qw * qy),
             2.0 * (qw * qx + qy * qz),
@@ -111,6 +109,7 @@ class IMUProcessor:
     GRAVITY = 9.81
 
     def __init__(self, dt: float = 0.032) -> None:
+        """Initialize IMU processor with EKF of given timestep."""
         self.dt = dt
         self.ekf = IMUEKF(dt=dt)
 
@@ -119,6 +118,7 @@ class IMUProcessor:
         self.ekf.reset()
 
     def step(self, gyro: np.ndarray, accel: Optional[np.ndarray] = None) -> IMUState:
+        """Run one predict-update cycle and return IMUState with world-frame acceleration."""
         if accel is None:
             accel = np.zeros(3, dtype=np.float32)
         self.ekf.predict(gyro)

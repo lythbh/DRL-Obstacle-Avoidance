@@ -1,12 +1,10 @@
-# Occupancy grid and keyframe-based trajectory tracker.
+"""Occupancy grid and keyframe-based trajectory tracker."""
 
 from __future__ import annotations
 
 import numpy as np
 from typing import List, Optional, Tuple
 
-
-# ── Occupancy grid ────────────────────────────────────────────────────────────
 
 class OccupancyMap:
     """Log-odds occupancy grid with Bresenham ray-casting."""
@@ -90,8 +88,6 @@ class OccupancyMap:
         return cells
 
 
-# ── SLAM map ──────────────────────────────────────────────────────────────────
-
 class SLAMMap:
     """Occupancy grid + keyframe trajectory tracker."""
 
@@ -99,6 +95,7 @@ class SLAMMap:
     KEYFRAME_ANGLE = 0.15   # rad — or rotating this much (~8.5°)
 
     def __init__(self, map_resolution: float = 0.05) -> None:
+        """Initialize SLAM map with occupancy grid and trajectory storage."""
         self.occ_map = OccupancyMap(resolution=map_resolution)
         self._trajectory: List[Tuple[float, float]] = []   # (x, y) per keyframe
         self._last_kf: Optional[Tuple[float, float, float]] = None  # x, y, theta

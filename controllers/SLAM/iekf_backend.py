@@ -1,11 +1,4 @@
-# IEKF odometry: dead-reckons position and heading from wheel speed + gyro.
-#
-# State vector: [px, py, θ, vx, vy, bωz, bax, bay]
-#   px, py — position in global frame
-#   θ      — heading (yaw)
-#   vx, vy — velocity in global frame
-#   bωz    — gyroscope z-bias
-#   bax, bay — accelerometer x/y bias
+"""IEKF odometry: dead-reckons position and heading from wheel speed and gyro."""
 
 from __future__ import annotations
 
@@ -51,6 +44,7 @@ class IEKFBackend:
         sigma_gyro: float = 0.01,
         sigma_accel: float = 0.05,
     ) -> None:
+        """Initialize IEKF state with position, heading, and covariance."""
         x0 = np.zeros(STATE_DIM)
         x0[:2] = init_pos
         x0[2] = init_heading
