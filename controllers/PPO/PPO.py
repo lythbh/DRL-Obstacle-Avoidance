@@ -179,7 +179,6 @@ class FeedForwardActorCritic(nn.Module):
         state_value = self.value_head(latent).reshape(batch_size, seq_len)
         if single_step or seq_len == 1:
             policy_output = policy_output[:, 0]
-            state_value = state_value[:, 0]
         return policy_output, state_value, None
 
 

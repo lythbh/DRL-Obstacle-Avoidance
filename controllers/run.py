@@ -85,6 +85,8 @@ def run_worker(args: argparse.Namespace) -> int:
         if previous_checkpoint is not None:
             env["PPO_LOAD_MODEL"] = str(previous_checkpoint)
 
+        env.setdefault("WEBOTS_CONTROLLER_PATH", str(REPO_ROOT / "controllers"))
+
         cmd = [
             "webots",
             "--no-rendering",
