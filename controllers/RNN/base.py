@@ -81,7 +81,7 @@ class RecurrentActorCriticBase(nn.Module):
         """Execute recurrent network forward pass on latent features (implemented by subclasses)."""
         raise NotImplementedError
 
-    def _split_observation(self, observation, recurrent_state, done_mask):
+    def _split_observation(self, observation):
         """Parse observation tensor into obstacle, pose/goal, IMU, and optional grid components."""
         obs_tensor = torch.as_tensor(observation, dtype=torch.float32, device=next(self.parameters()).device)
         if obs_tensor.ndim == 1:
@@ -102,7 +102,7 @@ class RecurrentActorCriticBase(nn.Module):
 
     def _encode_observation(self, observation, recurrent_state, done_mask):
         """Encode observation components through separate branches and fuse into latent representation."""
-        obstacle, pose_goal, imu, grid, batch_size, seq_len = self._split_observation(observation, recurrent_state, done_mask)
+        obstacle, pose_goal, imu, grid, batch_size, seq_len = self._split_observation(observation)
         n = batch_size * seq_len
         obstacle_latent = self.obstacle_encoder(obstacle.reshape(n, -1))
         pose_goal_latent = self.pose_goal_encoder(pose_goal.reshape(n, -1))

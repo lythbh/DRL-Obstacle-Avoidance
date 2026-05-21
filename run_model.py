@@ -1,15 +1,17 @@
 ﻿"""Inference script for running a trained PPO or SAC model in Webots."""
 
-import argparse
-import time
-import statistics
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Optional, Any, cast
 
+import argparse
+import time
+import statistics
+
 
 @dataclass
 class InferenceConfig:
+    """Configuration for model inference."""
     model_path: Optional[str] = None
     algorithm: str = "sac"
     episodes: int = 10

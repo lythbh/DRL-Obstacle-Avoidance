@@ -1,34 +1,12 @@
 """DDPG training controller for ALTINO robot in Webots obstacle avoidance task."""
-import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
-from typing import Tuple, List, Optional, Dict, Any, Union
+from typing import Optional, Tuple, List, Union
 import numpy as np
 import torch
 from torch import multiprocessing, nn
-from collections import namedtuple
 import random
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from controllers.common.reward_defaults import (
-    COLLISION_PENALTY,
-    PROGRESS_REWARD_SCALE,
-    DISTANCE_REWARD_SCALE,
-    HEADING_REWARD_SCALE,
-    SAFETY_REWARD_SCALE,
-    MOTION_REWARD_SCALE,
-    NEW_BEST_DISTANCE_BONUS,
-    STEP_PENALTY,
-    GOAL_SUCCESS_REWARD,
-    GOAL_STOP_BONUS,
-    GOAL_HOLD_REWARD,
-    GOAL_OVERSHOOT_PENALTY,
-    LOW_SCORE_THRESHOLD,
-    GOAL_THRESHOLD,
-    GOAL_STOP_SPEED_THRESHOLD,
-)
 
 RecurrentState = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
 
@@ -55,9 +33,6 @@ class CriticNetwork(nn.Module):
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
-
-# PER Replay Buffer
-import numpy as np
 
 class SumTree:
     def __init__(self, capacity):
@@ -141,25 +116,25 @@ class Config:
     # Environment (use reward_defaults.py for rewards)
     max_steps: int = 1500
     collision_threshold: float = 0.1
-    low_score_threshold: float = LOW_SCORE_THRESHOLD  # -800.0
-    collision_penalty: float = COLLISION_PENALTY  # -10.0
-    progress_reward_scale: float = PROGRESS_REWARD_SCALE  # 0.8
-    distance_reward_scale: float = DISTANCE_REWARD_SCALE  # 0.5
-    heading_reward_scale: float = HEADING_REWARD_SCALE  # 0.3
-    safety_reward_scale: float = SAFETY_REWARD_SCALE  # 0.5
-    motion_reward_scale: float = MOTION_REWARD_SCALE  # 0.1
-    new_best_distance_bonus: float = NEW_BEST_DISTANCE_BONUS  # 1.0
-    step_penalty: float = STEP_PENALTY  # -0.05
+    low_score_threshold: float = -800.0
+    collision_penalty: float = -10.0
+    progress_reward_scale: float = 0.8
+    distance_reward_scale: float = 0.5
+    heading_reward_scale: float = 0.3
+    safety_reward_scale: float = 0.5
+    motion_reward_scale: float = 0.1
+    new_best_distance_bonus: float = 1.0
+    step_penalty: float = -0.05
     stagnation_penalty: float = -20.0
     stagnation_steps: int = 40
     stagnation_termination_steps: int = 100
     endpoint: Tuple[float, float] = (2.0, 0.0)
     goal_success_reward: float = 100.0
-    goal_threshold: float = GOAL_THRESHOLD  # 0.3
+    goal_threshold: float = 0.3
     goal_stop_speed_threshold: float = 0.15
-    goal_stop_bonus: float = GOAL_STOP_BONUS  # 50.0
-    goal_hold_reward: float = GOAL_HOLD_REWARD  # 2.0
-    goal_overshoot_penalty: float = GOAL_OVERSHOOT_PENALTY  # -5.0
+    goal_stop_bonus: float = 50.0
+    goal_hold_reward: float = 2.0
+    goal_overshoot_penalty: float = -5.0
     goal_score_threshold: float = 3500.0
     reference_distance: Optional[float] = None
 
@@ -200,7 +175,6 @@ class DDPGAgent:
         self.config = config
         self.device = self._get_device()
         self.replay_buffer = SumTree(capacity=100000)
-        self.priorities = []
         self.beta = 0.4
         self.beta_increment = 0.001
         self.action_dim = action_dim
@@ -362,17 +336,6 @@ class DDPGAgent:
         self._soft_update(self.target_critic, self.critic, self.config.tau)
 
 
-        # Logging Q-values
-        # avg_q = current_q.mean().item()
-        # if not hasattr(self, 'q_values'):
-        #     self.q_values = []
-        # self.q_values.append(avg_q)
-        # if len(self.q_values) > 100:  # Log every 100 updates
-        #     self.q_values.pop(0)
-        # if len(self.q_values) == 100:
-        #     print(f"[DDPG] Avg Q-value (last 100 updates): {np.mean(self.q_values):.2f}", flush=True)
-
-
     def decay_exploration_noise(self) -> None:
         self.noise_std = max(
             self.config.exploration_noise_min,
@@ -519,7 +482,7 @@ def train(config: Optional[Config] = None) -> None:
     print("[TRAIN] Final model saved.")
 
     # Cleanup
-    env.robot.motors.stop()
+    env.robot.stop()
     print("[TRAIN] Training complete. Robot stopped.")
 
 if __name__ == "__main__":

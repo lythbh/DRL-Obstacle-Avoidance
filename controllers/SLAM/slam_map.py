@@ -30,11 +30,13 @@ class OccupancyMap:
         self.log_odds = np.zeros((self.ny, self.nx), dtype=np.float32)
 
     def world_to_cell(self, xy: np.ndarray) -> Tuple[int, int]:
+        """Convert world coordinates to (row, col) grid cell indices."""
         col = int((xy[0] - self.origin[0]) / self.resolution)
         row = int((xy[1] - self.origin[1]) / self.resolution)
         return row, col
 
     def in_bounds(self, row: int, col: int) -> bool:
+        """Check if (row, col) is within the occupancy grid."""
         return 0 <= row < self.ny and 0 <= col < self.nx
 
     def update(self, robot_pos: np.ndarray, scan_points: np.ndarray, max_range: float = 10.0) -> None:
@@ -58,10 +60,12 @@ class OccupancyMap:
 
     @property
     def probability(self) -> np.ndarray:
+        """Convert log-odds to probability via sigmoid."""
         return 1.0 / (1.0 + np.exp(-self.log_odds))
 
     @staticmethod
     def _bresenham(r0: int, c0: int, r1: int, c1: int) -> List[Tuple[int, int]]:
+        """Bresenham line algorithm returning all cells between (r0,c0) and (r1,c1)."""
         cells = []
         dr, dc = abs(r1 - r0), abs(c1 - c0)
         r, c = r0, c0

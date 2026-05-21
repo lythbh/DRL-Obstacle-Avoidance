@@ -111,10 +111,6 @@ class PPORewardComputer:
         high_speed_reward = self.high_speed_bonus if speed_norm > self.high_speed_threshold else 0.0
         new_best_bonus = self.new_best_distance_bonus if reached_new_best_distance else 0.0
 
-        # proximity_bonus = 0.0
-        # if distance_to_end < self.proximity_radius and distance_to_end >= self.goal_threshold:
-        #     proximity_bonus = self.proximity_reward_scale * (1.0 - distance_to_end / self.proximity_radius)
-
         return (
             progress
             + distance_penalty
@@ -124,6 +120,5 @@ class PPORewardComputer:
             + slow_penalty
             + high_speed_reward
             + new_best_bonus
-            #+ proximity_bonus
             + self.step_penalty
         ), distance_to_end

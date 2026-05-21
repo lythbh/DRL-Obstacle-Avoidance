@@ -9,6 +9,7 @@ from typing import Optional
 
 @dataclass
 class IMUState:
+    """EKF estimation state with quaternion and body/world-frame accelerations."""
     quaternion: np.ndarray   # (4,)  [w, x, y, z]
     accel_body: np.ndarray   # (3,)  m/s² in body frame
     gyro_body: np.ndarray    # (3,)  rad/s in body frame
@@ -41,10 +42,12 @@ class IMUEKF:
         self.R_acc = np.eye(3) * sigma_accel ** 2
 
     def reset(self) -> None:
+        """Reset EKF to identity quaternion and zero bias."""
         self.x = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
         self.P = np.eye(self.DIM) * 0.01
 
     def predict(self, gyro_raw: np.ndarray) -> None:
+        """EKF predict step: integrate gyroscope and propagate covariance."""
         q, b = self.x[:4], self.x[4:]
         gx, gy, gz = gyro_raw - b
         # Quaternion kinematics: q_dot = 0.5 * Omega(ω) * q
@@ -70,6 +73,7 @@ class IMUEKF:
         self.P = F @ self.P @ F.T + self.Q
 
     def update(self, accel_raw: np.ndarray) -> None:
+        """EKF update step: correct quaternion using accelerometer gravity measurement."""
         a_norm = np.linalg.norm(accel_raw)
         if a_norm < 0.1:
             return
@@ -97,6 +101,7 @@ class IMUEKF:
 
     @property
     def quaternion(self) -> np.ndarray:
+        """Current quaternion estimate (copy)."""
         return self.x[:4].copy()
 
 
@@ -110,6 +115,7 @@ class IMUProcessor:
         self.ekf = IMUEKF(dt=dt)
 
     def reset(self) -> None:
+        """Reset internal EKF to initial state."""
         self.ekf.reset()
 
     def step(self, gyro: np.ndarray, accel: Optional[np.ndarray] = None) -> IMUState:

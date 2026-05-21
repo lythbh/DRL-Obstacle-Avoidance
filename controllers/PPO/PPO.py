@@ -14,7 +14,7 @@ from torch.nn.utils.rnn import pad_sequence
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic, RecurrentState
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
-from controllers.common.PPO_rewards import PPORewardComputer
+from controllers.PPO.PPO_rewards import PPORewardComputer
 import controllers.common.PPO_defaults as d
 from controllers.common.checkpoints import (
     run_checkpoint_dir, run_checkpoint_path, load_checkpoint,
@@ -607,14 +607,11 @@ def train(config=None):
         ep_adv, ep_ret = agent.calculate_gae(
             scaled_rew, ep_val_np, bootstrap_value=bootstrap_value,
         )
-        # Normalize returns
-        # ep_ret = (ep_ret - np.mean(ep_ret)) / (np.std(ep_ret) + 1e-8) 
         rollout.append({"observations": ep_obs_arr, "actions": np.array(ep_act, dtype=np.float32),
                         "log_probs": np.array(ep_lp, dtype=np.float32), "returns": ep_ret, "advantages": ep_adv})
 
         act_stats = MetricsLogger.compute_action_stats(ep_act)
         obs_stats = MetricsLogger.compute_obs_stats(ep_obs)
-        ep_val_residual = MetricsLogger.compute_value_residual(ep_val_np, ep_ret)
 
         # Learning rate warmup: ramp from 25% to 100% over first 25 episodes.
         # Avoids freezing the model when exploration is strongest.

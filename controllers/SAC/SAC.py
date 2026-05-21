@@ -1,6 +1,7 @@
 ﻿"""Soft Actor-Critic controller for the ALTINO Webots task."""
 from __future__ import annotations
 
+import math
 import sys, time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -291,7 +292,6 @@ class SACAgent:
             delta = sp.data * tau - tp.data * tau
             total_change_sq += float(delta.norm(2).item() ** 2)
             tp.data.mul_(1.0 - tau).add_(sp.data, alpha=tau)
-        import math
         return float(math.sqrt(total_change_sq))
 
     @staticmethod
@@ -555,7 +555,6 @@ def train(config=None):
 
         act_stats = MetricsLogger.compute_action_stats(ep_act)
         obs_stats = MetricsLogger.compute_obs_stats(ep_obs)
-        ep_val_residual = 0.0
         agg_upd = MetricsLogger.aggregate_update_metrics(all_update_metrics)
 
         rew_w.append(episode_reward)
@@ -632,8 +631,6 @@ def train(config=None):
 
 if __name__ == "__main__":
     train()
-
-
 
 
 

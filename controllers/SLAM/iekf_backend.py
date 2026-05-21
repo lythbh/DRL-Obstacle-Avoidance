@@ -32,6 +32,7 @@ class IEKFState:
 
 
 def _wrap_angle(a: float) -> float:
+    """Wrap angle to [-pi, pi) range."""
     return float((a + np.pi) % (2 * np.pi) - np.pi)
 
 
@@ -65,7 +66,7 @@ class IEKFBackend:
         self._sigma_accel = sigma_accel
 
     def propagate_odom(self, speed: float, gyro_z: float, dt: float) -> None:
-        """Dead-reckon position and heading from wheel speed and gyro yaw rate."""
+        """Dead-reckon position, heading, and covariance from wheel speed and gyro yaw rate."""
         x = self.state.x.copy()
         θ = x[2]
         bωz = x[5]
@@ -88,6 +89,7 @@ class IEKFBackend:
         self.state.P = F @ self.state.P @ F.T + self._build_process_noise(dt)
 
     def _build_process_noise(self, dt: float) -> np.ndarray:
+        """Build diagonal process noise covariance matrix for odometry prediction."""
         q_pos = (self._sigma_accel * dt**2) ** 2
         q_head = (self._sigma_gyro * dt) ** 2
         q_vel = (self._sigma_accel * dt) ** 2

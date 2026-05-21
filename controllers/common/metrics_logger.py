@@ -277,23 +277,6 @@ class MetricsLogger:
         return float(np.mean(np.abs(v - r)))
 
     @staticmethod
-    def compute_td_error(
-        rewards: np.ndarray,
-        values: np.ndarray,
-        next_values: np.ndarray,
-        gamma: float,
-    ) -> float:
-        """Compute mean absolute TD-error across a trajectory.
-
-        TD(t) = r(t) + gamma * V(t+1) - V(t), where V(T+1) = 0 for terminal.
-        """
-        r = np.asarray(rewards, dtype=np.float32)
-        v = np.asarray(values, dtype=np.float32)
-        nv = np.asarray(next_values, dtype=np.float32)
-        td = r + gamma * nv - v
-        return float(np.mean(np.abs(td)))
-
-    @staticmethod
     def aggregate_update_metrics(
         update_list: List[Dict[str, Any]],
     ) -> Dict[str, float]:

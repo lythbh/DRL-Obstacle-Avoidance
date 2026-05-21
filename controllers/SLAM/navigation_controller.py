@@ -52,6 +52,7 @@ class NavigatingController:
     """Goal-seeking robot controller with occupancy-map obstacle memory."""
 
     def __init__(self) -> None:
+        """Initialize robot, sensors, motors, and occupancy map."""
         self.robot: any = Supervisor()
         self.timestep = int(self.robot.getBasicTimeStep())
         self.dt = self.timestep / 1000.0
@@ -114,10 +115,12 @@ class NavigatingController:
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     def run(self) -> None:
+        """Main control loop: step simulation until stopped."""
         while self.robot.step(self.timestep) != -1:
             self._tick()
 
     def _tick(self) -> None:
+        """Process one timestep: read sensors, update map, navigate."""
         self._step += 1
 
         # 1. Read LiDAR (first horizontal layer only)
@@ -235,6 +238,7 @@ class NavigatingController:
     # ── Utilities ─────────────────────────────────────────────────────────────
 
     def _get_heading(self) -> float:
+        """Get robot yaw from inertial unit or Supervisor rotation field."""
         if self._inertial is not None:
             return float(self._inertial.getRollPitchYaw()[2])
         if self._rotation_field is not None:
@@ -272,6 +276,7 @@ class NavigatingController:
         return 0.5
 
     def _set_motors(self, speed: float, steer: float) -> None:
+        """Apply clipped speed and steering commands to all motors."""
         steer = float(np.clip(steer, -MAX_STEER, MAX_STEER))
         speed = float(np.clip(speed, 0.0, MAX_SPEED))
         self._left_steer.setPosition(steer)
