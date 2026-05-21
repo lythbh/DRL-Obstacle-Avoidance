@@ -3,26 +3,24 @@
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/bathroom/protos/Toilet.proto"
 
 WorldInfo {
 }
 Viewpoint {
-  orientation 0.032307080089488606 0.9866644785153865 -0.1595288670180155 0.40480272948221724
-  position -12.787159395865814 -0.01631084309940567 5.67280389499958
+  orientation -0.009029030593201585 0.9992864453086161 0.03667528907885186 0.9878535068492668
+  position -9.711567710383028 -0.4501852012326506 13.803471516003205
 }
 TexturedBackground {
 }
 TexturedBackgroundLight {
 }
 RectangleArena {
-  translation -0.01 2.65273e-08 0
   rotation 0 0 1 3.14159
   floorSize 5 5
 }
 DEF ALTINO Robot {
-  translation -1.1775736143205975 -1.0443687552833596 0.019519209575492042
-  rotation -0.0002435457153517862 -0.0004944657163034471 -0.9999998480945584 0.9234564906537004
+  translation -1.0000146136885624 0.64494702705849 0.019518113190135262
+  rotation 0.000255544912873651 -0.0010076095825846433 0.9999994597097174 0.49862539193609234
   children [
     GPS {
       translation 0.039 0 0
@@ -36,14 +34,14 @@ DEF ALTINO Robot {
       children [
         DEF LEFT_STEER_HINGE2 Hinge2Joint {
           jointParameters HingeJointParameters {
-            position 0.03897063908052313
+            position 0.023896444518745376
             axis 0 0 -1
             suspensionSpringConstant 100000
             suspensionDampingConstant 4000
             suspensionAxis 0 0 1
           }
           jointParameters2 JointParameters {
-            position 17727.881474822843
+            position 31927.875144608883
             axis 0 -1 0
             dampingConstant 5
           }
@@ -79,7 +77,7 @@ DEF ALTINO Robot {
             endPoint Slot {
               type "vehicle wheel"
               endPoint Solid {
-                rotation 0.019484071853034492 0.9998094135080402 0.0012278455662291514 3.2674381122205047
+                rotation 0.011947934304455872 0.9999283137912093 0.0007836737365290149 3.2725771141549664
                 children [
                   DEF WHEEL_SLOT Group {
                   }
@@ -182,8 +180,8 @@ DEF ALTINO Robot {
                 }
                 physics Physics {
                 }
-                linearVelocity 0.01934727339562699 -0.025567751532942377 9.188473118017156e-07
-                angularVelocity 1.341699905997646 0.8754056178436068 1.0000352675205952
+                linearVelocity 0.03307724630804566 0.018058153805420325 -7.203220962662775e-05
+                angularVelocity -0.9057407400575685 1.6512827576771207 -0.9996051380222962
               }
             }
           }
@@ -195,14 +193,14 @@ DEF ALTINO Robot {
       children [
         DEF RIGHT_STEER_HINGE2 Hinge2Joint {
           jointParameters HingeJointParameters {
-            position 0.038970688789492516
+            position 0.023896572951632243
             axis 0 0 -1
             suspensionSpringConstant 100000
             suspensionDampingConstant 4000
             suspensionAxis 0 0 1
           }
           jointParameters2 JointParameters {
-            position 17751.798604493408
+            position 31951.792627609702
             axis 0 1 0
             dampingConstant 5
           }
@@ -238,7 +236,7 @@ DEF ALTINO Robot {
             endPoint Slot {
               type "vehicle wheel"
               endPoint Solid {
-                rotation -0.01948178338347774 -0.9996907070631504 0.015458018235782394 4.482772363768789
+                rotation -0.011947460022396883 -0.9998832464552531 0.009526366417310977 4.4877308779827745
                 children [
                   DEF WHEEL_SLOT Group {
                   }
@@ -341,8 +339,8 @@ DEF ALTINO Robot {
                 }
                 physics Physics {
                 }
-                linearVelocity 0.019336788594165228 -0.025565436339400904 1.1926364318321192e-06
-                angularVelocity 1.3416975201382735 0.8754092313067069 1.0000352652306632
+                linearVelocity 0.033105054649043585 0.018072574665919754 -6.877656210297909e-05
+                angularVelocity -0.9057449172875702 1.6512804671776165 -0.9996051412611222
               }
             }
           }
@@ -355,7 +353,7 @@ DEF ALTINO Robot {
       children [
         DEF LEFT_REAR_WHEEL_HINGE HingeJoint {
           jointParameters HingeJointParameters {
-            position 17726.16844615986
+            position 31928.868898342833
             axis 0 -1 0
             dampingConstant 5
             suspensionSpringConstant 100000
@@ -382,7 +380,7 @@ DEF ALTINO Robot {
             endPoint Slot {
               type "vehicle wheel"
               endPoint Solid {
-                rotation 0 1 0 4.980490700933297
+                rotation 0 1 0 2.27883274382564
                 children [
                   DEF WHEEL_SLOT Group {
                   }
@@ -485,8 +483,8 @@ DEF ALTINO Robot {
                 }
                 physics Physics {
                 }
-                linearVelocity 0.019327573326026463 -0.02557231204291595 -1.2125396578666807e-06
-                angularVelocity 1.2782870462061924 0.9662973529946459 -8.222977899238182e-05
+                linearVelocity 0.033101519038713056 0.018024878093288194 6.850843702560004e-05
+                angularVelocity -0.9013433721107423 1.655249026771589 0.0003970525728468216
               }
             }
           }
@@ -498,7 +496,7 @@ DEF ALTINO Robot {
       children [
         DEF RIGHT_REAR_WHEEL_HINGE HingeJoint {
           jointParameters HingeJointParameters {
-            position 17750.781630384045
+            position 31953.484380006736
             axis 0 1 0
             dampingConstant 5
             suspensionSpringConstant 100000
@@ -525,7 +523,7 @@ DEF ALTINO Robot {
             endPoint Slot {
               type "vehicle wheel"
               endPoint Solid {
-                rotation 0 -1 0 5.500047705466836
+                rotation 0 -0.9999999999999999 0 2.79609230864123
                 children [
                   DEF WHEEL_SLOT Group {
                   }
@@ -628,8 +626,8 @@ DEF ALTINO Robot {
                 }
                 physics Physics {
                 }
-                linearVelocity 0.01932448871405223 -0.02555923994991899 -1.0044780564013017e-06
-                angularVelocity 1.2782841509271892 0.9663003686780177 -8.22957952880637e-05
+                linearVelocity 0.03311123696435578 0.018030527250620373 7.185279900724659e-05
+                angularVelocity -0.9013479697549762 1.655247034677963 0.00039704577086946847
               }
             }
           }
@@ -944,10 +942,6 @@ DEF ALTINO Robot {
   radarCrossSection 100
   controller "PPO"
   supervisor TRUE
-  linearVelocity 0.019333378361183155 -0.025565150314374632 -2.3243521581409145e-07
-  angularVelocity -6.159055661384707e-05 -4.4057466803391096e-05 -2.1807493566703367e-05
-}
-Toilet {
-  translation -0.08 0.0899969 0
-  rotation 0 0 1 3.14159
+  linearVelocity 0.033126828043822436 0.018061407843717122 5.33616474228702e-06
+  angularVelocity -0.0009659334182862442 0.0016690618821583012 0.0003957276794560129
 }

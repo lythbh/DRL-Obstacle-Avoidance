@@ -66,7 +66,6 @@ class Config:
     goal_threshold: float = d.ENV_GOAL_THRESHOLD
     goal_stop_speed_threshold: float = d.ENV_GOAL_STOP_SPEED_THRESHOLD
     goal_success_reward: float = d.REW_GOAL_SUCCESS
-    goal_stop_bonus: float = d.REW_GOAL_STOP_BONUS
     goal_hold_reward: float = d.REW_GOAL_HOLD
     goal_speed_penalty: float = d.REW_GOAL_SPEED_PENALTY
     goal_overshoot_penalty: float = d.REW_GOAL_OVERSHOOT_PENALTY
@@ -167,6 +166,10 @@ class PPOAgent:
                 obs, recurrent_state=recurrent_state, done_mask=done_mask,
             )
             action, log_prob = self._sample_action(policy_output, deterministic=deterministic)
+            # Gaussian noise if not deterministic
+            if not deterministic:
+                action += torch.randn_like(action) * 0.2
+                action = torch.clamp(action, self.action_low, self.action_high)
         return (
             action.squeeze(0).cpu().numpy(),
             log_prob.squeeze(0),
@@ -409,12 +412,10 @@ def train(config=None):
         motion_reward_scale=config.motion_reward_scale,
         new_best_distance_bonus=config.new_best_distance_bonus,
         proximity_radius=getattr(config, "proximity_radius", d.REW_PROXIMITY_RADIUS),
-        proximity_reward_scale=getattr(config, "proximity_reward_scale", d.REW_PROXIMITY_SCALE),
         step_penalty=config.step_penalty,
         goal_threshold=config.goal_threshold,
         goal_stop_speed_threshold=config.goal_stop_speed_threshold,
         goal_success_reward=config.goal_success_reward,
-        goal_stop_bonus=config.goal_stop_bonus,
         goal_hold_reward=config.goal_hold_reward,
         goal_speed_penalty=config.goal_speed_penalty,
         goal_overshoot_penalty=config.goal_overshoot_penalty,
@@ -468,6 +469,7 @@ def train(config=None):
             ep_obs.append(obs)
             ep_act.append(action)
             ep_lp.append(float(log_prob.item()))
+            reward = np.clip(reward, -100.0, 100.0)
             ep_rew.append(reward)
             obs = obs_next
 
@@ -492,6 +494,8 @@ def train(config=None):
         ep_adv, ep_ret = agent.calculate_gae(
             scaled_rew, ep_val_np, bootstrap_value=bootstrap_value,
         )
+        # Normalize returns
+        ep_ret = (ep_ret - np.mean(ep_ret)) / (np.std(ep_ret) + 1e-8) 
         rollout.append({"observations": ep_obs_arr, "actions": np.array(ep_act, dtype=np.float32),
                         "log_probs": np.array(ep_lp, dtype=np.float32), "returns": ep_ret, "advantages": ep_adv})
 
@@ -522,8 +526,8 @@ def train(config=None):
 
         # Entropy coefficient decays linearly over training, maintaining some
         # exploration throughout to prevent premature convergence to poor policies.
-        decay_frac = min(1.0, episode / max(1, config.episodes))
-        agent.config.entropy_coef = d.PPODefaults.entropy_coef * (1.0 - 0.15 * decay_frac)
+        # decay_frac = min(1.0, episode / max(1, config.episodes))
+        # agent.config.entropy_coef = d.PPODefaults.entropy_coef * (1.0 - 0.15 * decay_frac)
 
         ep_sum = sum(ep_rew)
         rew_w.append(ep_sum)

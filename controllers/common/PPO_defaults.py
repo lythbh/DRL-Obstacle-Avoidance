@@ -28,25 +28,23 @@ SLAM_SAVE_PLOTS = False
 SLAM_FORCE_CPU = True
 
 # --- Reward ---
-REW_COLLISION_PENALTY = -75.0
-REW_PROGRESS_SCALE = 3.0
+REW_COLLISION_PENALTY = -25.0
+REW_PROGRESS_SCALE = 2.0
 REW_DISTANCE_SCALE = 0.05
 REW_HEADING_SCALE = 0.5
-REW_SAFETY_SCALE = 0.3
-REW_MOTION_SCALE = 0.02
+REW_SAFETY_SCALE = 0.2
+REW_MOTION_SCALE = 0.05
 REW_SLOW_SPEED_THRESHOLD = 0.25
 REW_SLOW_SPEED_PENALTY = -0.02
 REW_HIGH_SPEED_THRESHOLD = 0.6
 REW_HIGH_SPEED_BONUS = 0.05
 REW_NEW_BEST_DISTANCE_BONUS = 0.05
 REW_STEP_PENALTY = -0.01
-REW_GOAL_SUCCESS = 100.0
-REW_GOAL_STOP_BONUS = 200.0
-REW_GOAL_HOLD = 0.0
+REW_GOAL_SUCCESS = 200.0
+REW_GOAL_HOLD = 50.0
 REW_GOAL_SPEED_PENALTY = -10.0
 REW_GOAL_OVERSHOOT_PENALTY = -12.0
 REW_SCALE = 0.01
-REW_PROXIMITY_SCALE = 0.6
 REW_PROXIMITY_RADIUS = 1.5
 
 # --- Training ---
@@ -62,7 +60,7 @@ class PPODefaults:
     batch_size = 128
     save_every = 100
     learning_rate = 1e-4
-    entropy_coef = 0.001
+    entropy_coef = 0.2
     gamma = 0.99
     gae_lambda = 0.98
     epsilon = 0.1
@@ -70,6 +68,6 @@ class PPODefaults:
     latent_size = 128
     lstm_hidden_size = 128
     lstm_layers = 1
-    recurrent_cell = "lstm"
+    recurrent_cell = "gru"
     clip_value_loss = False
     max_grad_norm = 0.5
