@@ -28,7 +28,7 @@ SLAM_SAVE_PLOTS = False
 SLAM_FORCE_CPU = True
 
 # --- Reward ---
-REW_COLLISION_PENALTY = -25.0
+REW_COLLISION_PENALTY = -50.0
 REW_PROGRESS_SCALE = 2.0
 REW_DISTANCE_SCALE = 0.05
 REW_HEADING_SCALE = 0.5
@@ -39,7 +39,7 @@ REW_SLOW_SPEED_PENALTY = -0.02
 REW_HIGH_SPEED_THRESHOLD = 0.6
 REW_HIGH_SPEED_BONUS = 0.05
 REW_NEW_BEST_DISTANCE_BONUS = 0.05
-REW_STEP_PENALTY = -0.01
+REW_STEP_PENALTY = -0.015
 REW_GOAL_SUCCESS = 200.0
 REW_GOAL_HOLD = 50.0
 REW_GOAL_SPEED_PENALTY = -10.0
@@ -54,13 +54,13 @@ class RecurrentDefaults:
     sequence_stride = 16
 
 class PPODefaults:
-    episodes = 2500
+    episodes = 1000
     update_every = 4
     epochs = 4
     batch_size = 128
     save_every = 100
     learning_rate = 1e-4
-    entropy_coef = 0.2
+    entropy_coef = 0.005
     gamma = 0.99
     gae_lambda = 0.98
     epsilon = 0.1

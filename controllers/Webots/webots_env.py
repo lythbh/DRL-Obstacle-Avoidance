@@ -623,7 +623,7 @@ class WebotsEnv:
             reward += self.config.goal_overshoot_penalty
             self.episode_reward += self.config.goal_overshoot_penalty
 
-        goal_stopped = goal_reached and speed_norm <= float(getattr(self.config, "goal_stop_speed_threshold", 0.1))
+        goal_stopped = goal_reached
         if goal_stopped:
             terminated = True
             info["reset_reason"] = "goal"
