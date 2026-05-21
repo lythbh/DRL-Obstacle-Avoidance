@@ -425,8 +425,8 @@ class WebotsEnv:
         self.robot = AltinoDriver(config)
         self.timestep = self.robot.timestep
 
-        self.headlights = self.robot.supervisor.getDevice("headlights")
-        self.backlights = self.robot.supervisor.getDevice("backlights")
+        #self.headlights = self.robot.supervisor.getDevice("headlights")
+        #self.backlights = self.robot.supervisor.getDevice("backlights")
 
         self.reward_computer = reward_computer
 

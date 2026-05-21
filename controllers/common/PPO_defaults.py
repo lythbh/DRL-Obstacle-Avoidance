@@ -18,7 +18,7 @@ ENV_START_POSITION = (-2.0, 0.0, 0.02)
 ENV_START_ROTATION = (0.0, 0.0, 1.0, 0.0)
 ENV_START_POSITION_NOISE = 0.08
 ENV_START_YAW_NOISE = 0.8
-ENV_RESET_SETTLE_STEPS = 10
+ENV_RESET_SETTLE_STEPS = 5
 
 # --- SLAM ---
 SLAM_ENABLE = False
@@ -68,6 +68,6 @@ class PPODefaults:
     latent_size = 128
     lstm_hidden_size = 128
     lstm_layers = 1
-    recurrent_cell = "lstm"
+    recurrent_cell = "gru"
     clip_value_loss = False
     max_grad_norm = 0.5

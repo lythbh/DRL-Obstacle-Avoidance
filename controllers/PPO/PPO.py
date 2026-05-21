@@ -222,7 +222,7 @@ class PPOAgent:
             return torch.device("cpu")
         return torch.device("cuda")
 
-    def get_initial_state(self, batch_size: int = 1) -> RecurrentState:
+    def get_initial_state(self, batch_size: int = 1) -> Optional[RecurrentState]:
         """Get initial hidden state for the recurrent neural network."""
         return self.model.get_initial_state(batch_size, device=self.device)
 
