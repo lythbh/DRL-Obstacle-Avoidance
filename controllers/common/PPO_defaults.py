@@ -54,7 +54,7 @@ class RecurrentDefaults:
     sequence_stride = 16
 
 class PPODefaults:
-    episodes = 1000
+    episodes = 500
     update_every = 4
     epochs = 4
     batch_size = 128
@@ -68,6 +68,6 @@ class PPODefaults:
     latent_size = 128
     lstm_hidden_size = 128
     lstm_layers = 1
-    recurrent_cell = "gru"
+    recurrent_cell = "lstm"
     clip_value_loss = False
     max_grad_norm = 0.5

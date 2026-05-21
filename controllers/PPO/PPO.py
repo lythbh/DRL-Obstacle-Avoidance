@@ -637,10 +637,8 @@ def train(config=None):
 
         agg_upd = MetricsLogger.aggregate_update_metrics(all_update_metrics)
 
-        # Entropy coefficient decays linearly over training, maintaining some
-        # exploration throughout to prevent premature convergence to poor policies.
-        # decay_frac = min(1.0, episode / max(1, config.episodes))
-        # agent.config.entropy_coef = d.PPODefaults.entropy_coef * (1.0 - 0.15 * decay_frac)
+        decay_frac = min(1.0, episode / max(1, config.episodes))
+        agent.config.entropy_coef = d.PPODefaults.entropy_coef * (1.0 - 0.60 * decay_frac)
 
         ep_sum = sum(ep_rew)
         rew_w.append(ep_sum)
