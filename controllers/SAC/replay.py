@@ -49,7 +49,7 @@ class SequenceReplayBuffer:
             return (zeros.copy(), zeros.copy())
         return zeros
 
-    def add_episode(self, ep_obs, ep_act, ep_rew, ep_next, ep_done, ep_states=None) -> None:
+    def add_episode(self, ep_obs, ep_act, ep_rew, ep_next, ep_done, ep_states=None, ep_critic_states=None) -> None:
         """Add an episode as fixed-length sequences to the replay buffer, cycling when at capacity."""
         if not ep_obs:
             return
@@ -60,6 +60,8 @@ class SequenceReplayBuffer:
         dones = np.asarray(ep_done, dtype=np.float32).reshape(-1, 1)
         if ep_states is None:
             ep_states = [self._zero_state() for _ in range(len(obs))]
+        if ep_critic_states is None:
+            ep_critic_states = [self._zero_state() for _ in range(len(obs))]
         total = obs.shape[0]
         for start in range(0, total, self.seq_stride):
             end = min(start + self.seq_len, total)
@@ -71,6 +73,7 @@ class SequenceReplayBuffer:
                 "dones": dones[start:end].copy(),
                 "valid_mask": np.ones(end - start, dtype=np.float32),
                 "init_state": _clone_state(ep_states[start]),
+                "critic_init_state": _clone_state(ep_critic_states[start]),
                 "sequence_start": np.float32(1.0 if (start == 0 or bool(dones[start - 1])) else 0.0),
             }
             if len(self.buffer) < self.capacity:
@@ -103,4 +106,5 @@ class SequenceReplayBuffer:
             result[k] = torch.stack(tensors)
         result["sequence_start"] = torch.as_tensor([self.buffer[i]["sequence_start"] for i in indices], dtype=torch.float32, device=device)
         result["init_state"] = _stack_state_batch([self.buffer[i]["init_state"] for i in indices], device)
+        result["critic_init_state"] = _stack_state_batch([self.buffer[i]["critic_init_state"] for i in indices], device)
         return result

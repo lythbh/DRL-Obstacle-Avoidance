@@ -430,6 +430,9 @@ class WebotsEnv:
 
         self.reward_computer = reward_computer
 
+        self.prev_action: Optional[np.ndarray] = None
+        self.action_smooth_weight = float(getattr(config, "action_smooth_weight", 0.01))
+
         self.current_step = 0
         self.episode_reward = 0.0
         self.current_pos = np.array([0.0, 0.0], dtype=np.float32)
@@ -458,6 +461,7 @@ class WebotsEnv:
         self.collision = False
         self.was_in_goal = False
         self.last_min_lidar_norm = 1.0
+        self.prev_action = None
 
     def _goal_geometry(self, pos: np.ndarray, heading: float) -> Tuple[float, float]:
         """Compute distance and direction error to goal from current position and heading."""
@@ -554,6 +558,7 @@ class WebotsEnv:
         self.collision = False
         self.was_in_goal = False
         self.last_min_lidar_norm = 1.0
+        self.prev_action = None
 
         for _ in range(self.config.reset_settle_steps):
             self.robot.step(self.timestep)
@@ -619,9 +624,15 @@ class WebotsEnv:
                 collision, self.current_pos, self.prev_distance,
                 goal_error, min_lidar_norm, speed_norm, reached_new_best_distance,
             )
-            self.prev_distance = new_distance
-            self.episode_reward += reward
             total_reward += reward
+            self.episode_reward += reward
+            if self.prev_action is not None:
+                action_delta = float(np.linalg.norm(action_arr - self.prev_action))
+                smooth_penalty = -self.action_smooth_weight * action_delta
+                reward += smooth_penalty
+                self.episode_reward += smooth_penalty
+                total_reward += smooth_penalty
+            self.prev_action = action_arr.copy()
 
             if self.was_in_goal and not goal_reached and speed_norm > 0.05:
                 reward += self.config.goal_overshoot_penalty

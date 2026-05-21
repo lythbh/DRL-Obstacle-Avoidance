@@ -1,18 +1,18 @@
 """Consolidated defaults for environment, SLAM, rewards, and training."""
 
 # --- Environment observation / physics ---
-ENV_LIDAR_SECTOR_DIM = 16
+ENV_LIDAR_SECTOR_DIM = 32
 ENV_POSE_GOAL_DIM = 5
 ENV_IMU_FEATURE_DIM = 10
 ENV_OCCUPANCY_GRID_SHAPE = None
-ENV_MAX_STEPS = 5000
+ENV_MAX_STEPS = 4000
 ENV_COLLISION_THRESHOLD = 0.1
 ENV_LOW_SCORE_THRESHOLD = -5000.0
 ENV_ENDPOINT = (2.0, 0.0)
 ENV_GOAL_THRESHOLD = 0.3
 ENV_GOAL_STOP_SPEED_THRESHOLD = 0.15
 ENV_MAX_STEERING_ANGLE = 0.9
-ENV_MAX_SPEED = 6.0
+ENV_MAX_SPEED = 8.0
 ENV_MIN_SPEED = 0.0
 ENV_START_POSITION = (-2.0, 0.0, 0.02)
 ENV_START_ROTATION = (0.0, 0.0, 1.0, 0.0)
@@ -28,30 +28,16 @@ SLAM_SAVE_PLOTS = False
 SLAM_FORCE_CPU = True
 
 # --- Reward ---
-REW_COLLISION_PENALTY = -1000.0  
-REW_PROGRESS_SCALE = 1.0
-REW_DISTANCE_SCALE = 0.0
-REW_HEADING_SCALE = 1.0
-REW_SAFETY_SCALE = 0.4
-REW_MOTION_SCALE = 0.0
-REW_SLOW_SPEED_THRESHOLD = 0.25
-REW_SLOW_SPEED_PENALTY = -0.01
-REW_HIGH_SPEED_THRESHOLD = 0.6
-REW_HIGH_SPEED_BONUS = 0.0
-REW_NEW_BEST_DISTANCE_BONUS = 0.0
-REW_STEP_PENALTY = 0.0
-REW_GOAL_SUCCESS = 500.0
-REW_GOAL_STOP_BONUS = 0.0
-REW_GOAL_SPEED_PENALTY = 0.0
+REW_COLLISION_PENALTY = -500.0
+REW_HEADING_SCALE = 0.3
+REW_GOAL_SUCCESS = 1000.0
 REW_GOAL_OVERSHOOT_PENALTY = 0.0
 REW_SCALE = 1.0
-REW_PROXIMITY_SCALE = 0.0
-REW_PROXIMITY_RADIUS = 0.0
 
 # --- Training ---
 class RecurrentDefaults:
     sequence_length = 64
-    burn_in = 8
+    burn_in = 24
     sequence_stride = 16
 
 class SACDefaults:
@@ -62,12 +48,12 @@ class SACDefaults:
     action_repeat = 4
     save_every = 100
     gamma = 0.99
-    tau = 0.003
+    tau = 0.001
     target_update_interval = 2
-    actor_lr = 5e-5
-    critic_lr = 5e-5
+    actor_lr = 1e-3
+    critic_lr = 1e-3
     alpha_lr = 3e-4
-    initial_alpha = 0.1
+    initial_alpha = 0.05
     auto_entropy_tuning = True
     target_entropy_scale = 1.0
     hidden_size = 256
