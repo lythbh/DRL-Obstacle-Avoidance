@@ -105,8 +105,6 @@ def run_worker(args: argparse.Namespace) -> int:
         result = subprocess.run(cmd, cwd=REPO_ROOT, env=env, check=False)
         time.sleep(5)
         gc.collect()
-        #subprocess.run(["taskkill", "/F", "/IM", "webots.exe"], capture_output=True)
-        #subprocess.run(["taskkill", "/F", "/IM", "webotsw.exe"], capture_output=True)
         if result.returncode != 0:
             print(f"[RUN] Webots failed with exit code {result.returncode}: {world}", file=sys.stderr, flush=True)
             return result.returncode
