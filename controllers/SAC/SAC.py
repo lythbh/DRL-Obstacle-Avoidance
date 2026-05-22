@@ -467,6 +467,7 @@ def train(config=None):
     env = WebotsEnv(config, reward_computer)
     env.reset()
     run_id = Path(env.run_folder).name
+    os.makedirs(env.run_folder, exist_ok=True)
     agent = SACAgent(env.observation_size, env.action_dim, config)
     replay = SequenceReplayBuffer(env.observation_size, env.action_dim, config)
     checkpoint_dir = _run_checkpoint_dir(_CHECKPOINT_DIR, run_id)

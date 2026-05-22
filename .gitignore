@@ -44,8 +44,8 @@ runs/
 *.nbconvert.ipynb
 
 #Agent context and project configuration folders
-#.claude/
-#.kilo/
+.claude/
+.kilo/
 
 #Editor and IDE project folders
 .vscode/

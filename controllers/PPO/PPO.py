@@ -516,6 +516,7 @@ def train(config=None):
     if run_id_override:
         env.run_folder = str(Path(env.run_folder).parent / run_id_override)
         os.makedirs(env.run_folder, exist_ok=True)
+    os.makedirs(env.run_folder, exist_ok=True)
     obs_size = env.observation_size
     action_dim = env.action_dim
     agent = PPOAgent(obs_size, action_dim, config)

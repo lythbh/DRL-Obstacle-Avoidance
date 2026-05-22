@@ -439,10 +439,19 @@ class WebotsEnv:
         self.was_in_goal: bool = False
         self.last_min_lidar_norm: float = 1.0
 
-        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        _repo_root = Path(__file__).parent.parent.parent
-        self.run_folder = str(_repo_root / "plots" / ts)
-        os.makedirs(self.run_folder, exist_ok=True)
+        self._run_folder: Optional[str] = None
+
+    @property
+    def run_folder(self) -> str:
+        if self._run_folder is None:
+            ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            _repo_root = Path(__file__).parent.parent.parent
+            self._run_folder = str(_repo_root / "plots" / ts)
+        return self._run_folder
+
+    @run_folder.setter
+    def run_folder(self, value: str) -> None:
+        self._run_folder = value
 
     def _sync_endpoint_from_world(self) -> None:
         """Read GOAL_MARKER position from world file and update self._endpoint."""
