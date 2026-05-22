@@ -443,7 +443,6 @@ class WebotsEnv:
         _repo_root = Path(__file__).parent.parent.parent
         self.run_folder = str(_repo_root / "plots" / ts)
         os.makedirs(self.run_folder, exist_ok=True)
-        self._episode_count = 0
 
     def _sync_endpoint_from_world(self) -> None:
         """Read GOAL_MARKER position from world file and update self._endpoint."""
@@ -455,18 +454,6 @@ class WebotsEnv:
             self.reward_computer.endpoint = tuple(goal_xy.tolist())
             start_xy = np.array(self.config.start_position[:2], dtype=np.float32)
             self._reference_distance = float(np.linalg.norm(start_xy - goal_xy))
-
-    def _reset_episode_state(self) -> None:
-        """Reset all per-episode tracking variables to initial values."""
-        self.current_step = 0
-        self.prev_distance = None
-        self.episode_reward = 0.0
-        self.current_heading = 0.0
-        self.current_distance = float("inf")
-        self.min_episode_distance = float("inf")
-        self.collision = False
-        self.was_in_goal = False
-        self.last_min_lidar_norm = 1.0
 
     def _goal_geometry(self, pos: np.ndarray, heading: float) -> Tuple[float, float]:
         """Compute distance and direction error to goal from current position and heading."""
@@ -539,7 +526,6 @@ class WebotsEnv:
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Reset environment to start state, return initial observation and info."""
         self.robot.slam.reset_map()
-        self._episode_count += 1
         self.robot.stop()
 
         if getattr(self.config, "randomize_goal", False):

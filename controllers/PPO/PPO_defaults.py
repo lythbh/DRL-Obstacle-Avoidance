@@ -71,5 +71,3 @@ class PPODefaults:
     lstm_hidden_size = 128
     lstm_layers = 1
     recurrent_cell = "gru"
-    clip_value_loss = False
-    max_grad_norm = 0.5

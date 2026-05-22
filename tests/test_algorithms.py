@@ -11,7 +11,6 @@ The Webots `controller` C-extension is mocked so that pure-Python and
 PyTorch code can be exercised without launching a simulation.
 """
 
-import math
 import sys
 import types
 from pathlib import Path

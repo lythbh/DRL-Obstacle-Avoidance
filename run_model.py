@@ -84,6 +84,9 @@ def run_inference(config=None):
         reward_computer = checkpoint.get("reward_computer")
         if reward_computer is None and isinstance(saved_config, dict):
             reward_computer = saved_config.get("reward_computer")
+        if reward_computer is None:
+            from controllers.PPO.PPO_rewards import PPORewardComputer
+            reward_computer = PPORewardComputer(endpoint=train_config.endpoint)
         env = WebotsEnv(train_config, reward_computer=reward_computer)
         obs_size = env.observation_size
         n_actions = env.action_dim
@@ -96,6 +99,9 @@ def run_inference(config=None):
         reward_computer = checkpoint.get("reward_computer")
         if reward_computer is None and isinstance(saved_config, dict):
             reward_computer = saved_config.get("reward_computer")
+        if reward_computer is None:
+            from controllers.SAC.SAC_rewards import SACRewardComputer
+            reward_computer = SACRewardComputer(endpoint=train_config.endpoint)
         env = WebotsEnv(train_config, reward_computer=reward_computer)
         obs_size = env.observation_size
         n_actions = env.action_dim

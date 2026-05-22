@@ -24,6 +24,7 @@ from controllers.common.checkpoints import (
 )
 from controllers.common.metrics_logger import MetricsLogger
 from controllers.common.seed import set_all_seeds
+from controllers.common.training_utils import sequence_loss_mask
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
@@ -41,7 +42,6 @@ class Config:
     epsilon: float = d.PPODefaults.epsilon 
     learning_rate: float = d.PPODefaults.learning_rate
     entropy_coef: float = d.PPODefaults.entropy_coef
-    clip_value_loss: bool = d.PPODefaults.clip_value_loss
     hidden_size: int = d.PPODefaults.hidden_size
     latent_size: int = d.PPODefaults.latent_size
     lstm_hidden_size: int = d.PPODefaults.lstm_hidden_size
@@ -67,14 +67,11 @@ class Config:
     step_penalty: float = d.REW_STEP_PENALTY
     endpoint: Tuple[float, float] = d.ENV_ENDPOINT
     goal_threshold: float = d.ENV_GOAL_THRESHOLD
-    goal_stop_speed_threshold: float = d.ENV_GOAL_STOP_SPEED_THRESHOLD
     goal_success_reward: float = d.REW_GOAL_SUCCESS
     goal_hold_reward: float = d.REW_GOAL_HOLD
-    goal_speed_penalty: float = d.REW_GOAL_SPEED_PENALTY
     goal_overshoot_penalty: float = d.REW_GOAL_OVERSHOOT_PENALTY
     reference_distance: Optional[float] = None
     enable_slam: bool = d.SLAM_ENABLE
-    profile_slam: bool = d.SLAM_PROFILE
     slam_profile_interval: int = d.SLAM_PROFILE_INTERVAL
     save_slam_plots: bool = d.SLAM_SAVE_PLOTS
     force_cpu: bool = d.SLAM_FORCE_CPU
@@ -313,13 +310,6 @@ class PPOAgent:
             t["advantages"] = ((t["advantages"] - adv_mean) / adv_std).astype(np.float32)
             t["advantages"] = np.clip(t["advantages"], -5.0, 5.0)
 
-    @staticmethod
-    def _sequence_loss_mask(valid_mask, burn_in):
-        """Create learning mask that excludes burn-in steps from gradient computation."""
-        valid_lengths = valid_mask.sum(dim=1).to(dtype=torch.long)
-        start_index = torch.minimum(torch.full_like(valid_lengths, burn_in), torch.clamp(valid_lengths - 1, min=0))
-        return valid_mask * (torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0) >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)
-
     def _update_batch(self, batch):
         """Perform one PPO gradient update on a batch, returning a dict with loss components and gradient statistics."""
         log_probs_new, values, entropy = self.evaluate_sequences(
@@ -328,7 +318,7 @@ class PPOAgent:
         if not (torch.isfinite(log_probs_new).all() and torch.isfinite(values).all() and torch.isfinite(entropy).all()):
             return None
         valid_mask = batch["valid_mask"]
-        learn_mask = self._sequence_loss_mask(valid_mask, self.config.burn_in)
+        learn_mask = sequence_loss_mask(valid_mask, self.config.burn_in)
         mask_bool = learn_mask > 0
         log_ratio = torch.nan_to_num(log_probs_new - batch["log_probs"], nan=0.0, posinf=20.0, neginf=-20.0).clamp(-20.0, 20.0)
         ratio = torch.exp(log_ratio)
@@ -515,14 +505,10 @@ def train(config=None):
         safety_reward_scale=config.safety_reward_scale,
         motion_reward_scale=config.motion_reward_scale,
         new_best_distance_bonus=config.new_best_distance_bonus,
-        proximity_radius=getattr(config, "proximity_radius", d.REW_PROXIMITY_RADIUS),
         step_penalty=config.step_penalty,
         goal_threshold=config.goal_threshold,
-        goal_stop_speed_threshold=config.goal_stop_speed_threshold,
         goal_success_reward=config.goal_success_reward,
         goal_hold_reward=config.goal_hold_reward,
-        goal_speed_penalty=config.goal_speed_penalty,
-        goal_overshoot_penalty=config.goal_overshoot_penalty,
     )
     env = WebotsEnv(config, reward_computer)
     env.reset()

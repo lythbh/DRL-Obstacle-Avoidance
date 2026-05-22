@@ -8,8 +8,6 @@ from controllers.PPO.PPO_defaults import (
     REW_COLLISION_PENALTY,
     REW_DISTANCE_SCALE,
     REW_GOAL_HOLD,
-    REW_GOAL_OVERSHOOT_PENALTY,
-    REW_GOAL_SPEED_PENALTY,
     REW_GOAL_SUCCESS,
     REW_HEADING_SCALE,
     REW_HIGH_SPEED_BONUS,
@@ -17,7 +15,6 @@ from controllers.PPO.PPO_defaults import (
     REW_MOTION_SCALE,
     REW_NEW_BEST_DISTANCE_BONUS,
     REW_PROGRESS_SCALE,
-    REW_PROXIMITY_RADIUS,
     REW_SAFETY_SCALE,
     REW_SLOW_SPEED_PENALTY,
     REW_SLOW_SPEED_THRESHOLD,
@@ -43,14 +40,10 @@ class PPORewardComputer:
         high_speed_threshold: float = REW_HIGH_SPEED_THRESHOLD,
         high_speed_bonus: float = REW_HIGH_SPEED_BONUS,
         new_best_distance_bonus: float = REW_NEW_BEST_DISTANCE_BONUS,
-        proximity_radius: float = REW_PROXIMITY_RADIUS,
         step_penalty: float = REW_STEP_PENALTY,
         goal_threshold: float = 0.3,
-        goal_stop_speed_threshold: float = 0.1,
         goal_success_reward: float = REW_GOAL_SUCCESS,
         goal_hold_reward: float = REW_GOAL_HOLD,
-        goal_speed_penalty: float = REW_GOAL_SPEED_PENALTY,
-        goal_overshoot_penalty: float = REW_GOAL_OVERSHOOT_PENALTY,
     ) -> None:
         """Initialize reward computer with environment and tuning parameters."""
         self.endpoint = np.array(endpoint, dtype=np.float32)
@@ -66,14 +59,10 @@ class PPORewardComputer:
         self.high_speed_threshold = float(high_speed_threshold)
         self.high_speed_bonus = float(high_speed_bonus)
         self.new_best_distance_bonus = float(new_best_distance_bonus)
-        self.proximity_radius = float(proximity_radius)
         self.step_penalty = float(step_penalty)
         self.goal_threshold = float(goal_threshold)
-        self.goal_stop_speed_threshold = float(goal_stop_speed_threshold)
         self.goal_success_reward = float(goal_success_reward)
         self.goal_hold_reward = float(goal_hold_reward)
-        self.goal_speed_penalty = float(goal_speed_penalty)
-        self.goal_overshoot_penalty = float(goal_overshoot_penalty)
 
     def compute(
         self,

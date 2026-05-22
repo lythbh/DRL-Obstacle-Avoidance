@@ -61,7 +61,6 @@ class SACDefaults:
 
     episodes = 2500
     update_after_steps = 2000
-    updates_per_step = 2
     gradient_steps_per_episode = 4
     save_every = 100
     gamma = 0.99
@@ -75,8 +74,6 @@ class SACDefaults:
     hidden_size = 128
     latent_size = 128
     recurrent_cell = "gru"
-    recurrent_hidden_size = None
-    recurrent_layers = 1
     lstm_hidden_size = 128
     lstm_layers = 1
     log_std_min = -5.0

@@ -33,6 +33,7 @@ class CriticNetwork(nn.Module):
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
+from controllers.PPO.PPO_rewards import PPORewardComputer
 
 class SumTree:
     def __init__(self, capacity):
@@ -109,7 +110,7 @@ class Config:
     lstm_layers: int = 1
     recurrent_cell: str = "gru"
     lidar_sector_dim: int = 16
-    pose_goal_dim: int = 9 
+    pose_goal_dim: int = 5
     imu_feature_dim: int = 10
     occupancy_grid_shape: Optional[Tuple[int, ...]] = None
 
@@ -131,11 +132,9 @@ class Config:
     endpoint: Tuple[float, float] = (2.0, 0.0)
     goal_success_reward: float = 100.0
     goal_threshold: float = 0.3
-    goal_stop_speed_threshold: float = 0.15
     goal_stop_bonus: float = 50.0
     goal_hold_reward: float = 2.0
     goal_overshoot_penalty: float = -5.0
-    goal_score_threshold: float = 3500.0
     reference_distance: Optional[float] = None
 
     # Robot Control
@@ -365,7 +364,22 @@ def train(config: Optional[Config] = None) -> None:
     _init_supervisor()
     
     # Create environment and agent
-    env = WebotsEnv(config)
+    reward_computer = PPORewardComputer(
+        endpoint=config.endpoint,
+        reference_distance=config.reference_distance,
+        collision_penalty=config.collision_penalty,
+        progress_reward_scale=config.progress_reward_scale,
+        distance_reward_scale=config.distance_reward_scale,
+        heading_reward_scale=config.heading_reward_scale,
+        safety_reward_scale=config.safety_reward_scale,
+        motion_reward_scale=config.motion_reward_scale,
+        new_best_distance_bonus=config.new_best_distance_bonus,
+        step_penalty=config.step_penalty,
+        goal_threshold=config.goal_threshold,
+        goal_success_reward=config.goal_success_reward,
+        goal_hold_reward=config.goal_hold_reward,
+    )
+    env = WebotsEnv(config, reward_computer)
     obs, _ = env.reset()
     obs_size = env.observation_size
     action_dim = env.action_dim
