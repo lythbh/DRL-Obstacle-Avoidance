@@ -7,13 +7,13 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from controller import Supervisor  # pyright: ignore[reportMissingImports]
+from controller import Supervisor # type: ignore
 
 _SLAM_IMPORT_ERROR: Optional[Exception] = None
 try:
-    from controllers.SLAM.imu_filter import IMUProcessor, IMUState                       # type: ignore
-    from controllers.SLAM.iekf_backend import IEKFBackend                                # type: ignore
-    from controllers.SLAM.slam_map import SLAMMap                                        # type: ignore
+    from controllers.SLAM.imu_filter import IMUProcessor, IMUState
+    from controllers.SLAM.iekf_backend import IEKFBackend
+    from controllers.SLAM.slam_map import SLAMMap
     _SLAM_AVAILABLE = True
 except ImportError as _slam_err:
     _SLAM_AVAILABLE = False
@@ -424,11 +424,8 @@ class WebotsEnv:
         self._reference_distance = float(config.reference_distance if config.reference_distance is not None else 1.0)
         self.robot = AltinoDriver(config)
         self.timestep = self.robot.timestep
-
-        #self.headlights = self.robot.supervisor.getDevice("headlights")
-        #self.backlights = self.robot.supervisor.getDevice("backlights")
-
         self.reward_computer = reward_computer
+        self._sync_endpoint_from_world()
 
         self.current_step = 0
         self.episode_reward = 0.0
@@ -442,22 +439,30 @@ class WebotsEnv:
         self.was_in_goal: bool = False
         self.last_min_lidar_norm: float = 1.0
 
-        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        _repo_root = Path(__file__).parent.parent.parent
-        self.run_folder = str(_repo_root / "plots" / ts)
-        os.makedirs(self.run_folder, exist_ok=True)
-        self._episode_count = 0
+        self._run_folder: Optional[str] = None
 
-    def _reset_episode_state(self) -> None:
-        self.current_step = 0
-        self.prev_distance = None
-        self.episode_reward = 0.0
-        self.current_heading = 0.0
-        self.current_distance = float("inf")
-        self.min_episode_distance = float("inf")
-        self.collision = False
-        self.was_in_goal = False
-        self.last_min_lidar_norm = 1.0
+    @property
+    def run_folder(self) -> str:
+        if self._run_folder is None:
+            ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            _repo_root = Path(__file__).parent.parent.parent
+            self._run_folder = str(_repo_root / "plots" / ts)
+        return self._run_folder
+
+    @run_folder.setter
+    def run_folder(self, value: str) -> None:
+        self._run_folder = value
+
+    def _sync_endpoint_from_world(self) -> None:
+        """Read GOAL_MARKER position from world file and update self._endpoint."""
+        goal_node = self.robot.supervisor.getFromDef("GOAL_MARKER")
+        if goal_node is not None:
+            translation = goal_node.getField("translation").getSFVec3f()
+            goal_xy = np.array([translation[0], translation[1]], dtype=np.float32)
+            self._endpoint = goal_xy
+            self.reward_computer.endpoint = tuple(goal_xy.tolist())
+            start_xy = np.array(self.config.start_position[:2], dtype=np.float32)
+            self._reference_distance = float(np.linalg.norm(start_xy - goal_xy))
 
     def _goal_geometry(self, pos: np.ndarray, heading: float) -> Tuple[float, float]:
         """Compute distance and direction error to goal from current position and heading."""
@@ -530,7 +535,6 @@ class WebotsEnv:
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Reset environment to start state, return initial observation and info."""
         self.robot.slam.reset_map()
-        self._episode_count += 1
         self.robot.stop()
 
         if getattr(self.config, "randomize_goal", False):

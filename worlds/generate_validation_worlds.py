@@ -1,15 +1,5 @@
-"""Generate 5 static validation world files from the ObstacleCourse.wbt template.
+"""Generate 5 static validation world files from the ObstacleCourse.wbt template."""
 
-Run once from the repository root:
-    python worlds/generate_validation_worlds.py
-
-Each world is written to worlds/validation/ with fixed obstacle layouts that
-the PPO controller will not randomize (they are baked into the file).
-The validation worlds cover three difficulty levels:
-  - Stage 1 (empty): val_1_empty_center.wbt, val_2_empty_offset.wbt
-  - Stage 2 (sparse): val_3_sparse_a.wbt, val_4_sparse_b.wbt
-  - Stage 3 (dense):  val_5_dense.wbt
-"""
 import re
 from pathlib import Path
 
@@ -17,11 +7,9 @@ TEMPLATE = Path(__file__).parent / "ObstacleCourse.wbt"
 OUT_DIR   = Path(__file__).parent / "validation"
 OUT_DIR.mkdir(exist_ok=True)
 
-# ---------------------------------------------------------------------------
-# Obstacle snippets — inline Solid cylinders and boxes, no PROTO downloads
-# ---------------------------------------------------------------------------
 
 def _cyl(name, x, y, r=0.15, h=0.3, color="0.8 0.2 0.2"):
+    """Build a cylinder-shaped obstacle Solid snippet."""
     return f"""\
 DEF {name} Solid {{
   translation {x} {y} 0.15
@@ -37,6 +25,7 @@ DEF {name} Solid {{
 
 
 def _box(name, x, y, sx=0.3, sy=0.3, sz=0.3, color="0.5 0.3 0.7"):
+    """Build a box-shaped obstacle Solid snippet."""
     return f"""\
 DEF {name} Solid {{
   translation {x} {y} 0.15
@@ -51,11 +40,8 @@ DEF {name} Solid {{
 }}"""
 
 
-# ---------------------------------------------------------------------------
-# Barrier walls (gap centred on goal_y)
-# ---------------------------------------------------------------------------
-
 def _goal_marker(goal_y=0.0, goal_x=2.0):
+    """Build the green goal marker cylinder Solid snippet."""
     return f"""\
 DEF GOAL_MARKER Solid {{
   translation {goal_x} {goal_y:.4f} 0.001
@@ -75,6 +61,7 @@ DEF GOAL_MARKER Solid {{
 
 
 def _barriers(goal_y=0.0, wall_x=1.5, half_span=1.55):
+    """Build the barrier wall Solid snippets that create a gap at the goal y-position."""
     return f"""\
 DEF BARRIER_TOP Solid {{
   translation {wall_x} {goal_y + half_span:.4f} 0.25
@@ -101,30 +88,16 @@ DEF BARRIER_BOTTOM Solid {{
 }}"""
 
 
-# ---------------------------------------------------------------------------
-# Read template: split into header (up to first DEF OBS_) and ALTINO block.
-# Patch WorldInfo to include basicTimeStep 16 if not already set.
-# ---------------------------------------------------------------------------
-
 raw = TEMPLATE.read_text(encoding="utf-8")
-# Ensure basicTimeStep is set for physics stability
-    # No physics overrides — keep the original WorldInfo defaults (32 ms, ODE defaults)
-    # which were verified to produce no physics warnings with this robot model.
 lines = raw.splitlines(keepends=True)
 
-# Header: everything up to (but not including) the first obstacle DEF or BARRIER
 HEADER_STOP_RE = re.compile(r"^DEF (OBS_|BARRIER_|ALTINO )")
 header_end = next(i for i, ln in enumerate(lines) if HEADER_STOP_RE.match(ln))
 header = "".join(lines[:header_end])
 
-# ALTINO block: from "DEF ALTINO Robot {" to end
 altino_start = next(i for i, ln in enumerate(lines) if ln.startswith("DEF ALTINO Robot {"))
 altino = "".join(lines[altino_start:])
 
-
-# ---------------------------------------------------------------------------
-# World definitions
-# ---------------------------------------------------------------------------
 
 WORLDS = [
     {
@@ -140,7 +113,6 @@ WORLDS = [
         "obstacles": [],
     },
     {
-        # 5 obstacles verified: all surface gaps ≥ 0.45 m, all ≥ 0.9 m from start, ≥ 0.8 m from goal
         "filename": "val_3_sparse_a.wbt",
         "comment": "# Validation 3 — Stage 2A: 5 obstacles, open corridor",
         "goal_y": 0.0,
@@ -153,7 +125,6 @@ WORLDS = [
         ],
     },
     {
-        # 5 obstacles verified: all surface gaps ≥ 0.45 m
         "filename": "val_4_sparse_b.wbt",
         "comment": "# Validation 4 — Stage 2B: 5 obstacles, partial corridor block",
         "goal_y": 0.0,
@@ -166,7 +137,6 @@ WORLDS = [
         ],
     },
     {
-        # 10 obstacles verified: all surface gaps ≥ 0.45 m, all ≥ 0.9 m from start, ≥ 0.8 m from goal
         "filename": "val_5_dense.wbt",
         "comment": "# Validation 5 — Stage 3: 10 obstacles, dense layout",
         "goal_y": 0.0,
@@ -184,11 +154,6 @@ WORLDS = [
         ],
     },
 ]
-
-
-# ---------------------------------------------------------------------------
-# Write each world
-# ---------------------------------------------------------------------------
 
 for world in WORLDS:
     obs_block = "\n\n".join(world["obstacles"])

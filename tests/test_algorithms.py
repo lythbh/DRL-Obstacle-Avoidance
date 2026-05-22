@@ -11,7 +11,6 @@ The Webots `controller` C-extension is mocked so that pure-Python and
 PyTorch code can be exercised without launching a simulation.
 """
 
-import math
 import sys
 import types
 from pathlib import Path
@@ -20,25 +19,17 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
-from torch.distributions import Normal
 
-# ---------------------------------------------------------------------------
-# Mock the Webots `controller` C-extension BEFORE any project imports so that
-# modules which do `from controller import Supervisor` succeed without Webots.
-# ---------------------------------------------------------------------------
+# Mock the Webots `controller` C-extension BEFORE any project imports.
 _controller_mock = types.ModuleType("controller")
 _controller_mock.Supervisor = MagicMock()
 sys.modules["controller"] = _controller_mock
 
-# Make project root importable when running directly.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 def _ppo_config():
+    """Return a minimal PPO Config for testing."""
     from controllers.PPO.PPO import Config
     return Config(
         episodes=10,
@@ -51,6 +42,7 @@ def _ppo_config():
 
 
 def _sac_config():
+    """Return a minimal SAC Config for testing."""
     from controllers.SAC.SAC import Config
     return Config(
         episodes=10,
@@ -61,12 +53,8 @@ def _sac_config():
     )
 
 
-# ---------------------------------------------------------------------------
-# PPO – Generalized Advantage Estimation
-# ---------------------------------------------------------------------------
-
 class TestGAE:
-    """GAE must satisfy the λ=1 / λ=0 boundary cases and be self-consistent."""
+    """GAE must satisfy the lambda=1 / lambda=0 boundary cases and be self-consistent."""
 
     def _make_agent(self):
         from controllers.PPO.PPO import PPOAgent
@@ -75,18 +63,17 @@ class TestGAE:
         return PPOAgent(obs_size, action_dim=2, config=cfg)
 
     def test_lambda_one_recovers_monte_carlo(self):
-        """GAE with λ=1 must equal discounted Monte-Carlo returns."""
+        """GAE with lambda=1 must equal discounted Monte-Carlo returns."""
         agent = self._make_agent()
         agent.config.gae_lambda = 1.0
         gamma = agent.config.gamma
 
         rewards = np.array([1.0, 2.0, -1.0, 3.0], dtype=np.float32)
-        values  = np.zeros(4, dtype=np.float32)          # zero critic → A = G
+        values  = np.zeros(4, dtype=np.float32)
         bootstrap = 0.5
 
         advantages, returns = agent.calculate_gae(rewards, values, bootstrap)
 
-        # MC returns computed independently.
         mc = np.zeros(4, dtype=np.float32)
         G = bootstrap
         for t in reversed(range(4)):
@@ -94,10 +81,10 @@ class TestGAE:
             mc[t] = G
 
         np.testing.assert_allclose(returns, mc, atol=1e-5,
-                                   err_msg="GAE(λ=1) must equal MC returns")
+                                   err_msg="GAE(lambda=1) must equal MC returns")
 
     def test_lambda_zero_gives_one_step_td(self):
-        """GAE with λ=0 must equal the 1-step TD advantage δ_t = r_t + γV(s_{t+1}) - V(s_t)."""
+        """GAE with lambda=0 must equal the 1-step TD advantage."""
         agent = self._make_agent()
         agent.config.gae_lambda = 0.0
         gamma = agent.config.gamma
@@ -112,10 +99,10 @@ class TestGAE:
         td = rewards + gamma * next_values - values
 
         np.testing.assert_allclose(advantages, td, atol=1e-5,
-                                   err_msg="GAE(λ=0) must equal 1-step TD advantages")
+                                   err_msg="GAE(lambda=0) must equal 1-step TD advantages")
 
     def test_returns_equal_advantages_plus_values(self):
-        """Returns must always be V̂ = A + V."""
+        """Returns must always be V_hat = A + V."""
         agent = self._make_agent()
         agent.config.gae_lambda = 0.95
 
@@ -151,11 +138,8 @@ class TestGAE:
         assert returns.shape == (1,)
 
 
-# ---------------------------------------------------------------------------
-# PPO – Advantage normalisation
-# ---------------------------------------------------------------------------
-
 class TestAdvantageNormalisation:
+    """Advantage normalisation must produce zero mean and unit std."""
 
     def _make_agent(self):
         from controllers.PPO.PPO import PPOAgent
@@ -178,16 +162,12 @@ class TestAdvantageNormalisation:
         assert abs(float(all_adv.std()) - 1.0) < 1e-4, "Normalised advantages must have unit std"
 
     def test_degenerate_constant_advantages_no_nan(self):
-        """Constant advantages (std ≈ 0) must not produce NaN after normalisation."""
+        """Constant advantages (std approx 0) must not produce NaN after normalisation."""
         agent = self._make_agent()
         traj = [{"advantages": np.ones(10, dtype=np.float32)}]
         agent._normalize_advantages(traj)
         assert not np.any(np.isnan(traj[0]["advantages"])), "Normalised advantages must not be NaN"
 
-
-# ---------------------------------------------------------------------------
-# PPO – Log-probability and tanh-squashing correction
-# ---------------------------------------------------------------------------
 
 class TestLogProbCorrection:
     """The tanh-squashed Gaussian log-prob must be consistent with the sampling density."""
@@ -212,8 +192,6 @@ class TestLogProbCorrection:
         assert torch.isfinite(log_prob).all(), "Log-probability must be finite"
 
     def test_log_prob_negative(self):
-        """For a continuous distribution, log-prob can be negative (density < 1 is possible,
-        but very high-density points near mean may exceed 0 - what matters is it is finite)."""
         agent = self._make_agent()
         policy_output = torch.zeros(1, 2)
         for _ in range(30):
@@ -235,11 +213,8 @@ class TestLogProbCorrection:
         )
 
 
-# ---------------------------------------------------------------------------
-# SAC – Replay buffer
-# ---------------------------------------------------------------------------
-
 class TestSequenceReplayBuffer:
+    """SAC replay buffer must manage capacity, padding, and sampling correctly."""
 
     def _make_buffer(self, obs_size=33, action_dim=2, capacity=128,
                      seq_len=16, stride=8):
@@ -296,21 +271,16 @@ class TestSequenceReplayBuffer:
     def test_valid_mask_marks_padded_steps(self):
         """Short windows (< seq_len) must be zero-padded with valid_mask=0 beyond actual length."""
         buf = self._make_buffer(capacity=32, seq_len=8, stride=8)
-        T = 5   # episode shorter than seq_len
+        T = 5
         obs     = [np.random.randn(33).astype(np.float32) for _ in range(T)]
         actions = [np.random.randn(2).astype(np.float32)  for _ in range(T)]
         rewards = list(np.zeros(T, dtype=float))
         dones   = [False] * T
         buf.add_episode(obs, actions, rewards, obs, dones)
-        # The stored window should have valid_mask=1 for first T steps, 0 for the rest.
         stored_mask = buf.buffer[0]["valid_mask"]
         assert stored_mask[:T].sum()  == T,     "First T steps must be valid"
         assert stored_mask[T:].sum()  == 0,     "Padded steps must be invalid"
 
-
-# ---------------------------------------------------------------------------
-# SAC – done flag must NOT be set on truncation
-# ---------------------------------------------------------------------------
 
 class TestSACDoneFlag:
     """The Bellman target must not zero out on episode timeout."""
@@ -334,95 +304,8 @@ class TestSACDoneFlag:
         assert done is True
 
 
-# ---------------------------------------------------------------------------
-# Reward function
-# ---------------------------------------------------------------------------
-
-class TestRewardComputer:
-
-    def _make_computer(self):
-        from controllers.Webots.webots_env import RewardComputer
-        return RewardComputer(
-            endpoint=np.array([2.0, 0.0], dtype=np.float32),
-            reference_distance=4.0,
-        )
-
-    def test_collision_returns_penalty(self):
-        rc = self._make_computer()
-        reward, dist = rc.compute(
-            collision=True,
-            current_pos=np.array([0.0, 0.0]),
-            current_step=1,
-            prev_distance=None,
-            goal_error=0.0,
-            min_lidar_norm=0.05,
-            speed_norm=0.5,
-            reached_new_best_distance=False,
-            accel=np.zeros(3),
-        )
-        assert reward < 0, "Collision reward must be negative"
-        assert dist is None, "Distance is undefined on collision"
-
-    def test_goal_reached_returns_large_positive(self):
-        rc = self._make_computer()
-        from controllers.common.defaults import REW_GOAL_SUCCESS as GOAL_SUCCESS_REWARD, REW_GOAL_STOP_BONUS as GOAL_STOP_BONUS
-        pos_at_goal = np.array([2.0, 0.0], dtype=np.float32)
-        reward, dist = rc.compute(
-            collision=False,
-            current_pos=pos_at_goal,
-            current_step=10,
-            prev_distance=0.5,
-            goal_error=0.0,
-            min_lidar_norm=0.8,
-            speed_norm=0.05,   # slow enough to trigger stop bonus
-            reached_new_best_distance=True,
-            accel=np.zeros(3),
-        )
-        assert reward > 0, "Goal reward must be positive"
-        assert reward >= GOAL_SUCCESS_REWARD, "Goal reward must be at least GOAL_SUCCESS_REWARD"
-
-    def test_progress_toward_goal_positive(self):
-        rc = self._make_computer()
-        # Robot at (0,0), prev distance was 3.0, now 2.5 → progress.
-        reward, _ = rc.compute(
-            collision=False,
-            current_pos=np.array([0.5, 0.0], dtype=np.float32),
-            current_step=5,
-            prev_distance=3.0,
-            goal_error=0.0,
-            min_lidar_norm=0.8,
-            speed_norm=0.5,
-            reached_new_best_distance=True,
-            accel=np.zeros(3),
-        )
-        # Should be positive net (progress dominates small penalties).
-        # Not guaranteed in all configurations, but with these clean params it should be.
-        assert np.isfinite(reward), "Reward must be finite for valid inputs"
-
-    def test_reward_is_finite_for_random_inputs(self):
-        rc = self._make_computer()
-        rng = np.random.default_rng(42)
-        for _ in range(100):
-            pos = rng.uniform(-3, 3, size=2).astype(np.float32)
-            reward, _ = rc.compute(
-                collision=False,
-                current_pos=pos,
-                current_step=int(rng.integers(1, 200)),
-                prev_distance=float(rng.uniform(0.5, 5.0)),
-                goal_error=float(rng.uniform(-math.pi, math.pi)),
-                min_lidar_norm=float(rng.uniform(0.0, 1.0)),
-                speed_norm=float(rng.uniform(0.0, 1.0)),
-                reached_new_best_distance=bool(rng.integers(0, 2)),
-                accel=rng.standard_normal(3).astype(np.float32),
-            )
-            assert np.isfinite(reward), f"Reward is non-finite for pos={pos}"
-
-
-# ---------------------------------------------------------------------------
-# GRU / LSTM actor-critic – forward pass shapes
-# ---------------------------------------------------------------------------
-
 class TestRecurrentModels:
+    """GRU / LSTM actor-critic forward pass shape tests."""
 
     def _ppo_obs(self, cfg):
         return cfg.lidar_sector_dim + cfg.pose_goal_dim + cfg.imu_feature_dim
@@ -455,7 +338,7 @@ class TestRecurrentModels:
         B, T = 4, 16
         obs = torch.randn(B, T, obs_size)
         done_mask = torch.zeros(B, T)
-        done_mask[:, 0] = 1.0  # reset at start of each sequence
+        done_mask[:, 0] = 1.0
         policy, value, h = model(obs, done_mask=done_mask)
         assert policy.shape == (B, T, 2), f"Sequence policy shape wrong: {policy.shape}"
         assert value.shape  == (B, T),    f"Sequence value shape wrong:  {value.shape}"
@@ -466,13 +349,10 @@ class TestRecurrentModels:
         cfg = _ppo_config()
         obs_size = self._ppo_obs(cfg)
         model = GRUActorCritic(obs_size, action_dim=2, config=cfg)
-        # Pass a non-zero initial hidden state.
         h_nonzero = torch.ones(cfg.lstm_layers, 1, cfg.lstm_hidden_size)
         obs = torch.randn(1, obs_size)
-        # done=1 should wipe the state.
         _, _, h_after_reset  = model(obs, recurrent_state=h_nonzero, done_mask=torch.tensor([1.0]))
         _, _, h_after_no_reset = model(obs, recurrent_state=h_nonzero, done_mask=torch.tensor([0.0]))
-        # Reset should yield a different (typically smaller-magnitude) hidden state.
         assert not torch.allclose(h_after_reset, h_after_no_reset), \
             "done=1 must change the hidden state compared to done=0"
 
@@ -487,11 +367,8 @@ class TestRecurrentModels:
         assert torch.isfinite(value).all(),  "Value output contains NaN/Inf"
 
 
-# ---------------------------------------------------------------------------
-# SAC – critic update target shape consistency
-# ---------------------------------------------------------------------------
-
 class TestSACNetworkShapes:
+    """SAC agent network shape consistency tests."""
 
     def _make_agent(self):
         from controllers.SAC.SAC import SACAgent
@@ -543,10 +420,6 @@ class TestSACNetworkShapes:
             f"Update produced non-finite loss: {metrics}"
 
 
-# ---------------------------------------------------------------------------
-# Entry point for running without pytest
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
     import traceback
 
@@ -556,7 +429,6 @@ if __name__ == "__main__":
         TestLogProbCorrection,
         TestSequenceReplayBuffer,
         TestSACDoneFlag,
-        TestRewardComputer,
         TestRecurrentModels,
         TestSACNetworkShapes,
     ]

@@ -1,50 +1,63 @@
+#Python bytecode and cache files
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
 
-# Virtual environments
+#Virtual environment directories
 venv/
 .venv/
 env/
 .env/
 5429/
 
-# Python packaging
+#Python build artifacts and package metadata
 build/
 dist/
 *.egg-info/
 .eggs/
-controllers/PPO/slam_runs
-plots
 
-# Machine learning outputs
+#Saved model checkpoints per controller
+controllers/PPO/checkpoints/
+controllers/SAC/checkpoints/
+
+#Serialised model weight formats
 *.h5
 *.ckpt
 *.pth
 *.pt
 *.onnx
+
+#Training and evaluation output directories
+controllers/PPO/slam_runs
+controllers/PPO/slam_runs/
+controllers/SAC/slam_runs
+controllers/SAC/slam_runs/
+plots/
 data/
 datasets/
 logs/
 runs/
-controllers/PPO/slam_runs/
-controllers/PPO/checkpoints/
-plots/
 
-# Jupyter
+#Jupyter Notebook auto-save files
 .ipynb_checkpoints/
 *.nbconvert.ipynb
 
-# Editors
+#Agent context and project configuration folders
+.claude/
+.kilo/
+
+#Editor and IDE project folders
 .vscode/
 .idea/
+
+#Editor temporary and swap files
 *.swp
 *.swo
 
-# OS-specific
+#Operating-system meta files
 .DS_Store
 .AppleDouble
 .LSOverride
 Thumbs.db
 Desktop.ini
-

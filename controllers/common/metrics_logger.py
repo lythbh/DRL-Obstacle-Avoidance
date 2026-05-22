@@ -70,7 +70,7 @@ class MetricsLogger:
         "act1_mean", "act1_std", "act1_min", "act1_max",
         "obs_mean", "obs_std", "obs_min", "obs_max",
         "actor_loss", "critic_loss", "policy_entropy", "entropy_coef",
-        "value_residual", "grad_norm_actor", "grad_norm_critic",
+        "value_residual", "grad_norm_actor", "grad_norm_critic", "grad_norm_rnn",
         "lr_actor", "lr_critic",
         "alpha", "alpha_loss",
         "target_update_magnitude",
@@ -88,6 +88,7 @@ class MetricsLogger:
         "value_residual",
         "grad_norm_actor",
         "grad_norm_critic",
+        "grad_norm_rnn",
         "lr_actor",
         "lr_critic",
         "alpha",
@@ -275,23 +276,6 @@ class MetricsLogger:
         v = np.asarray(values, dtype=np.float32)
         r = np.asarray(returns, dtype=np.float32)
         return float(np.mean(np.abs(v - r)))
-
-    @staticmethod
-    def compute_td_error(
-        rewards: np.ndarray,
-        values: np.ndarray,
-        next_values: np.ndarray,
-        gamma: float,
-    ) -> float:
-        """Compute mean absolute TD-error across a trajectory.
-
-        TD(t) = r(t) + gamma * V(t+1) - V(t), where V(T+1) = 0 for terminal.
-        """
-        r = np.asarray(rewards, dtype=np.float32)
-        v = np.asarray(values, dtype=np.float32)
-        nv = np.asarray(next_values, dtype=np.float32)
-        td = r + gamma * nv - v
-        return float(np.mean(np.abs(td)))
 
     @staticmethod
     def aggregate_update_metrics(

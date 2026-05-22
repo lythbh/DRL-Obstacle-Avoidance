@@ -1,15 +1,15 @@
-﻿"""PPO-specific reward computation for obstacle avoidance task."""
+﻿"""SAC-specific reward computation for obstacle avoidance task."""
 
 from typing import Optional, Tuple
 
 import numpy as np
 
-from controllers.common.PPO_defaults import (
+from controllers.SAC.SAC_defaults import (
     REW_COLLISION_PENALTY,
     REW_DISTANCE_SCALE,
     REW_GOAL_HOLD,
-    REW_GOAL_OVERSHOOT_PENALTY,
     REW_GOAL_SPEED_PENALTY,
+    REW_GOAL_STOP_BONUS,
     REW_GOAL_SUCCESS,
     REW_HEADING_SCALE,
     REW_HIGH_SPEED_BONUS,
@@ -18,6 +18,7 @@ from controllers.common.PPO_defaults import (
     REW_NEW_BEST_DISTANCE_BONUS,
     REW_PROGRESS_SCALE,
     REW_PROXIMITY_RADIUS,
+    REW_PROXIMITY_SCALE,
     REW_SAFETY_SCALE,
     REW_SLOW_SPEED_PENALTY,
     REW_SLOW_SPEED_THRESHOLD,
@@ -25,8 +26,8 @@ from controllers.common.PPO_defaults import (
 )
 
 
-class PPORewardComputer:
-    """Computes rewards for the obstacle avoidance task (PPO variant)."""
+class SACRewardComputer:
+    """Computes rewards for the obstacle avoidance task (SAC variant)."""
 
     def __init__(
         self,
@@ -44,13 +45,14 @@ class PPORewardComputer:
         high_speed_bonus: float = REW_HIGH_SPEED_BONUS,
         new_best_distance_bonus: float = REW_NEW_BEST_DISTANCE_BONUS,
         proximity_radius: float = REW_PROXIMITY_RADIUS,
+        proximity_reward_scale: float = REW_PROXIMITY_SCALE,
         step_penalty: float = REW_STEP_PENALTY,
         goal_threshold: float = 0.3,
         goal_stop_speed_threshold: float = 0.1,
         goal_success_reward: float = REW_GOAL_SUCCESS,
+        goal_stop_bonus: float = REW_GOAL_STOP_BONUS,
         goal_hold_reward: float = REW_GOAL_HOLD,
         goal_speed_penalty: float = REW_GOAL_SPEED_PENALTY,
-        goal_overshoot_penalty: float = REW_GOAL_OVERSHOOT_PENALTY,
     ) -> None:
         self.endpoint = np.array(endpoint, dtype=np.float32)
         self.reference_distance = float(reference_distance)
@@ -66,13 +68,14 @@ class PPORewardComputer:
         self.high_speed_bonus = float(high_speed_bonus)
         self.new_best_distance_bonus = float(new_best_distance_bonus)
         self.proximity_radius = float(proximity_radius)
+        self.proximity_reward_scale = float(proximity_reward_scale)
         self.step_penalty = float(step_penalty)
         self.goal_threshold = float(goal_threshold)
         self.goal_stop_speed_threshold = float(goal_stop_speed_threshold)
         self.goal_success_reward = float(goal_success_reward)
+        self.goal_stop_bonus = float(goal_stop_bonus)
         self.goal_hold_reward = float(goal_hold_reward)
         self.goal_speed_penalty = float(goal_speed_penalty)
-        self.goal_overshoot_penalty = float(goal_overshoot_penalty)
 
     def compute(
         self,
@@ -93,14 +96,14 @@ class PPORewardComputer:
         distance_to_end = float(np.linalg.norm(current_pos - self.endpoint))
 
         if distance_to_end < self.goal_threshold:
-            return self.goal_success_reward +  self.goal_hold_reward, distance_to_end
+            if speed_norm <= self.goal_stop_speed_threshold:
+                return self.goal_success_reward + self.goal_stop_bonus + self.goal_hold_reward, distance_to_end
+            return self.goal_speed_penalty * speed_norm + self.goal_hold_reward, distance_to_end
 
         progress = 0.0
         if prev_distance is not None:
             delta = float(prev_distance - distance_to_end)
-            proximity_factor = 1.0 - (distance_to_end / max(self.reference_distance, 1e-6))
-            progress = delta * self.progress_scale * proximity_factor
-
+            progress = delta * self.progress_scale if delta >= 0.0 else delta * (0.25 * self.progress_scale)
         distance_ratio = float(np.clip(distance_to_end / max(self.reference_distance, 1e-6), 0.0, 2.0))
         distance_penalty = -distance_ratio * self.distance_reward_scale
         heading_alignment = float(np.cos(goal_error))
@@ -111,9 +114,9 @@ class PPORewardComputer:
         high_speed_reward = self.high_speed_bonus if speed_norm > self.high_speed_threshold else 0.0
         new_best_bonus = self.new_best_distance_bonus if reached_new_best_distance else 0.0
 
-        # proximity_bonus = 0.0
-        # if distance_to_end < self.proximity_radius and distance_to_end >= self.goal_threshold:
-        #     proximity_bonus = self.proximity_reward_scale * (1.0 - distance_to_end / self.proximity_radius)
+        proximity_bonus = 0.0
+        if distance_to_end < self.proximity_radius and distance_to_end >= self.goal_threshold:
+            proximity_bonus = self.proximity_reward_scale * (1.0 - distance_to_end / self.proximity_radius)
 
         return (
             progress
@@ -124,6 +127,6 @@ class PPORewardComputer:
             + slow_penalty
             + high_speed_reward
             + new_best_bonus
-            #+ proximity_bonus
+            + proximity_bonus
             + self.step_penalty
         ), distance_to_end

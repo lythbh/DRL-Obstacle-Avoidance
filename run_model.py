@@ -1,15 +1,17 @@
 ﻿"""Inference script for running a trained PPO or SAC model in Webots."""
 
-import argparse
-import time
-import statistics
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Optional, Any, cast
 
+import argparse
+import time
+import statistics
+
 
 @dataclass
 class InferenceConfig:
+    """Configuration for model inference."""
     model_path: Optional[str] = None
     algorithm: str = "sac"
     episodes: int = 10
@@ -79,7 +81,13 @@ def run_inference(config=None):
     if algorithm == "ppo":
         train_config = PPOConfig(**{k: v for k, v in saved_config.items() if k in {f.name for f in fields(PPOConfig)}})
         train_config.recurrent_cell = str(checkpoint.get("recurrent_cell", "gru")).lower().strip()
-        env = WebotsEnv(train_config)
+        reward_computer = checkpoint.get("reward_computer")
+        if reward_computer is None and isinstance(saved_config, dict):
+            reward_computer = saved_config.get("reward_computer")
+        if reward_computer is None:
+            from controllers.PPO.PPO_rewards import PPORewardComputer
+            reward_computer = PPORewardComputer(endpoint=train_config.endpoint)
+        env = WebotsEnv(train_config, reward_computer=reward_computer)
         obs_size = env.observation_size
         n_actions = env.action_dim
         agent = cast(Any, PPOAgent(obs_size, n_actions, train_config))
@@ -88,7 +96,13 @@ def run_inference(config=None):
         architecture = checkpoint.get("architecture", {})
         if isinstance(architecture, dict):
             train_config.recurrent_cell = str(architecture.get("recurrent_cell", "gru")).lower().strip()
-        env = WebotsEnv(train_config)
+        reward_computer = checkpoint.get("reward_computer")
+        if reward_computer is None and isinstance(saved_config, dict):
+            reward_computer = saved_config.get("reward_computer")
+        if reward_computer is None:
+            from controllers.SAC.SAC_rewards import SACRewardComputer
+            reward_computer = SACRewardComputer(endpoint=train_config.endpoint)
+        env = WebotsEnv(train_config, reward_computer=reward_computer)
         obs_size = env.observation_size
         n_actions = env.action_dim
         agent = cast(Any, SACAgent(obs_size, n_actions, train_config))

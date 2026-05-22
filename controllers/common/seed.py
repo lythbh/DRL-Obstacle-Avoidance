@@ -12,6 +12,5 @@ def set_all_seeds(seed: int = 42) -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-        # deterministic mode costs some throughput but guarantees reproducibility
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False

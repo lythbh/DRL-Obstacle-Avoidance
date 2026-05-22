@@ -12,6 +12,7 @@ class LSTMActorCritic(RecurrentActorCriticBase):
     """Actor-critic network with lightweight feature branches and an LSTM core."""
 
     def __init__(self, obs_size: int, action_dim: int, config) -> None:
+        """Initialize LSTM recurrent core on top of base feature encoders."""
         super().__init__(obs_size, action_dim, config)
         self.lstm = nn.LSTM(
             input_size=config.latent_size,

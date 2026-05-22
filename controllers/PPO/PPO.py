@@ -1,4 +1,5 @@
 ﻿"""PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
+import math
 import os
 import sys, time
 from dataclasses import asdict, dataclass
@@ -14,8 +15,8 @@ from torch.nn.utils.rnn import pad_sequence
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic, RecurrentState
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
-from controllers.common.PPO_rewards import PPORewardComputer
-import controllers.common.PPO_defaults as d
+from controllers.PPO.PPO_rewards import PPORewardComputer
+import controllers.PPO.PPO_defaults as d
 from controllers.common.checkpoints import (
     run_checkpoint_dir, run_checkpoint_path, load_checkpoint,
     make_checkpoint_header as _make_checkpoint_header,
@@ -23,6 +24,7 @@ from controllers.common.checkpoints import (
 )
 from controllers.common.metrics_logger import MetricsLogger
 from controllers.common.seed import set_all_seeds
+from controllers.common.training_utils import sequence_loss_mask
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
@@ -40,7 +42,6 @@ class Config:
     epsilon: float = d.PPODefaults.epsilon 
     learning_rate: float = d.PPODefaults.learning_rate
     entropy_coef: float = d.PPODefaults.entropy_coef
-    clip_value_loss: bool = d.PPODefaults.clip_value_loss
     hidden_size: int = d.PPODefaults.hidden_size
     latent_size: int = d.PPODefaults.latent_size
     lstm_hidden_size: int = d.PPODefaults.lstm_hidden_size
@@ -66,14 +67,11 @@ class Config:
     step_penalty: float = d.REW_STEP_PENALTY
     endpoint: Tuple[float, float] = d.ENV_ENDPOINT
     goal_threshold: float = d.ENV_GOAL_THRESHOLD
-    goal_stop_speed_threshold: float = d.ENV_GOAL_STOP_SPEED_THRESHOLD
     goal_success_reward: float = d.REW_GOAL_SUCCESS
     goal_hold_reward: float = d.REW_GOAL_HOLD
-    goal_speed_penalty: float = d.REW_GOAL_SPEED_PENALTY
     goal_overshoot_penalty: float = d.REW_GOAL_OVERSHOOT_PENALTY
     reference_distance: Optional[float] = None
     enable_slam: bool = d.SLAM_ENABLE
-    profile_slam: bool = d.SLAM_PROFILE
     slam_profile_interval: int = d.SLAM_PROFILE_INTERVAL
     save_slam_plots: bool = d.SLAM_SAVE_PLOTS
     force_cpu: bool = d.SLAM_FORCE_CPU
@@ -90,6 +88,7 @@ class Config:
     reset_settle_steps: int = d.ENV_RESET_SETTLE_STEPS
 
     def __post_init__(self):
+        """Initialize mutable fields and validate recurrent cell type."""
         self.recurrent_cell = self.recurrent_cell.lower().strip()
         aliases = {"mlp": "none", "feedforward": "none", "ff": "none"}
         self.recurrent_cell = aliases.get(self.recurrent_cell, self.recurrent_cell)
@@ -111,6 +110,7 @@ class FeedForwardActorCritic(nn.Module):
     """Feed-forward actor-critic with PPO's structured observation branches."""
 
     def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
+        """Initialize branch encoders, fusion network, and policy/value heads."""
         super().__init__()
         self.obs_size = obs_size
         self.action_dim = action_dim
@@ -147,9 +147,11 @@ class FeedForwardActorCritic(nn.Module):
         self.value_head = nn.Linear(config.latent_size, 1)
 
     def get_initial_state(self, batch_size: int, device: Optional[torch.device] = None):
+        """Return None as feed-forward has no recurrent state."""
         return None
 
     def forward(self, observation, recurrent_state=None, done_mask=None):
+        """Forward pass: encode observations through branches, output policy & value."""
         obs = torch.as_tensor(observation, dtype=torch.float32, device=next(self.parameters()).device)
         single_step = obs.ndim == 1
         if obs.ndim == 1:
@@ -175,7 +177,6 @@ class FeedForwardActorCritic(nn.Module):
         state_value = self.value_head(latent).reshape(batch_size, seq_len)
         if single_step or seq_len == 1:
             policy_output = policy_output[:, 0]
-            state_value = state_value[:, 0]
         return policy_output, state_value, None
 
 
@@ -307,15 +308,7 @@ class PPOAgent:
         adv_std = float(all_adv.std() + 1e-8)
         for t in trajectories:
             t["advantages"] = ((t["advantages"] - adv_mean) / adv_std).astype(np.float32)
-            # Clip normalized advantages to prevent extreme ratio outliers
             t["advantages"] = np.clip(t["advantages"], -5.0, 5.0)
-
-    @staticmethod
-    def _sequence_loss_mask(valid_mask, burn_in):
-        """Create learning mask that excludes burn-in steps from gradient computation."""
-        valid_lengths = valid_mask.sum(dim=1).to(dtype=torch.long)
-        start_index = torch.minimum(torch.full_like(valid_lengths, burn_in), torch.clamp(valid_lengths - 1, min=0))
-        return valid_mask * (torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0) >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)
 
     def _update_batch(self, batch):
         """Perform one PPO gradient update on a batch, returning a dict with loss components and gradient statistics."""
@@ -325,14 +318,13 @@ class PPOAgent:
         if not (torch.isfinite(log_probs_new).all() and torch.isfinite(values).all() and torch.isfinite(entropy).all()):
             return None
         valid_mask = batch["valid_mask"]
-        learn_mask = self._sequence_loss_mask(valid_mask, self.config.burn_in)
+        learn_mask = sequence_loss_mask(valid_mask, self.config.burn_in)
         mask_bool = learn_mask > 0
         log_ratio = torch.nan_to_num(log_probs_new - batch["log_probs"], nan=0.0, posinf=20.0, neginf=-20.0).clamp(-20.0, 20.0)
         ratio = torch.exp(log_ratio)
         surr1 = ratio * batch["advantages"]
         surr2 = torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon) * batch["advantages"]
         surrogate = torch.where(mask_bool, torch.min(surr1, surr2), torch.zeros_like(surr1))
-        # Value loss: simple smooth_l1_loss without clipping (clip_value_loss disabled to allow critic gradient flow)
         value_error = nn.functional.smooth_l1_loss(values, batch["returns"], reduction="none")
         entropy_term = torch.where(mask_bool, entropy, torch.zeros_like(entropy))
         valid_count = learn_mask.sum().clamp_min(1.0)
@@ -354,24 +346,22 @@ class PPOAgent:
                 self.optimizer.zero_grad()
                 return None
 
+        rnn_attr = "gru" if hasattr(self.model, "gru") else ("lstm" if hasattr(self.model, "lstm") else None)
+        rnn_clip = list(getattr(self.model, rnn_attr).parameters()) if rnn_attr else []
+
         actor_params = [self.model.policy_head.weight, self.model.policy_head.bias, self.actor_log_std]
         critic_params = [self.model.value_head.weight, self.model.value_head.bias]
-        all_params = list(self.model.parameters()) + [self.actor_log_std]
 
         grad_norm_actor = MetricsLogger.compute_grad_norm(actor_params)
         grad_norm_critic = MetricsLogger.compute_grad_norm(critic_params)
+        grad_norm_rnn = MetricsLogger.compute_grad_norm(rnn_clip) if rnn_clip else 0.0
 
-        # Per-module gradient clipping for stability:
-        # - Actor params get conservative clipping (max_norm=0.5)
-        # - Critic and RNN params get looser clipping (max_norm=1.0)
         actor_clip = list(self.model.policy_head.parameters()) + [self.actor_log_std]
         critic_clip = list(self.model.value_head.parameters())
-        rnn_attr = "gru" if hasattr(self.model, "gru") else ("lstm" if hasattr(self.model, "lstm") else None)
-        rnn_clip = list(getattr(self.model, rnn_attr).parameters()) if rnn_attr else []
         encoder_clip = [p for n, p in self.model.named_parameters()
                         if "policy_head" not in n and "value_head" not in n and (rnn_attr is None or rnn_attr not in n)]
         nn.utils.clip_grad_norm_(actor_clip, max_norm=0.5)
-        nn.utils.clip_grad_norm_(critic_clip, max_norm=5.0)  # raised from 1.0 â€” critic has only 2 params, needs more room
+        nn.utils.clip_grad_norm_(critic_clip, max_norm=5.0)
         if rnn_clip:
             nn.utils.clip_grad_norm_(rnn_clip, max_norm=1.0)
         nn.utils.clip_grad_norm_(encoder_clip, max_norm=0.5)
@@ -389,6 +379,7 @@ class PPOAgent:
             "approx_kl": round(approx_kl, 6),
             "grad_norm_actor": round(grad_norm_actor, 6),
             "grad_norm_critic": round(grad_norm_critic, 6),
+            "grad_norm_rnn": round(grad_norm_rnn, 6),
             "lr_actor": lr,
         }
 
@@ -409,12 +400,8 @@ class PPOAgent:
         log_prob -= torch.log(self.action_scale + 1e-6)
         log_prob -= torch.log(1.0 - action_tanh.pow(2) + 1e-6)
         log_prob = log_prob.sum(dim=-1)
-        entropy_pre_tanh = dist.rsample()
-        entropy_action_tanh = torch.tanh(entropy_pre_tanh)
-        entropy = dist.log_prob(entropy_pre_tanh)
-        entropy -= torch.log(self.action_scale + 1e-6)
-        entropy -= torch.log(1.0 - entropy_action_tanh.pow(2) + 1e-6)
-        entropy = -entropy.sum(dim=-1)
+        flat_entropy = 0.5 * self.action_dim * (1.0 + math.log(2.0 * math.pi)) + self.actor_log_std.sum()
+        entropy = flat_entropy.expand(observations.shape[0], observations.shape[1])
         return log_prob, state_values, entropy
 
     def update(self, trajectories):
@@ -439,7 +426,6 @@ class PPOAgent:
                 metrics = self._update_batch(batch)
                 if metrics is not None:
                     update_metrics.append(metrics)
-                    # Early stopping if KL divergence is too large
                     if metrics.get("approx_kl", 0) > 0.05:
                         early_stop = True
                         break
@@ -519,14 +505,10 @@ def train(config=None):
         safety_reward_scale=config.safety_reward_scale,
         motion_reward_scale=config.motion_reward_scale,
         new_best_distance_bonus=config.new_best_distance_bonus,
-        proximity_radius=getattr(config, "proximity_radius", d.REW_PROXIMITY_RADIUS),
         step_penalty=config.step_penalty,
         goal_threshold=config.goal_threshold,
-        goal_stop_speed_threshold=config.goal_stop_speed_threshold,
         goal_success_reward=config.goal_success_reward,
         goal_hold_reward=config.goal_hold_reward,
-        goal_speed_penalty=config.goal_speed_penalty,
-        goal_overshoot_penalty=config.goal_overshoot_penalty,
     )
     env = WebotsEnv(config, reward_computer)
     env.reset()
@@ -534,6 +516,7 @@ def train(config=None):
     if run_id_override:
         env.run_folder = str(Path(env.run_folder).parent / run_id_override)
         os.makedirs(env.run_folder, exist_ok=True)
+    os.makedirs(env.run_folder, exist_ok=True)
     obs_size = env.observation_size
     action_dim = env.action_dim
     agent = PPOAgent(obs_size, action_dim, config)
@@ -607,17 +590,12 @@ def train(config=None):
         ep_adv, ep_ret = agent.calculate_gae(
             scaled_rew, ep_val_np, bootstrap_value=bootstrap_value,
         )
-        # Normalize returns
-        # ep_ret = (ep_ret - np.mean(ep_ret)) / (np.std(ep_ret) + 1e-8) 
         rollout.append({"observations": ep_obs_arr, "actions": np.array(ep_act, dtype=np.float32),
                         "log_probs": np.array(ep_lp, dtype=np.float32), "returns": ep_ret, "advantages": ep_adv})
 
         act_stats = MetricsLogger.compute_action_stats(ep_act)
         obs_stats = MetricsLogger.compute_obs_stats(ep_obs)
-        ep_val_residual = MetricsLogger.compute_value_residual(ep_val_np, ep_ret)
 
-        # Learning rate warmup: ramp from 25% to 100% over first 25 episodes.
-        # Avoids freezing the model when exploration is strongest.
         if episode < 25:
             warmup_lr = config.learning_rate * (0.25 + 0.75 * (episode + 1) / 25.0)
             for pg in agent.optimizer.param_groups:
@@ -638,7 +616,9 @@ def train(config=None):
         agg_upd = MetricsLogger.aggregate_update_metrics(all_update_metrics)
 
         decay_frac = min(1.0, episode / max(1, config.episodes))
-        agent.config.entropy_coef = d.PPODefaults.entropy_coef * (1.0 - 0.60 * decay_frac)
+        arch_scale = {"none": 1.0, "gru": 1.0, "lstm": 1.35}.get(config.recurrent_cell, 1.0)
+        base_entropy = d.PPODefaults.entropy_coef * arch_scale
+        agent.config.entropy_coef = base_entropy * (1.0 - 0.30 * decay_frac)
 
         ep_sum = sum(ep_rew)
         rew_w.append(ep_sum)

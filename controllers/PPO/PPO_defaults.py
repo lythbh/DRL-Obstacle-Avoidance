@@ -1,13 +1,13 @@
 ﻿"""Consolidated defaults for environment, SLAM, rewards, and training."""
 
-# --- Environment observation / physics ---
+"""Environment observation / physics."""
 ENV_LIDAR_SECTOR_DIM = 16
 ENV_POSE_GOAL_DIM = 5
 ENV_IMU_FEATURE_DIM = 10
 ENV_OCCUPANCY_GRID_SHAPE = None
-ENV_MAX_STEPS = 6000
+ENV_MAX_STEPS = 2500
 ENV_COLLISION_THRESHOLD = 0.1
-ENV_LOW_SCORE_THRESHOLD = -2000.0
+ENV_LOW_SCORE_THRESHOLD = -500.0
 ENV_ENDPOINT = (2.0, 0.0)
 ENV_GOAL_THRESHOLD = 0.3
 ENV_GOAL_STOP_SPEED_THRESHOLD = 0.15
@@ -18,16 +18,16 @@ ENV_START_POSITION = (-2.0, 0.0, 0.02)
 ENV_START_ROTATION = (0.0, 0.0, 1.0, 0.0)
 ENV_START_POSITION_NOISE = 0.08
 ENV_START_YAW_NOISE = 0.8
-ENV_RESET_SETTLE_STEPS = 5
+ENV_RESET_SETTLE_STEPS = 10
 
-# --- SLAM ---
+"""SLAM."""
 SLAM_ENABLE = False
 SLAM_PROFILE = False
 SLAM_PROFILE_INTERVAL = 500
 SLAM_SAVE_PLOTS = False
 SLAM_FORCE_CPU = True
 
-# --- Reward ---
+"""Reward."""
 REW_COLLISION_PENALTY = -50.0
 REW_PROGRESS_SCALE = 2.0
 REW_DISTANCE_SCALE = 0.05
@@ -47,13 +47,15 @@ REW_GOAL_OVERSHOOT_PENALTY = -12.0
 REW_SCALE = 0.01
 REW_PROXIMITY_RADIUS = 1.5
 
-# --- Training ---
+"""Training."""
 class RecurrentDefaults:
+    """Recurrent training sequence parameters shared across architectures."""
     sequence_length = 32
     burn_in = 8
     sequence_stride = 16
 
 class PPODefaults:
+    """PPO-specific training hyperparameters."""
     episodes = 500
     update_every = 4
     epochs = 4
@@ -69,5 +71,3 @@ class PPODefaults:
     lstm_hidden_size = 128
     lstm_layers = 1
     recurrent_cell = "gru"
-    clip_value_loss = False
-    max_grad_norm = 0.5

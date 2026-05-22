@@ -1,6 +1,7 @@
 ﻿"""Soft Actor-Critic controller for the ALTINO Webots task."""
 from __future__ import annotations
 
+import math
 import sys, time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -13,9 +14,9 @@ from torch import nn
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
-from controllers.common.SAC_rewards import SACRewardComputer
+from controllers.SAC.SAC_rewards import SACRewardComputer
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
-import controllers.common.SAC_defaults as d
+import controllers.SAC.SAC_defaults as d
 from controllers.common.checkpoints import (
     run_checkpoint_dir as _run_checkpoint_dir,
     run_checkpoint_path as _run_checkpoint_path,
@@ -23,6 +24,7 @@ from controllers.common.checkpoints import (
     save_checkpoint_file as _save_checkpoint_file,
 )
 from controllers.common.metrics_logger import MetricsLogger
+from controllers.common.training_utils import sequence_loss_mask
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
@@ -32,7 +34,6 @@ _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 class Config:
     episodes: int = d.SACDefaults.episodes
     update_after_steps: int = d.SACDefaults.update_after_steps
-    updates_per_step: int = d.SACDefaults.updates_per_step
     gradient_steps_per_episode: int = d.SACDefaults.gradient_steps_per_episode
     save_every: int = d.SACDefaults.save_every
     gamma: float = d.SACDefaults.gamma
@@ -46,8 +47,6 @@ class Config:
     hidden_size: int = d.SACDefaults.hidden_size
     latent_size: int = d.SACDefaults.latent_size
     recurrent_cell: str = d.SACDefaults.recurrent_cell
-    recurrent_hidden_size: Optional[int] = d.SACDefaults.recurrent_hidden_size
-    recurrent_layers: int = d.SACDefaults.recurrent_layers
     lstm_hidden_size: int = d.SACDefaults.lstm_hidden_size
     lstm_layers: int = d.SACDefaults.lstm_layers
     log_std_min: float = d.SACDefaults.log_std_min
@@ -87,7 +86,6 @@ class Config:
     goal_overshoot_penalty: float = d.REW_GOAL_OVERSHOOT_PENALTY
     reference_distance: Optional[float] = None
     enable_slam: bool = d.SLAM_ENABLE
-    profile_slam: bool = d.SLAM_PROFILE
     slam_profile_interval: int = d.SLAM_PROFILE_INTERVAL
     save_slam_plots: bool = d.SLAM_SAVE_PLOTS
     force_cpu: bool = d.SLAM_FORCE_CPU
@@ -103,8 +101,6 @@ class Config:
     def __post_init__(self):
         self.recurrent_cell = self.recurrent_cell.lower().strip()
         assert self.recurrent_cell in {"gru", "lstm"}, f"Unsupported recurrent_cell: {self.recurrent_cell}"
-        if self.recurrent_hidden_size is None:
-            self.recurrent_hidden_size = self.hidden_size
         if self.start_position is None:
             self.start_position = list(d.ENV_START_POSITION)
         if self.start_rotation is None:
@@ -291,15 +287,7 @@ class SACAgent:
             delta = sp.data * tau - tp.data * tau
             total_change_sq += float(delta.norm(2).item() ** 2)
             tp.data.mul_(1.0 - tau).add_(sp.data, alpha=tau)
-        import math
         return float(math.sqrt(total_change_sq))
-
-    @staticmethod
-    def _sequence_loss_mask(valid_mask: torch.Tensor, burn_in: int) -> torch.Tensor:
-        """Create learning mask that excludes burn-in steps and invalid positions from gradient computation."""
-        valid_lengths = valid_mask.sum(dim=1).to(dtype=torch.long)
-        start_index = torch.minimum(torch.full_like(valid_lengths, burn_in), torch.clamp(valid_lengths - 1, min=0))
-        return valid_mask * (torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0) >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)
 
     @staticmethod
     def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -322,7 +310,7 @@ class SACAgent:
             return None
 
         valid_mask = batch["valid_mask"]
-        learn_mask = self._sequence_loss_mask(valid_mask, min(self.config.burn_in, batch["obs"].shape[1] - 1))
+        learn_mask = sequence_loss_mask(valid_mask, min(self.config.burn_in, batch["obs"].shape[1] - 1))
         done_flags = batch["dones"].squeeze(-1)
         done_mask_obs = torch.zeros_like(done_flags)
         done_mask_obs[:, 0] = done_flags[:, 0]
@@ -475,11 +463,11 @@ def train(config=None):
         goal_stop_bonus=config.goal_stop_bonus,
         goal_hold_reward=config.goal_hold_reward,
         goal_speed_penalty=config.goal_speed_penalty,
-        goal_overshoot_penalty=config.goal_overshoot_penalty,
     )
     env = WebotsEnv(config, reward_computer)
     env.reset()
     run_id = Path(env.run_folder).name
+    os.makedirs(env.run_folder, exist_ok=True)
     agent = SACAgent(env.observation_size, env.action_dim, config)
     replay = SequenceReplayBuffer(env.observation_size, env.action_dim, config)
     checkpoint_dir = _run_checkpoint_dir(_CHECKPOINT_DIR, run_id)
@@ -555,7 +543,6 @@ def train(config=None):
 
         act_stats = MetricsLogger.compute_action_stats(ep_act)
         obs_stats = MetricsLogger.compute_obs_stats(ep_obs)
-        ep_val_residual = 0.0
         agg_upd = MetricsLogger.aggregate_update_metrics(all_update_metrics)
 
         rew_w.append(episode_reward)
@@ -632,14 +619,4 @@ def train(config=None):
 
 if __name__ == "__main__":
     train()
-
-
-
-
-
-
-
-
-
-
 

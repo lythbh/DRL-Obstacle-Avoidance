@@ -1,12 +1,11 @@
-# Occupancy grid and keyframe-based trajectory tracker.
+"""Occupancy grid and keyframe-based trajectory tracker."""
 
 from __future__ import annotations
 
 import numpy as np
 from typing import List, Optional, Tuple
+from matplotlib.patches import Circle
 
-
-# ── Occupancy grid ────────────────────────────────────────────────────────────
 
 class OccupancyMap:
     """Log-odds occupancy grid with Bresenham ray-casting."""
@@ -30,11 +29,13 @@ class OccupancyMap:
         self.log_odds = np.zeros((self.ny, self.nx), dtype=np.float32)
 
     def world_to_cell(self, xy: np.ndarray) -> Tuple[int, int]:
+        """Convert world coordinates to (row, col) grid cell indices."""
         col = int((xy[0] - self.origin[0]) / self.resolution)
         row = int((xy[1] - self.origin[1]) / self.resolution)
         return row, col
 
     def in_bounds(self, row: int, col: int) -> bool:
+        """Check if (row, col) is within the occupancy grid."""
         return 0 <= row < self.ny and 0 <= col < self.nx
 
     def update(self, robot_pos: np.ndarray, scan_points: np.ndarray, max_range: float = 10.0) -> None:
@@ -58,10 +59,12 @@ class OccupancyMap:
 
     @property
     def probability(self) -> np.ndarray:
+        """Convert log-odds to probability via sigmoid."""
         return 1.0 / (1.0 + np.exp(-self.log_odds))
 
     @staticmethod
     def _bresenham(r0: int, c0: int, r1: int, c1: int) -> List[Tuple[int, int]]:
+        """Bresenham line algorithm returning all cells between (r0,c0) and (r1,c1)."""
         cells = []
         dr, dc = abs(r1 - r0), abs(c1 - c0)
         r, c = r0, c0
@@ -86,8 +89,6 @@ class OccupancyMap:
         return cells
 
 
-# ── SLAM map ──────────────────────────────────────────────────────────────────
-
 class SLAMMap:
     """Occupancy grid + keyframe trajectory tracker."""
 
@@ -95,6 +96,7 @@ class SLAMMap:
     KEYFRAME_ANGLE = 0.15   # rad — or rotating this much (~8.5°)
 
     def __init__(self, map_resolution: float = 0.05) -> None:
+        """Initialize SLAM map with occupancy grid and trajectory storage."""
         self.occ_map = OccupancyMap(resolution=map_resolution)
         self._trajectory: List[Tuple[float, float]] = []   # (x, y) per keyframe
         self._last_kf: Optional[Tuple[float, float, float]] = None  # x, y, theta
@@ -128,7 +130,7 @@ class SLAMMap:
             prob = self.occ_map.probability
             ox, oy = self.occ_map.origin
             res = self.occ_map.resolution
-            extent = [ox, ox + self.occ_map.nx * res, oy, oy + self.occ_map.ny * res]
+            extent = (ox, ox + self.occ_map.nx * res, oy, oy + self.occ_map.ny * res)
             ax.imshow(prob, origin="lower", extent=extent, cmap="gray_r",
                       vmin=0.0, vmax=1.0, interpolation="nearest")
 
@@ -140,8 +142,8 @@ class SLAMMap:
 
             if goal is not None:
                 ax.scatter([goal[0]], [goal[1]], c="yellow", s=120, marker="*", zorder=6, label="goal")
-                ax.add_patch(plt.Circle(goal, 0.1, color="yellow", fill=False,
-                                        linewidth=1.5, linestyle="--"))
+                ax.add_patch(Circle(goal, 0.1, color="yellow", fill=False,
+                                    linewidth=1.5, linestyle="--"))
 
             ax.set_xlabel("x (m)"); ax.set_ylabel("y (m)")
             ax.set_title(f"Occupancy Map  ({len(self._trajectory)} keyframes)")

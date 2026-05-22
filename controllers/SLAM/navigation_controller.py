@@ -16,58 +16,50 @@ import math
 import sys
 import traceback
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import numpy as np
 
-try:
-    from controller import Supervisor  # pyright: ignore[reportMissingImports]
-except ImportError:
-    Supervisor = object  # type: ignore
+from controller import Supervisor  # type: ignore
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.SLAM.slam_map import OccupancyMap
 
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-
 GOAL_POS       = np.array([2.0, 0.0], dtype=np.float32)
-GOAL_RADIUS    = 0.30   # m — success distance
-COLLISION_DIST = 0.10   # m — abort distance
+GOAL_RADIUS    = 0.30
+COLLISION_DIST = 0.10
 
-MAX_SPEED   = 5.0   # rad/s wheel speed
-WHEEL_RADIUS = 0.033  # m
-MAX_STEER   = 1.0   # rad
-SAFE_DIST   = 0.50   # m — obstacle avoidance activation range
+MAX_SPEED   = 5.0
+WHEEL_RADIUS = 0.033
+MAX_STEER   = 1.0
+SAFE_DIST   = 0.50
 
-# Map memory: sample occupancy this far ahead at N angles across the front arc
-MAP_LOOKAHEAD = 1.2   # m
-MAP_SAMPLES   = 11    # angular samples (-90° … +90°)
-MAP_WEIGHT    = 0.5   # relative weight of map signal vs LiDAR signal
+MAP_LOOKAHEAD = 1.2
+MAP_SAMPLES   = 11
+MAP_WEIGHT    = 0.5
 
 
-# ── Controller ────────────────────────────────────────────────────────────────
+
 
 class NavigatingController:
     """Goal-seeking robot controller with occupancy-map obstacle memory."""
 
     def __init__(self) -> None:
-        self.robot: any = Supervisor()
+        """Initialize robot, sensors, motors, and occupancy map."""
+        self.robot: Any = Supervisor()
         self.timestep = int(self.robot.getBasicTimeStep())
         self.dt = self.timestep / 1000.0
 
-        # Sensors
-        self.lidar: any = self.robot.getDevice("lidar")
+        self.lidar: Any = self.robot.getDevice("lidar")
         self.lidar.enable(self.timestep)
         self.lidar_max_range: float = self.lidar.getMaxRange()
         self._h_res: int = self.lidar.getHorizontalResolution()
 
-        self.gps: any = self.robot.getDevice("gps")
+        self.gps: Any = self.robot.getDevice("gps")
         self.gps.enable(self.timestep)
 
-        # Heading source — InertialUnit gives yaw directly; fall back to
-        # Supervisor rotation field if the device is absent.
-        self._inertial: Optional[any] = None
+        self._inertial: Optional[Any] = None
         try:
             dev = self.robot.getDevice("inertial unit")
             if dev is not None:
@@ -76,16 +68,15 @@ class NavigatingController:
         except Exception:
             pass
 
-        self._rotation_field: Optional[any] = None
+        self._rotation_field: Optional[Any] = None
         if self._inertial is None:
             try:
                 self._rotation_field = self.robot.getFromDef("ALTINO").getField("rotation")
             except Exception:
                 pass
 
-        # Motors
-        self._left_steer: any  = self.robot.getDevice("left_steer")
-        self._right_steer: any = self.robot.getDevice("right_steer")
+        self._left_steer: Any  = self.robot.getDevice("left_steer")
+        self._right_steer: Any = self.robot.getDevice("right_steer")
         for s in (self._left_steer, self._right_steer):
             s.setPosition(0.0)
             s.setVelocity(1.0)
@@ -100,7 +91,6 @@ class NavigatingController:
             w.setPosition(float("inf"))
             w.setVelocity(0.0)
 
-        # Occupancy map: 40×40 m world, 5 cm resolution
         self.occ_map = OccupancyMap(
             resolution=0.05, width_m=40.0, height_m=40.0, origin=(-20.0, -20.0)
         )
@@ -111,16 +101,15 @@ class NavigatingController:
 
         print(f"[NAV] Ready — goal at {GOAL_POS.tolist()}", flush=True)
 
-    # ── Main loop ─────────────────────────────────────────────────────────────
-
     def run(self) -> None:
+        """Main control loop: step simulation until stopped."""
         while self.robot.step(self.timestep) != -1:
             self._tick()
 
     def _tick(self) -> None:
+        """Process one timestep: read sensors, update map, navigate."""
         self._step += 1
 
-        # 1. Read LiDAR (first horizontal layer only)
         raw = np.nan_to_num(
             np.array(self.lidar.getRangeImage(), dtype=np.float32),
             nan=0.0, posinf=0.0, neginf=0.0,
@@ -132,31 +121,26 @@ class NavigatingController:
             fov = self.lidar.getFov()
             self._lidar_angles = np.linspace(-fov / 2, fov / 2, h, dtype=np.float32)
 
-        # 2. Read GPS and heading
         gv = self.gps.getValues()
         pos = np.array([gv[0], gv[1]], dtype=np.float32)
         heading = self._get_heading()
 
-        # 3. Collision check
         valid = ranges[ranges > 0.0]
         if len(valid) > 0 and float(valid.min()) < COLLISION_DIST:
             print(f"[NAV] Collision at step {self._step} — reverting.", flush=True)
             self.robot.simulationRevert()
             return
 
-        # 4. Goal check
         dist_goal = float(np.linalg.norm(pos - GOAL_POS))
         if dist_goal < GOAL_RADIUS:
             print(f"[NAV] Goal reached at step {self._step}!", flush=True)
             self.robot.simulationSetMode(0)
             return
 
-        # 5. Update occupancy map
         scan_pts = self._scan_to_world(ranges, pos, heading)
         if len(scan_pts) > 0:
             self.occ_map.update(pos, scan_pts)
 
-        # 6. Navigate
         self._navigate(ranges, pos, heading, dist_goal)
 
         if self._step % 100 == 0:
@@ -166,8 +150,6 @@ class NavigatingController:
                 f"goal_dist={dist_goal:.2f} m",
                 flush=True,
             )
-
-    # ── Navigation (potential field) ──────────────────────────────────────────
 
     def _navigate(
         self,
@@ -179,26 +161,24 @@ class NavigatingController:
         n = len(ranges)
         angles = self._lidar_angles
 
-        # --- Goal attraction ---
         goal_vec = GOAL_POS - pos
         goal_dir = float(np.arctan2(goal_vec[1], goal_vec[0]))
         goal_error = float(
             np.arctan2(np.sin(goal_dir - heading), np.cos(goal_dir - heading))
         )
 
-        # --- LiDAR repulsion ---
-        # Each ray inside SAFE_DIST pushes laterally; sin(angle) gives left/right sign.
         eff = np.where(ranges > 0, ranges, self.lidar_max_range)
         closeness = np.clip(1.0 - eff / SAFE_DIST, 0.0, 1.0)
-        lidar_lateral = float(np.clip(np.sum(-np.sin(angles) * closeness), -3.0, 3.0))
+        if angles is None:
+            lidar_lateral = 0.0
+        else:
+            lidar_lateral = float(
+                np.clip(np.sum(-np.sin(angles) * closeness), -3.0, 3.0)
+            )
 
-        # Minimum range in the forward ±90° arc (used for speed scaling below)
         front = eff[n // 4 : 3 * n // 4]
         front_min = float(front.min()) if len(front) > 0 else self.lidar_max_range
 
-        # --- Map repulsion ---
-        # Sample the occupancy map ahead of the robot across a 180° arc.
-        # Known-occupied cells push the robot away; known-free cells are neutral.
         map_lateral = 0.0
         sample_angles = np.linspace(-math.pi / 2, math.pi / 2, MAP_SAMPLES)
         for sa in sample_angles:
@@ -206,12 +186,9 @@ class NavigatingController:
             sx = pos[0] + MAP_LOOKAHEAD * math.cos(world_angle)
             sy = pos[1] + MAP_LOOKAHEAD * math.sin(world_angle)
             occ_prob = self._query_map(sx, sy)
-            # occ_prob > 0.5 → occupied → push away (sign opposite to sin(sa))
             map_lateral -= math.sin(sa) * (occ_prob - 0.5) * 2.0
         map_lateral = float(np.clip(map_lateral, -3.0, 3.0))
 
-        # --- Blend goal vs repulsion ---
-        # When the robot is close to an obstacle, shift weight toward avoidance.
         proximity = float(np.clip(1.0 - front_min / SAFE_DIST, 0.0, 1.0))
         goal_weight = 1.0 - 0.75 * proximity
 
@@ -232,9 +209,8 @@ class NavigatingController:
 
         self._set_motors(speed, self._steer)
 
-    # ── Utilities ─────────────────────────────────────────────────────────────
-
     def _get_heading(self) -> float:
+        """Get robot yaw from inertial unit or Supervisor rotation field."""
         if self._inertial is not None:
             return float(self._inertial.getRollPitchYaw()[2])
         if self._rotation_field is not None:
@@ -272,6 +248,7 @@ class NavigatingController:
         return 0.5
 
     def _set_motors(self, speed: float, steer: float) -> None:
+        """Apply clipped speed and steering commands to all motors."""
         steer = float(np.clip(steer, -MAX_STEER, MAX_STEER))
         speed = float(np.clip(speed, 0.0, MAX_SPEED))
         self._left_steer.setPosition(steer)
@@ -279,8 +256,6 @@ class NavigatingController:
         for w in self._wheels:
             w.setVelocity(speed)
 
-
-# ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     try:

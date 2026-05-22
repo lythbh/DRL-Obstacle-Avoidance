@@ -12,6 +12,7 @@ class GRUActorCritic(RecurrentActorCriticBase):
     """Actor-critic network with lightweight feature branches and a GRU core."""
 
     def __init__(self, obs_size: int, action_dim: int, config) -> None:
+        """Initialize GRU recurrent core on top of base feature encoders."""
         super().__init__(obs_size, action_dim, config)
         self.gru = nn.GRU(
             input_size=config.latent_size,

@@ -11,11 +11,6 @@ from typing import Any, Dict, Union
 import torch
 
 
-def checkpoint_path(controller_dir: Path, filename: str) -> str:
-    """Return a checkpoint path pinned to the given controller directory."""
-    return str(controller_dir / filename)
-
-
 def run_checkpoint_dir(controller_checkpoints_dir: Path, run_id: str) -> Path:
     """Return the checkpoint folder for a training run and ensure it exists."""
     checkpoint_dir = controller_checkpoints_dir / run_id

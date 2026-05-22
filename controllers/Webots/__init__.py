@@ -6,7 +6,3 @@ from .webots_env import (
     WebotsEnv,
     _init_supervisor,
 )
-
-# Backward-compat aliases
-MotorController = AltinoDriver
-SensorReader = AltinoDriver
