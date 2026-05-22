@@ -5,7 +5,7 @@ ENV_LIDAR_SECTOR_DIM = 16
 ENV_POSE_GOAL_DIM = 5
 ENV_IMU_FEATURE_DIM = 10
 ENV_OCCUPANCY_GRID_SHAPE = None
-ENV_MAX_STEPS = 6000
+ENV_MAX_STEPS = 2500
 ENV_COLLISION_THRESHOLD = 0.1
 ENV_LOW_SCORE_THRESHOLD = -2000.0
 ENV_ENDPOINT = (2.0, 0.0)
@@ -18,7 +18,7 @@ ENV_START_POSITION = (-2.0, 0.0, 0.02)
 ENV_START_ROTATION = (0.0, 0.0, 1.0, 0.0)
 ENV_START_POSITION_NOISE = 0.08
 ENV_START_YAW_NOISE = 0.8
-ENV_RESET_SETTLE_STEPS = 5
+ENV_RESET_SETTLE_STEPS = 10
 
 """SLAM."""
 SLAM_ENABLE = False
@@ -56,7 +56,6 @@ class RecurrentDefaults:
 
 class PPODefaults:
     """PPO-specific training hyperparameters."""
-
     episodes = 500
     update_every = 4
     epochs = 4

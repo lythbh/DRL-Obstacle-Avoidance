@@ -39,7 +39,7 @@ CURRICULUM: list = [
     ),
 ]
 
-
+#DEAD CODE
 class CurriculumManager:
     """Tracks training stage and advances when mastery criteria are met.
 

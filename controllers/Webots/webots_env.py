@@ -424,8 +424,8 @@ class WebotsEnv:
         self._reference_distance = float(config.reference_distance if config.reference_distance is not None else 1.0)
         self.robot = AltinoDriver(config)
         self.timestep = self.robot.timestep
-
         self.reward_computer = reward_computer
+        self._sync_endpoint_from_world()
 
         self.current_step = 0
         self.episode_reward = 0.0
@@ -444,6 +444,17 @@ class WebotsEnv:
         self.run_folder = str(_repo_root / "plots" / ts)
         os.makedirs(self.run_folder, exist_ok=True)
         self._episode_count = 0
+
+    def _sync_endpoint_from_world(self) -> None:
+        """Read GOAL_MARKER position from world file and update self._endpoint."""
+        goal_node = self.robot.supervisor.getFromDef("GOAL_MARKER")
+        if goal_node is not None:
+            translation = goal_node.getField("translation").getSFVec3f()
+            goal_xy = np.array([translation[0], translation[1]], dtype=np.float32)
+            self._endpoint = goal_xy
+            self.reward_computer.endpoint = tuple(goal_xy.tolist())
+            start_xy = np.array(self.config.start_position[:2], dtype=np.float32)
+            self._reference_distance = float(np.linalg.norm(start_xy - goal_xy))
 
     def _reset_episode_state(self) -> None:
         """Reset all per-episode tracking variables to initial values."""

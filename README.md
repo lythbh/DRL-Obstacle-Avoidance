@@ -351,3 +351,23 @@ Optional args:
 - `--quiet` to reduce per-episode output
 
 If `--model-path` is omitted, `run_model.py` loads the newest dated `best_model.pth` for PPO.
+
+## Recent Changes
+
+### Goal Position Fix (`controllers/Webots/webots_env.py`)
+
+The observation used a hardcoded endpoint `(2.0, 0.0)` from config, ignoring the actual goal position in the world file. Worlds 5–8 shift the goal marker to different Y positions, but the agent never knew about this.
+
+**Fix**: `WebotsEnv.__init__()` now calls `_sync_endpoint_from_world()` after creating the robot. This reads the `GOAL_MARKER` DEF node's `translation` field from the Webots world file and updates `self._endpoint`, `reward_computer.endpoint`, and `_reference_distance` to match the actual goal position. Both X and Y are read directly from the world definition — no magic constants.
+
+### LSTM Stability Fixes (`controllers/PPO/PPO.py`)
+
+**Analytical entropy (2.1)**: The `evaluate_sequences()` method previously used a noisy Monte Carlo estimate of entropy (`dist.rsample()` → `-log_prob(sample)`). This was replaced with the analytical formula `0.5 * D * (1 + log(2π)) + sum(log_std)`, which gives a clean gradient signal for all architectures.
+
+**Architecture-aware entropy (2.2)**: The entropy coefficient schedule was identical for all architectures despite LSTM having 33% more parameters than GRU. The schedule now scales the initial coefficient by architecture (`lstm`: 1.35×, `gru`/`none`: 1.0×) and uses a gentler decay (30% reduction over training instead of 60%), preventing the policy from becoming deterministic too early during transfer to harder worlds.
+
+**RNN gradient norm logging (2.3)**: Added `grad_norm_rnn` to the per-update metrics, logging the pre-clip gradient norm of the GRU/LSTM core parameters alongside the existing actor/critic norms.
+
+### Path Resolution Fix (`controllers/run.py`)
+
+The `--resume-from` flag passed a relative checkpoint path to the Webots controller, which runs from a different working directory. Fixed by adding `.resolve()` to convert the path to absolute before passing it as the `PPO_LOAD_MODEL` environment variable.

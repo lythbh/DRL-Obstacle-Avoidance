@@ -1,4 +1,5 @@
 ﻿"""PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
+import math
 import os
 import sys, time
 from dataclasses import asdict, dataclass
@@ -355,16 +356,18 @@ class PPOAgent:
                 self.optimizer.zero_grad()
                 return None
 
+        rnn_attr = "gru" if hasattr(self.model, "gru") else ("lstm" if hasattr(self.model, "lstm") else None)
+        rnn_clip = list(getattr(self.model, rnn_attr).parameters()) if rnn_attr else []
+
         actor_params = [self.model.policy_head.weight, self.model.policy_head.bias, self.actor_log_std]
         critic_params = [self.model.value_head.weight, self.model.value_head.bias]
 
         grad_norm_actor = MetricsLogger.compute_grad_norm(actor_params)
         grad_norm_critic = MetricsLogger.compute_grad_norm(critic_params)
+        grad_norm_rnn = MetricsLogger.compute_grad_norm(rnn_clip) if rnn_clip else 0.0
 
         actor_clip = list(self.model.policy_head.parameters()) + [self.actor_log_std]
         critic_clip = list(self.model.value_head.parameters())
-        rnn_attr = "gru" if hasattr(self.model, "gru") else ("lstm" if hasattr(self.model, "lstm") else None)
-        rnn_clip = list(getattr(self.model, rnn_attr).parameters()) if rnn_attr else []
         encoder_clip = [p for n, p in self.model.named_parameters()
                         if "policy_head" not in n and "value_head" not in n and (rnn_attr is None or rnn_attr not in n)]
         nn.utils.clip_grad_norm_(actor_clip, max_norm=0.5)
@@ -386,6 +389,7 @@ class PPOAgent:
             "approx_kl": round(approx_kl, 6),
             "grad_norm_actor": round(grad_norm_actor, 6),
             "grad_norm_critic": round(grad_norm_critic, 6),
+            "grad_norm_rnn": round(grad_norm_rnn, 6),
             "lr_actor": lr,
         }
 
@@ -406,12 +410,8 @@ class PPOAgent:
         log_prob -= torch.log(self.action_scale + 1e-6)
         log_prob -= torch.log(1.0 - action_tanh.pow(2) + 1e-6)
         log_prob = log_prob.sum(dim=-1)
-        entropy_pre_tanh = dist.rsample()
-        entropy_action_tanh = torch.tanh(entropy_pre_tanh)
-        entropy = dist.log_prob(entropy_pre_tanh)
-        entropy -= torch.log(self.action_scale + 1e-6)
-        entropy -= torch.log(1.0 - entropy_action_tanh.pow(2) + 1e-6)
-        entropy = -entropy.sum(dim=-1)
+        flat_entropy = 0.5 * self.action_dim * (1.0 + math.log(2.0 * math.pi)) + self.actor_log_std.sum()
+        entropy = flat_entropy.expand(observations.shape[0], observations.shape[1])
         return log_prob, state_values, entropy
 
     def update(self, trajectories):
@@ -629,7 +629,9 @@ def train(config=None):
         agg_upd = MetricsLogger.aggregate_update_metrics(all_update_metrics)
 
         decay_frac = min(1.0, episode / max(1, config.episodes))
-        agent.config.entropy_coef = d.PPODefaults.entropy_coef * (1.0 - 0.60 * decay_frac)
+        arch_scale = {"none": 1.0, "gru": 1.0, "lstm": 1.35}.get(config.recurrent_cell, 1.0)
+        base_entropy = d.PPODefaults.entropy_coef * arch_scale
+        agent.config.entropy_coef = base_entropy * (1.0 - 0.30 * decay_frac)
 
         ep_sum = sum(ep_rew)
         rew_w.append(ep_sum)

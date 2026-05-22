@@ -1,34 +1,34 @@
-"""Python bytecode and cache files."""
+#Python bytecode and cache files
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 
-"""Virtual environment directories."""
+#Virtual environment directories
 venv/
 .venv/
 env/
 .env/
 5429/
 
-"""Python build artifacts and package metadata."""
+#Python build artifacts and package metadata
 build/
 dist/
 *.egg-info/
 .eggs/
 
-"""Saved model checkpoints per controller."""
+#Saved model checkpoints per controller
 controllers/PPO/checkpoints/
 controllers/SAC/checkpoints/
 
-"""Serialised model weight formats."""
+#Serialised model weight formats
 *.h5
 *.ckpt
 *.pth
 *.pt
 *.onnx
 
-"""Training and evaluation output directories."""
+#Training and evaluation output directories
 controllers/PPO/slam_runs
 controllers/PPO/slam_runs/
 controllers/SAC/slam_runs
@@ -39,23 +39,23 @@ datasets/
 logs/
 runs/
 
-"""Jupyter Notebook auto-save files."""
+#Jupyter Notebook auto-save files
 .ipynb_checkpoints/
 *.nbconvert.ipynb
 
-"""Agent context and project configuration folders."""
-.claude/
-.kilo/
+#Agent context and project configuration folders
+#.claude/
+#.kilo/
 
-"""Editor and IDE project folders."""
+#Editor and IDE project folders
 .vscode/
 .idea/
 
-"""Editor temporary and swap files."""
+#Editor temporary and swap files
 *.swp
 *.swo
 
-"""Operating-system meta files."""
+#Operating-system meta files
 .DS_Store
 .AppleDouble
 .LSOverride

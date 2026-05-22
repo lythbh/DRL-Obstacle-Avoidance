@@ -9,11 +9,13 @@ Usage examples:
 from __future__ import annotations
 
 import argparse
+import gc
 import os
 import re
 import shlex
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -67,7 +69,7 @@ def run_worker(args: argparse.Namespace) -> int:
     arch = _normalize_arch(args.arch)
     worlds = _resolve_worlds(args.worlds)
     run_group = args.run_group or datetime.now().strftime("%Y%m%d_%H%M%S")
-    previous_checkpoint: Path | None = Path(args.resume_from) if args.resume_from else None
+    previous_checkpoint: Path | None = Path(args.resume_from).resolve() if args.resume_from else None
 
     for stage_index, world in enumerate(worlds, start=1):
         world_name = world.stem.replace(" ", "_")
@@ -101,6 +103,10 @@ def run_worker(args: argparse.Namespace) -> int:
         if previous_checkpoint:
             print(f"[RUN] resuming from {previous_checkpoint}", flush=True)
         result = subprocess.run(cmd, cwd=REPO_ROOT, env=env, check=False)
+        time.sleep(5)
+        gc.collect()
+        #subprocess.run(["taskkill", "/F", "/IM", "webots.exe"], capture_output=True)
+        #subprocess.run(["taskkill", "/F", "/IM", "webotsw.exe"], capture_output=True)
         if result.returncode != 0:
             print(f"[RUN] Webots failed with exit code {result.returncode}: {world}", file=sys.stderr, flush=True)
             return result.returncode
