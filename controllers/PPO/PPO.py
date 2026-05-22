@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.RNN import GRUActorCritic, LSTMActorCritic, RecurrentState
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
 from controllers.PPO.PPO_rewards import PPORewardComputer
-import controllers.common.PPO_defaults as d
+import controllers.PPO.PPO_defaults as d
 from controllers.common.checkpoints import (
     run_checkpoint_dir, run_checkpoint_path, load_checkpoint,
     make_checkpoint_header as _make_checkpoint_header,

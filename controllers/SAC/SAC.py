@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
 from controllers.SAC.SAC_rewards import SACRewardComputer
 from controllers.RNN import GRUActorCritic, LSTMActorCritic
-import controllers.common.SAC_defaults as d
+import controllers.SAC.SAC_defaults as d
 from controllers.common.checkpoints import (
     run_checkpoint_dir as _run_checkpoint_dir,
     run_checkpoint_path as _run_checkpoint_path,

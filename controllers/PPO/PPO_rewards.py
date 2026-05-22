@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from controllers.common.PPO_defaults import (
+from controllers.PPO.PPO_defaults import (
     REW_COLLISION_PENALTY,
     REW_DISTANCE_SCALE,
     REW_GOAL_HOLD,
