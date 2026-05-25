@@ -8,8 +8,9 @@ set -e
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 WEBOTS_HOME="${WEBOTS_HOME:-/uio/hume/student-u79/esbrovol/Downloads/webots-R2025a-x86-64/webots}"  # override via env if needed
 VENV="$REPO_DIR/venv"                                    # path to your Python venv
-WORLD="$REPO_DIR/worlds/testing/ObstacleCourse.wbt"
 TMPDIR_BASE="${TMPDIR:-/tmp}/webots_local_$$"
+# Default curriculum command — override by setting PPO_RUN_COMMAND in the environment
+DEFAULT_RUN_COMMAND="python controllers/run.py worker --arch gru --seed 0"
 # ─────────────────────────────────────────────────────────────────────────────
 
 mkdir -p logs
@@ -59,25 +60,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [ -n "${PPO_RUN_COMMAND:-}" ]; then
-    echo "Running command: $PPO_RUN_COMMAND"
-    eval "$PPO_RUN_COMMAND"
-    echo "Command finished."
-    exit 0
-fi
-
-webots --no-rendering --batch --minimize --stdout --stderr --mode=fast "$WORLD" &
-WEBOTS_PID=$!
-echo "Webots launched (PID $WEBOTS_PID), waiting for it to load..."
-
-for i in $(seq 1 10); do
-    sleep 2
-    if ! kill -0 $WEBOTS_PID 2>/dev/null; then
-        echo "ERROR: Webots exited unexpectedly after $((i*2))s"
-        exit 1
-    fi
-done
-echo "Webots has been running for 20s..."
-
-wait $WEBOTS_PID
-echo "Webots finished."
+RUN_COMMAND="${PPO_RUN_COMMAND:-$DEFAULT_RUN_COMMAND}"
+echo "Running: $RUN_COMMAND"
+eval "$RUN_COMMAND"
+echo "Training finished."
