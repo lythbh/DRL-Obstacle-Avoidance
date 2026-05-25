@@ -8,7 +8,7 @@ set -e
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 WEBOTS_HOME="${WEBOTS_HOME:-/uio/hume/student-u79/esbrovol/Downloads/webots-R2025a-x86-64/webots}"  # override via env if needed
 VENV="$REPO_DIR/venv"                                    # path to your Python venv
-WORLD="$REPO_DIR/worlds/ObstacleCourse.wbt"
+WORLD="$REPO_DIR/worlds/testing/ObstacleCourse.wbt"
 TMPDIR_BASE="${TMPDIR:-/tmp}/webots_local_$$"
 # ─────────────────────────────────────────────────────────────────────────────
 
