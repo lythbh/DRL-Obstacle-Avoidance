@@ -15,7 +15,7 @@ WEBOTS_HOME="${WEBOTS_HOME:-/uio/hume/student-u79/esbrovol/Downloads/webots-R202
 VENV="$REPO_DIR/venv"
 TMPDIR_BASE="${TMPDIR:-/tmp}/webots_local_$$"
 ARCHS=(gru lstm none)
-SEEDS=(0 1 2 3 4)
+SEEDS=(0 1 2)
 # ─────────────────────────────────────────────────────────────────────────────
 
 mkdir -p logs
