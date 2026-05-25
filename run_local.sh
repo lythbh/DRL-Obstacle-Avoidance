@@ -6,7 +6,7 @@ set -e
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-WEBOTS_HOME="${WEBOTS_HOME:-$HOME/Downloads/webots-R2025a-x86-64}"  # override via env if needed
+WEBOTS_HOME="${WEBOTS_HOME:-/uio/hume/student-u79/esbrovol/Downloads/webots-R2025a-x86-64}"  # override via env if needed
 VENV="$REPO_DIR/venv"                                    # path to your Python venv
 WORLD="$REPO_DIR/worlds/ObstacleCourse.wbt"
 TMPDIR_BASE="${TMPDIR:-/tmp}/webots_local_$$"
