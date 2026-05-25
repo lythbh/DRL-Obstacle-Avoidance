@@ -89,8 +89,10 @@ def run_worker(args: argparse.Namespace) -> int:
 
         env.setdefault("WEBOTS_CONTROLLER_PATH", str(REPO_ROOT / "controllers"))
 
+        port = int(os.environ.get("WEBOTS_PORT", 1234))
         cmd = [
             "webots",
+            f"--port={port}",
             "--no-rendering",
             "--batch",
             "--minimize",

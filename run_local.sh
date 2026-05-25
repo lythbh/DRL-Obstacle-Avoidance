@@ -66,16 +66,19 @@ trap cleanup EXIT
 
 # Launch 9 runs in parallel, each with its own log file and tmp dir
 PIDS=()
+RUN_INDEX=0
 for ARCH in "${ARCHS[@]}"; do
     for SEED in "${SEEDS[@]}"; do
         LOG="$REPO_DIR/logs/${ARCH}_seed${SEED}.log"
         WEBOTS_TMPDIR="$TMPDIR_BASE/${ARCH}_seed${SEED}"
         mkdir -p "$WEBOTS_TMPDIR"
-        echo "Starting arch=$ARCH seed=$SEED → $LOG"
-        WEBOTS_TMPDIR="$WEBOTS_TMPDIR" \
+        PORT=$((2000 + RUN_INDEX * 12))
+        echo "Starting arch=$ARCH seed=$SEED port=$PORT → $LOG"
+        WEBOTS_TMPDIR="$WEBOTS_TMPDIR" WEBOTS_PORT="$PORT" \
             python controllers/run.py worker --arch "$ARCH" --seed "$SEED" \
             > "$LOG" 2>&1 &
         PIDS+=($!)
+        RUN_INDEX=$((RUN_INDEX + 1))
     done
 done
 
