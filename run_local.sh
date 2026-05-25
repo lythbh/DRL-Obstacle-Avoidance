@@ -18,7 +18,7 @@ nvidia-smi 2>/dev/null || echo "nvidia-smi not found — GPU may not be availabl
 
 # Webots paths
 export PATH=$WEBOTS_HOME:$PATH
-export LD_LIBRARY_PATH=$WEBOTS_HOME/lib/webots:${LD_LIBRARY_PATH:-}
+export LD_LIBRARY_PATH=$WEBOTS_HOME/lib/webots:$HOME/sndio_install/lib:${LD_LIBRARY_PATH:-}
 
 # Webots temp dir
 export WEBOTS_TMPDIR=$TMPDIR_BASE
