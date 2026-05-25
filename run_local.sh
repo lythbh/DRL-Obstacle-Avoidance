@@ -29,9 +29,10 @@ mkdir -p /tmp/webots/$USER
 # X11 socket dir — Xvfb won't create it as non-root
 mkdir -p /tmp/.X11-unix
 
-# EGL: use X11 backend (same fix as on HPC)
-export EGL_PLATFORM=x11
-export LIBGL_ALWAYS_SOFTWARE=1
+# EGL: use NVIDIA GPU via renderD128 (world-accessible on cupid)
+export EGL_PLATFORM=device
+export DRM_RENDER_NODE=/dev/dri/renderD128
+export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
 
 # Start virtual display
 DISPLAY_NUM=$((90 + $$ % 900))
