@@ -1,16 +1,21 @@
 #!/bin/bash
-# Local Linux runner — equivalent to slurm.sh but without SLURM or module system.
-# Edit the variables in the CONFIG section below to match your machine.
+# Local Linux runner — launches 9 parallel curriculum training runs (3 archs × 3 seeds).
 
 set -e
 
+# Re-launch inside a detached screen session so training survives logout.
+# Reattach later with: screen -r drl_training
+if [ -z "${STY}" ] && [ -z "${TMUX}" ]; then
+    exec screen -dmS drl_training bash "$0" "$@"
+fi
+
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-WEBOTS_HOME="${WEBOTS_HOME:-/uio/hume/student-u79/esbrovol/Downloads/webots-R2025a-x86-64/webots}"  # override via env if needed
-VENV="$REPO_DIR/venv"                                    # path to your Python venv
+WEBOTS_HOME="${WEBOTS_HOME:-/uio/hume/student-u79/esbrovol/Downloads/webots-R2025a-x86-64/webots}"
+VENV="$REPO_DIR/venv"
 TMPDIR_BASE="${TMPDIR:-/tmp}/webots_local_$$"
-# Default curriculum command — override by setting PPO_RUN_COMMAND in the environment
-DEFAULT_RUN_COMMAND="python controllers/run.py worker --arch gru --seed 0"
+ARCHS=(gru lstm none)
+SEEDS=(0 1 2 3 4)
 # ─────────────────────────────────────────────────────────────────────────────
 
 mkdir -p logs
@@ -21,12 +26,9 @@ nvidia-smi 2>/dev/null || echo "nvidia-smi not found — GPU may not be availabl
 export PATH=$WEBOTS_HOME:$PATH
 export LD_LIBRARY_PATH=$WEBOTS_HOME/lib/webots:$HOME/sndio_install/lib:${LD_LIBRARY_PATH:-}
 
-# Webots temp dir
-export WEBOTS_TMPDIR=$TMPDIR_BASE
-mkdir -p $WEBOTS_TMPDIR
+# Per-run Webots tmp dirs live under TMPDIR_BASE
+mkdir -p $TMPDIR_BASE
 mkdir -p /tmp/webots/$USER
-
-# X11 socket dir — Xvfb won't create it as non-root
 mkdir -p /tmp/.X11-unix
 
 # EGL: use NVIDIA GPU via renderD128 (world-accessible on cupid)
@@ -34,7 +36,7 @@ export EGL_PLATFORM=device
 export DRM_RENDER_NODE=/dev/dri/renderD128
 export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
 
-# Start virtual display
+# Start a single shared virtual display
 DISPLAY_NUM=$((90 + $$ % 900))
 Xvfb :$DISPLAY_NUM -screen 0 1024x768x24 -nolisten tcp &
 XVFB_PID=$!
@@ -57,11 +59,36 @@ python -c "import torch; print('CUDA available:', torch.cuda.is_available())" ||
 
 cleanup() {
     kill $XVFB_PID 2>/dev/null || true
-    rm -rf $WEBOTS_TMPDIR
+    kill "${PIDS[@]}" 2>/dev/null || true
+    rm -rf $TMPDIR_BASE
 }
 trap cleanup EXIT
 
-RUN_COMMAND="${PPO_RUN_COMMAND:-$DEFAULT_RUN_COMMAND}"
-echo "Running: $RUN_COMMAND"
-eval "$RUN_COMMAND"
-echo "Training finished."
+# Launch 9 runs in parallel, each with its own log file and tmp dir
+PIDS=()
+for ARCH in "${ARCHS[@]}"; do
+    for SEED in "${SEEDS[@]}"; do
+        LOG="$REPO_DIR/logs/${ARCH}_seed${SEED}.log"
+        WEBOTS_TMPDIR="$TMPDIR_BASE/${ARCH}_seed${SEED}"
+        mkdir -p "$WEBOTS_TMPDIR"
+        echo "Starting arch=$ARCH seed=$SEED → $LOG"
+        WEBOTS_TMPDIR="$WEBOTS_TMPDIR" \
+            python controllers/run.py worker --arch "$ARCH" --seed "$SEED" \
+            > "$LOG" 2>&1 &
+        PIDS+=($!)
+    done
+done
+
+echo "Launched ${#PIDS[@]} runs. Logs in logs/<arch>_seed<N>.log"
+
+# Wait for all runs and collect exit codes
+FAILED=0
+for PID in "${PIDS[@]}"; do
+    wait "$PID" || FAILED=$((FAILED + 1))
+done
+
+if [ "$FAILED" -gt 0 ]; then
+    echo "$FAILED run(s) failed — check logs for details."
+    exit 1
+fi
+echo "All runs finished successfully."
