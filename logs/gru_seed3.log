@@ -1,0 +1,79 @@
+[RUN] arch=gru seed=3 stage=1/10 world=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/worlds/training/train_1_empty.wbt
+INFO: PPO: Starting controller: python3 -u PPO.py
+[PPO] Using architecture: GRU
+[TRAIN][PPO] arch=GRU weights_dir=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_134618_gru_seed03_stage01_train_1_empty final=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_134618_gru_seed03_stage01_train_1_empty/final_20260525_134618_gru_seed03_stage01_train_1_empty.pth
+[TRAIN][PPO] episodes=500 update_every=4 obs=31 act=2 cell=GRU seq=32 burn_in=8
+[TRAIN][PPO] ep=001/500 r=  -85.56 avg10=  -85.56 steps=1219 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.88 avg_spd=1.89m/s end=collision t=   22.0s ckpt=best
+[TRAIN][PPO] ep=002/500 r=  639.66 avg10=  277.05 steps=1729 succ10=0.50 touch10=0.50 col10=0.50 to10=0.00 min_d= 0.30 avg_spd=1.86m/s end=goal t=   52.8s ckpt=best_goal
+[TRAIN][PPO] ep=003/500 r=  289.32 avg10=  281.14 steps=1470 succ10=0.33 touch10=0.33 col10=0.67 to10=0.00 min_d= 1.36 avg_spd=1.86m/s end=collision t=   79.1s
+[TRAIN][PPO] ep=004/500 r=   -7.09 avg10=  209.08 steps=1617 succ10=0.25 touch10=0.25 col10=0.75 to10=0.00 min_d= 2.16 avg_spd=1.84m/s end=collision t=  116.2s
+[TRAIN][PPO] ep=005/500 r=   58.04 avg10=  178.87 steps=1733 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 1.70 avg_spd=1.86m/s end=collision t=  148.0s
+[TRAIN][PPO] ep=006/500 r=  116.53 avg10=  168.48 steps=1619 succ10=0.17 touch10=0.17 col10=0.83 to10=0.00 min_d= 1.89 avg_spd=1.88m/s end=collision t=  176.2s
+[TRAIN][PPO] ep=007/500 r=  633.73 avg10=  234.95 steps=1661 succ10=0.29 touch10=0.29 col10=0.71 to10=0.00 min_d= 0.30 avg_spd=1.86m/s end=goal t=  205.3s
+[TRAIN][PPO] ep=008/500 r=  346.46 avg10=  248.89 steps=1423 succ10=0.25 touch10=0.25 col10=0.75 to10=0.00 min_d= 1.12 avg_spd=1.87m/s end=collision t=  234.7s
+[TRAIN][PPO] ep=009/500 r= -212.38 avg10=  197.63 steps=1107 succ10=0.22 touch10=0.22 col10=0.78 to10=0.00 min_d= 3.31 avg_spd=1.88m/s end=collision t=  255.1s
+[TRAIN][PPO] ep=010/500 r= -171.83 avg10=  160.69 steps=1140 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 3.07 avg_spd=1.87m/s end=collision t=  275.5s
+[TRAIN][PPO] ep=011/500 r=  428.45 avg10=  212.09 steps=1456 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 0.63 avg_spd=1.88m/s end=collision t=  301.5s
+[TRAIN][PPO] ep=012/500 r=  332.26 avg10=  181.35 steps=1427 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 1.16 avg_spd=1.88m/s end=collision t=  329.6s
+[TRAIN][PPO] ep=013/500 r=    0.10 avg10=  152.43 steps=1644 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 2.11 avg_spd=1.88m/s end=collision t=  359.4s
+[TRAIN][PPO] ep=014/500 r=  261.65 avg10=  179.30 steps=1482 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 1.49 avg_spd=1.87m/s end=collision t=  386.6s
+[TRAIN][PPO] ep=015/500 r=  312.83 avg10=  204.78 steps=1402 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 1.20 avg_spd=1.89m/s end=collision t=  412.2s
+[TRAIN][PPO] ep=016/500 r=  263.35 avg10=  219.46 steps=1540 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 1.45 avg_spd=1.87m/s end=collision t=  442.1s
+[TRAIN][PPO] ep=017/500 r=  398.21 avg10=  195.91 steps=1503 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 0.88 avg_spd=1.85m/s end=collision t=  469.1s
+[TRAIN][PPO] ep=018/500 r=   21.83 avg10=  163.45 steps=1655 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.20 avg_spd=1.87m/s end=collision t=  499.5s
+[TRAIN][PPO] ep=019/500 r=  -20.56 avg10=  182.63 steps=1483 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.42 avg_spd=1.86m/s end=collision t=  526.2s
+[TRAIN][PPO] ep=020/500 r=  -23.47 avg10=  197.46 steps=1645 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.07 avg_spd=1.86m/s end=collision t=  558.9s
+[TRAIN][PPO] ep=021/500 r=  228.96 avg10=  177.51 steps=1459 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 1.60 avg_spd=1.89m/s end=collision t=  585.8s
+[TRAIN][PPO] ep=022/500 r= -252.95 avg10=  118.99 steps=1110 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 3.39 avg_spd=1.87m/s end=collision t=  605.9s
+[TRAIN][PPO] ep=023/500 r=   16.00 avg10=  120.58 steps=1633 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.15 avg_spd=1.89m/s end=collision t=  636.2s
+[TRAIN][PPO] ep=024/500 r= -163.41 avg10=   78.08 steps=1376 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.58 avg_spd=1.86m/s end=collision t=  663.7s
+[TRAIN][PPO] ep=025/500 r=  290.55 avg10=   75.85 steps=1533 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 1.35 avg_spd=1.88m/s end=collision t=  690.9s
+[TRAIN][PPO] ep=026/500 r=  394.13 avg10=   88.93 steps=1392 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 0.88 avg_spd=1.91m/s end=collision t=  715.2s
+[TRAIN][PPO] ep=027/500 r= -111.81 avg10=   37.93 steps=1212 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.98 avg_spd=1.88m/s end=collision t=  736.5s
+[TRAIN][PPO] ep=028/500 r=   71.13 avg10=   42.86 steps=1588 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 1.94 avg_spd=1.89m/s end=collision t=  767.0s
+[TRAIN][PPO] ep=029/500 r=   11.75 avg10=   46.09 steps=1596 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.21 avg_spd=1.90m/s end=collision t=  795.7s
+[TRAIN][PPO] ep=030/500 r=  -64.88 avg10=   41.95 steps=1299 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.68 avg_spd=1.91m/s end=collision t=  818.7s
+[TRAIN][PPO] ep=031/500 r=  -98.67 avg10=    9.18 steps=1192 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.90 avg_spd=1.91m/s end=collision t=  840.0s
+[TRAIN][PPO] ep=032/500 r=  378.05 avg10=   72.28 steps=1339 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 0.96 avg_spd=1.90m/s end=collision t=  866.8s
+[TRAIN][PPO] ep=033/500 r=  381.44 avg10=  108.83 steps=1360 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 0.96 avg_spd=1.91m/s end=collision t=  890.9s
+[TRAIN][PPO] ep=034/500 r=   84.95 avg10=  133.66 steps=1498 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.15 avg_spd=1.92m/s end=collision t=  917.7s
+[TRAIN][PPO] ep=035/500 r=  279.21 avg10=  132.53 steps=1445 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 1.37 avg_spd=1.90m/s end=collision t=  943.8s
+[TRAIN][PPO] ep=036/500 r=  377.36 avg10=  130.85 steps=1311 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 0.93 avg_spd=1.90m/s end=collision t=  969.2s
+[TRAIN][PPO] ep=037/500 r=  193.10 avg10=  161.34 steps=1457 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 1.75 avg_spd=1.90m/s end=collision t=  995.3s
+[TRAIN][PPO] ep=038/500 r=  652.04 avg10=  219.43 steps=1562 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 0.30 avg_spd=1.90m/s end=goal t= 1023.0s ckpt=best_goal
+[TRAIN][PPO] ep=039/500 r=    2.07 avg10=  218.47 steps=1632 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 2.53 avg_spd=1.88m/s end=collision t= 1052.2s
+[TRAIN][PPO] ep=040/500 r=  419.89 avg10=  266.94 steps=1361 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 0.83 avg_spd=1.88m/s end=collision t= 1078.2s
+[TRAIN][PPO] ep=041/500 r=  394.50 avg10=  316.26 steps=1302 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 0.86 avg_spd=1.93m/s end=collision t= 1101.3s
+[TRAIN][PPO] ep=042/500 r=  149.26 avg10=  293.38 steps=1459 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 1.85 avg_spd=1.92m/s end=collision t= 1127.3s
+[TRAIN][PPO] ep=043/500 r=  348.15 avg10=  290.05 steps=1428 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 1.07 avg_spd=1.91m/s end=collision t= 1152.5s
+[TRAIN][PPO] ep=044/500 r=  169.63 avg10=  298.52 steps=1453 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 1.81 avg_spd=1.94m/s end=collision t= 1181.0s
+[TRAIN][PPO] ep=045/500 r=  143.89 avg10=  284.99 steps=1499 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 1.96 avg_spd=1.92m/s end=collision t= 1208.0s
+[TRAIN][PPO] ep=046/500 r=  239.13 avg10=  271.17 steps=1457 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 1.54 avg_spd=1.90m/s end=collision t= 1234.0s
+[TRAIN][PPO] ep=047/500 r=  392.19 avg10=  291.07 steps=1379 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 0.89 avg_spd=1.90m/s end=collision t= 1258.4s
+[TRAIN][PPO] ep=048/500 r=  308.47 avg10=  256.72 steps=1356 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 1.26 avg_spd=1.90m/s end=collision t= 1285.1s
+[TRAIN][PPO] ep=049/500 r=  392.00 avg10=  295.71 steps=1390 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 0.85 avg_spd=1.92m/s end=collision t= 1310.5s
+[TRAIN][PPO] ep=050/500 r=  352.09 avg10=  288.93 steps=1391 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 1.09 avg_spd=1.90m/s end=collision t= 1335.3s
+[TRAIN][PPO] ep=051/500 r=  124.64 avg10=  261.95 steps=1514 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.01 avg_spd=1.92m/s end=collision t= 1362.7s
+[TRAIN][PPO] ep=052/500 r=  262.39 avg10=  273.26 steps=1350 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 1.38 avg_spd=1.93m/s end=collision t= 1390.5s
+[TRAIN][PPO] ep=053/500 r=  -70.96 avg10=  231.35 steps=1192 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.99 avg_spd=1.93m/s end=collision t= 1411.1s
+[TRAIN][PPO] ep=054/500 r=  627.34 avg10=  277.12 steps=1515 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 0.30 avg_spd=1.93m/s end=goal t= 1438.0s
+[TRAIN][PPO] ep=055/500 r=  236.29 avg10=  286.36 steps=1417 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 1.50 avg_spd=1.90m/s end=collision t= 1462.9s
+[TRAIN][PPO] ep=056/500 r=   40.25 avg10=  266.47 steps=1604 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 2.27 avg_spd=1.90m/s end=collision t= 1495.3s
+[TRAIN][PPO] ep=057/500 r=  635.28 avg10=  290.78 steps=1572 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 0.30 avg_spd=1.92m/s end=goal t= 1522.6s
+[TRAIN][PPO] ep=058/500 r=  231.12 avg10=  283.04 steps=1394 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 1.55 avg_spd=1.95m/s end=collision t= 1546.8s
+[TRAIN][PPO] ep=059/500 r=  393.72 avg10=  283.22 steps=1326 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 0.87 avg_spd=1.92m/s end=collision t= 1569.9s
+[TRAIN][PPO] ep=060/500 r=  360.76 avg10=  284.08 steps=1308 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 0.96 avg_spd=1.94m/s end=collision t= 1595.2s
+[TRAIN][PPO] ep=061/500 r=  247.89 avg10=  296.41 steps=1346 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 1.43 avg_spd=1.95m/s end=collision t= 1618.9s
+[TRAIN][PPO] ep=062/500 r=  396.31 avg10=  309.80 steps=1350 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 0.88 avg_spd=1.94m/s end=collision t= 1642.2s
+[TRAIN][PPO] ep=063/500 r=  638.87 avg10=  380.78 steps=1596 succ10=0.30 touch10=0.30 col10=0.70 to10=0.00 min_d= 0.30 avg_spd=1.91m/s end=goal t= 1670.0s
+[TRAIN][PPO] ep=064/500 r=  179.35 avg10=  335.98 steps=1408 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 1.73 avg_spd=1.94m/s end=collision t= 1696.9s
+[TRAIN][PPO] ep=065/500 r=  -13.61 avg10=  310.99 steps=1437 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 2.63 avg_spd=1.91m/s end=collision t= 1721.6s
+[TRAIN][PPO] ep=066/500 r=  -21.70 avg10=  304.80 steps=1587 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 2.49 avg_spd=1.92m/s end=collision t= 1749.8s
+[TRAIN][PPO] ep=067/500 r=  -16.71 avg10=  239.60 steps=1407 succ10=0.10 touch10=0.10 col10=0.90 to10=0.00 min_d= 2.68 avg_spd=1.92m/s end=collision t= 1775.0s
+[TRAIN][PPO] ep=068/500 r=  651.60 avg10=  281.65 steps=1540 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 0.30 avg_spd=1.90m/s end=goal t= 1805.1s
+[TRAIN][PPO] ep=069/500 r=  633.58 avg10=  305.63 steps=1509 succ10=0.30 touch10=0.30 col10=0.70 to10=0.00 min_d= 0.30 avg_spd=1.93m/s end=goal t= 1831.7s
+[TRAIN][PPO] ep=070/500 r=  351.77 avg10=  304.73 steps=1331 succ10=0.30 touch10=0.30 col10=0.70 to10=0.00 min_d= 1.01 avg_spd=1.94m/s end=collision t= 1856.1s
+[TRAIN][PPO] ep=071/500 r=  353.38 avg10=  315.28 steps=1297 succ10=0.30 touch10=0.30 col10=0.70 to10=0.00 min_d= 1.01 avg_spd=1.94m/s end=collision t= 1880.0s
+[TRAIN][PPO] ep=072/500 r=   -9.16 avg10=  274.74 steps=1461 succ10=0.30 touch10=0.30 col10=0.70 to10=0.00 min_d= 2.61 avg_spd=1.94m/s end=collision t= 1909.4s
+[TRAIN][PPO] ep=073/500 r=  344.12 avg10=  245.26 steps=1420 succ10=0.20 touch10=0.20 col10=0.80 to10=0.00 min_d= 1.11 avg_spd=1.91m/s end=collision t= 1934.3s
+Warning: The X11 connection broke (error 1). Did the X11 server die?
