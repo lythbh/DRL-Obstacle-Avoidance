@@ -4,6 +4,9 @@ Usage examples:
   python controllers/run.py submit --sessions 10 --episodes 2500
   python controllers/run.py worker --arch gru --seed 0
   python controllers/run.py worker --arch none --worlds worlds/training/train_1_empty.wbt
+  python controllers/run.py worker --arch gru --seed 0 --worlds worlds/training/train_11_partial_moving.wbt --moving-obstacle-indices "0,1,2,3,4"
+  python controllers/run.py worker --arch gru --seed 0 --worlds worlds/training/train_12_all_moving.wbt --moving-obstacle-indices all
+  python controllers/run.py worker --arch gru --seed 0 --worlds worlds/training/train_13_moving_goal.wbt --moving-obstacle-indices all --moving-goal
 """
 
 from __future__ import annotations
@@ -86,6 +89,14 @@ def run_worker(args: argparse.Namespace) -> int:
             env["PPO_MAX_STEPS"] = str(args.max_steps)
         if previous_checkpoint is not None:
             env["PPO_LOAD_MODEL"] = str(previous_checkpoint)
+        if args.moving_obstacle_indices is not None:
+            env["PPO_MOVING_OBSTACLE_INDICES"] = args.moving_obstacle_indices
+            env["PPO_MOVING_OBSTACLE_SPEED"] = str(args.moving_obstacle_speed)
+            env["PPO_MOVING_OBSTACLE_AMPLITUDE"] = str(args.moving_obstacle_amplitude)
+        if args.moving_goal:
+            env["PPO_MOVING_GOAL"] = "1"
+            env["PPO_MOVING_GOAL_SPEED"] = str(args.moving_goal_speed)
+            env["PPO_MOVING_GOAL_AMPLITUDE"] = str(args.moving_goal_amplitude)
 
         env.setdefault("WEBOTS_CONTROLLER_PATH", str(REPO_ROOT / "controllers"))
 
@@ -217,6 +228,13 @@ def build_parser() -> argparse.ArgumentParser:
     worker.add_argument("--max-steps", type=int, default=None)
     worker.add_argument("--resume-from", default=None)
     worker.add_argument("--worlds", nargs="+", default=None)
+    worker.add_argument("--moving-obstacle-indices", default=None,
+                        help="Comma-separated 0-indexed obstacle indices, or 'all'.")
+    worker.add_argument("--moving-obstacle-speed", type=float, default=0.3)
+    worker.add_argument("--moving-obstacle-amplitude", type=float, default=0.4)
+    worker.add_argument("--moving-goal", action="store_true")
+    worker.add_argument("--moving-goal-speed", type=float, default=0.2)
+    worker.add_argument("--moving-goal-amplitude", type=float, default=0.5)
     worker.set_defaults(func=run_worker)
 
     submit = subparsers.add_parser("submit", help="Generate and optionally submit SLURM jobs.")

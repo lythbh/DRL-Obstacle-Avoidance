@@ -45,6 +45,14 @@ REW_GOAL_OVERSHOOT_PENALTY = -12.0
 REW_SCALE = 0.01
 REW_PROXIMITY_RADIUS = 1.5
 
+"""Moving obstacles."""
+MOVING_OBSTACLE_INDICES: list = []          # 0-indexed; empty = none
+MOVING_OBSTACLE_SPEED: float = 0.3          # angular frequency (rad/s)
+MOVING_OBSTACLE_AMPLITUDE: float = 0.4      # peak y-displacement (m)
+MOVING_GOAL: bool = False
+MOVING_GOAL_SPEED: float = 0.2
+MOVING_GOAL_AMPLITUDE: float = 0.5
+
 """Training."""
 class RecurrentDefaults:
     """Recurrent training sequence parameters shared across architectures."""

@@ -1,5 +1,6 @@
 ﻿"""Webots simulation stack for the ALTINO robot."""
 
+import math
 import os
 from datetime import datetime
 from pathlib import Path
@@ -228,6 +229,10 @@ class AltinoDriver:
             self.translation_field = None
             self.rotation_field = None
 
+        self._tr_obs_bases: Dict[str, List[float]] = {}
+        self._goal_base: Optional[List[float]] = None
+        self._cache_dynamic_nodes()
+
     def set_steering(self, angle: float) -> None:
         """Set steering angle for both left and right wheels."""
         self.left_steer.setPosition(angle)
@@ -386,6 +391,72 @@ class AltinoDriver:
         else:
             print("[ENV] WARNING: cannot reset; ALTINO node not accessible!", flush=True)
 
+    _DYNAMIC_OBS_MAX: int = 18
+
+    def _cache_dynamic_nodes(self) -> None:
+        """Cache base translations of TR_OBS_N and GOAL_MARKER for motion updates."""
+        self._tr_obs_bases.clear()
+        for i in range(1, self._DYNAMIC_OBS_MAX + 1):
+            def_name = f"TR_OBS_{i}"
+            node = self.supervisor.getFromDef(def_name)
+            if node is not None:
+                pos = node.getField("translation").getSFVec3f()
+                self._tr_obs_bases[def_name] = list(pos)
+
+        goal_node = self.supervisor.getFromDef("GOAL_MARKER")
+        if goal_node is not None:
+            self._goal_base = list(goal_node.getField("translation").getSFVec3f())
+
+    def update_moving_obstacles(
+        self,
+        sim_time: float,
+        indices: List[int],
+        speed: float,
+        amplitude: float,
+    ) -> None:
+        """Apply sinusoidal y-oscillation to the specified obstacle indices."""
+        for i in indices:
+            def_name = f"TR_OBS_{i + 1}"
+            base = self._tr_obs_bases.get(def_name)
+            if base is None:
+                continue
+            node = self.supervisor.getFromDef(def_name)
+            if node is None:
+                continue
+            phase = base[0] * 1.5
+            new_y = base[1] + amplitude * math.sin(speed * sim_time + phase)
+            node.getField("translation").setSFVec3f([base[0], new_y, base[2]])
+
+    def update_moving_goal(
+        self,
+        sim_time: float,
+        speed: float,
+        amplitude: float,
+    ) -> Tuple[float, float]:
+        """Move GOAL_MARKER and barrier walls with sinusoidal y-oscillation.
+        Returns the new (goal_x, goal_y).
+        """
+        if self._goal_base is None:
+            return (float(self.config.endpoint[0]), float(self.config.endpoint[1]))
+
+        base_x, base_y = self._goal_base[0], self._goal_base[1]
+        new_y = base_y + amplitude * math.sin(speed * sim_time)
+
+        goal_node = self.supervisor.getFromDef("GOAL_MARKER")
+        if goal_node is not None:
+            goal_node.getField("translation").setSFVec3f([base_x, new_y, 0.001])
+
+        wall_x = base_x - 0.5
+        half_span = 1.55
+        top = self.supervisor.getFromDef("BARRIER_TOP")
+        bot = self.supervisor.getFromDef("BARRIER_BOTTOM")
+        if top is not None:
+            top.getField("translation").setSFVec3f([wall_x, new_y + half_span, 0.25])
+        if bot is not None:
+            bot.getField("translation").setSFVec3f([wall_x, new_y - half_span, 0.25])
+
+        return (base_x, new_y)
+
 
 class WebotsEnv:
     """Webots simulation environment for ALTINO obstacle avoidance."""
@@ -427,6 +498,7 @@ class WebotsEnv:
         self.reward_computer = reward_computer
         self._sync_endpoint_from_world()
 
+        self._sim_time: float = 0.0
         self.current_step = 0
         self.episode_reward = 0.0
         self.current_pos = np.array([0.0, 0.0], dtype=np.float32)
@@ -550,6 +622,7 @@ class WebotsEnv:
         self.robot.reset_position()
 
         self.current_step = 0
+        self._sim_time = 0.0
         self.prev_distance = None
         self.episode_reward = 0.0
         self.current_heading = 0.0
@@ -592,6 +665,22 @@ class WebotsEnv:
         self.robot.set_speed(speed)
         self.robot.step(self.timestep)
         self.current_step += 1
+        self._sim_time += self.timestep / 1000.0
+        if self.config.moving_obstacle_indices:
+            self.robot.update_moving_obstacles(
+                self._sim_time,
+                self.config.moving_obstacle_indices,
+                self.config.moving_obstacle_speed,
+                self.config.moving_obstacle_amplitude,
+            )
+        if self.config.moving_goal:
+            new_goal = self.robot.update_moving_goal(
+                self._sim_time,
+                self.config.moving_goal_speed,
+                self.config.moving_goal_amplitude,
+            )
+            self._endpoint = np.array(new_goal, dtype=np.float32)
+            self.reward_computer.endpoint = new_goal
 
         lidar_sectors, pos, heading, imu_state, collision = self.robot.read_sensors()
         self.current_pos = pos
