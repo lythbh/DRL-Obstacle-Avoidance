@@ -30,10 +30,10 @@ RectangleArena {
 
 # Obstacle 1: Oil Barrel near center-left
 
-# Validation 5 — Stage 3: 10 obstacles, dense layout
+# Validation 6 — Stage 4A: 5 obstacles, 1 moving (TR_OBS_1)
 
-DEF VAL_CYL_1 Solid {
-  translation -1.0 -1.0 0.15
+DEF TR_OBS_1 Solid {
+  translation 0.3 0.5 0.15
   children [
     Shape {
       appearance PBRAppearance { baseColor 0.8 0.2 0.2 roughness 0.7 }
@@ -41,11 +41,11 @@ DEF VAL_CYL_1 Solid {
     }
   ]
   boundingObject Cylinder { height 0.3 radius 0.15 }
-  name "val_cyl_1"
+  name "tr_obs_1"
 }
 
-DEF VAL_CYL_2 Solid {
-  translation -0.8 0.8 0.15
+DEF TR_OBS_2 Solid {
+  translation -0.7 -0.4 0.15
   children [
     Shape {
       appearance PBRAppearance { baseColor 0.2 0.5 0.8 roughness 0.7 }
@@ -53,11 +53,11 @@ DEF VAL_CYL_2 Solid {
     }
   ]
   boundingObject Cylinder { height 0.3 radius 0.15 }
-  name "val_cyl_2"
+  name "tr_obs_2"
 }
 
-DEF VAL_CYL_3 Solid {
-  translation 0.0 -0.7 0.15
+DEF TR_OBS_3 Solid {
+  translation 1.1 -0.6 0.15
   children [
     Shape {
       appearance PBRAppearance { baseColor 0.8 0.7 0.1 roughness 0.7 }
@@ -65,91 +65,31 @@ DEF VAL_CYL_3 Solid {
     }
   ]
   boundingObject Cylinder { height 0.3 radius 0.15 }
-  name "val_cyl_3"
+  name "tr_obs_3"
 }
 
-DEF VAL_CYL_4 Solid {
-  translation 0.5 0.7 0.15
+DEF TR_OBS_4 Solid {
+  translation -0.2 0.9 0.15
   children [
     Shape {
-      appearance PBRAppearance { baseColor 0.3 0.8 0.3 roughness 0.7 }
-      geometry Cylinder { height 0.3 radius 0.15 }
+      appearance PBRAppearance { baseColor 0.5 0.3 0.7 roughness 0.8 }
+      geometry Box { size 0.3 0.3 0.3 }
     }
   ]
-  boundingObject Cylinder { height 0.3 radius 0.15 }
-  name "val_cyl_4"
+  boundingObject Box { size 0.3 0.3 0.3 }
+  name "tr_obs_4"
 }
 
-DEF VAL_CYL_5 Solid {
-  translation 1.0 -0.5 0.15
+DEF TR_OBS_5 Solid {
+  translation 0.4 -1.0 0.15
   children [
     Shape {
-      appearance PBRAppearance { baseColor 0.7 0.3 0.8 roughness 0.7 }
-      geometry Cylinder { height 0.3 radius 0.15 }
+      appearance PBRAppearance { baseColor 0.9 0.4 0.1 roughness 0.8 }
+      geometry Box { size 0.3 0.3 0.3 }
     }
   ]
-  boundingObject Cylinder { height 0.3 radius 0.15 }
-  name "val_cyl_5"
-}
-
-DEF VAL_CYL_6 Solid {
-  translation -0.6 0.0 0.15
-  children [
-    Shape {
-      appearance PBRAppearance { baseColor 0.9 0.5 0.1 roughness 0.7 }
-      geometry Cylinder { height 0.3 radius 0.15 }
-    }
-  ]
-  boundingObject Cylinder { height 0.3 radius 0.15 }
-  name "val_cyl_6"
-}
-
-DEF VAL_CYL_7 Solid {
-  translation 1.3 0.5 0.15
-  children [
-    Shape {
-      appearance PBRAppearance { baseColor 0.5 0.3 0.7 roughness 0.7 }
-      geometry Cylinder { height 0.3 radius 0.15 }
-    }
-  ]
-  boundingObject Cylinder { height 0.3 radius 0.15 }
-  name "val_cyl_7"
-}
-
-DEF VAL_CYL_8 Solid {
-  translation -0.3 -1.6 0.15
-  children [
-    Shape {
-      appearance PBRAppearance { baseColor 0.9 0.4 0.1 roughness 0.7 }
-      geometry Cylinder { height 0.3 radius 0.15 }
-    }
-  ]
-  boundingObject Cylinder { height 0.3 radius 0.15 }
-  name "val_cyl_8"
-}
-
-DEF VAL_CYL_9 Solid {
-  translation 0.0 1.5 0.15
-  children [
-    Shape {
-      appearance PBRAppearance { baseColor 0.2 0.8 0.4 roughness 0.7 }
-      geometry Cylinder { height 0.3 radius 0.15 }
-    }
-  ]
-  boundingObject Cylinder { height 0.3 radius 0.15 }
-  name "val_cyl_9"
-}
-
-DEF VAL_CYL_10 Solid {
-  translation 0.8 -1.5 0.15
-  children [
-    Shape {
-      appearance PBRAppearance { baseColor 0.8 0.2 0.6 roughness 0.7 }
-      geometry Cylinder { height 0.3 radius 0.15 }
-    }
-  ]
-  boundingObject Cylinder { height 0.3 radius 0.15 }
-  name "val_cyl_10"
+  boundingObject Box { size 0.3 0.3 0.3 }
+  name "tr_obs_5"
 }
 
 DEF GOAL_MARKER Solid {

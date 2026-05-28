@@ -1,9 +1,9 @@
-"""Generate 5 static validation world files from the ObstacleCourse.wbt template."""
+"""Generate validation world files from the ObstacleCourse.wbt template."""
 
 import re
 from pathlib import Path
 
-TEMPLATE = Path(__file__).parent / "ObstacleCourse.wbt"
+TEMPLATE = Path(__file__).parent / "testing" / "ObstacleCourse.wbt"
 OUT_DIR   = Path(__file__).parent / "validation"
 OUT_DIR.mkdir(exist_ok=True)
 
@@ -153,6 +153,56 @@ WORLDS = [
             _cyl("VAL_CYL_10", 0.8, -1.5, color="0.8 0.2 0.6"),
         ],
     },
+    {
+        "filename": "val_6_one_moving.wbt",
+        "comment": "# Validation 6 — Stage 4A: 5 obstacles, 1 moving (TR_OBS_1)",
+        "goal_y": 0.0,
+        "obstacles": [
+            _cyl("TR_OBS_1",  0.3,  0.5, color="0.8 0.2 0.2"),
+            _cyl("TR_OBS_2", -0.7, -0.4, color="0.2 0.5 0.8"),
+            _cyl("TR_OBS_3",  1.1, -0.6, color="0.8 0.7 0.1"),
+            _box("TR_OBS_4", -0.2,  0.9, color="0.5 0.3 0.7"),
+            _box("TR_OBS_5",  0.4, -1.0, color="0.9 0.4 0.1"),
+        ],
+    },
+    {
+        "filename": "val_7_all_moving.wbt",
+        "comment": "# Validation 7 — Stage 4B: 6 obstacles, all moving",
+        "goal_y": 0.0,
+        "obstacles": [
+            _cyl("TR_OBS_1",  0.2,  0.6, color="0.8 0.2 0.2"),
+            _cyl("TR_OBS_2", -0.9, -0.3, color="0.2 0.5 0.8"),
+            _cyl("TR_OBS_3",  0.8, -0.8, color="0.8 0.7 0.1"),
+            _cyl("TR_OBS_4", -0.4,  0.7, color="0.3 0.8 0.3"),
+            _box("TR_OBS_5",  0.6,  1.0, color="0.7 0.3 0.8"),
+            _box("TR_OBS_6", -1.1, -1.0, color="0.9 0.4 0.1"),
+        ],
+    },
+    {
+        "filename": "val_8_moving_goal.wbt",
+        "comment": "# Validation 8 — Stage 4C: 6 obstacles, all moving + goal moving",
+        "goal_y": 0.0,
+        "obstacles": [
+            _cyl("TR_OBS_1",  0.0,  0.4, color="0.8 0.2 0.2"),
+            _cyl("TR_OBS_2", -0.6, -0.5, color="0.2 0.5 0.8"),
+            _cyl("TR_OBS_3",  1.0, -0.3, color="0.8 0.7 0.1"),
+            _cyl("TR_OBS_4", -1.2,  0.8, color="0.3 0.8 0.3"),
+            _box("TR_OBS_5",  0.5, -1.1, color="0.7 0.3 0.8"),
+            _box("TR_OBS_6", -0.3,  1.2, color="0.9 0.4 0.1"),
+        ],
+    },
+    {
+        "filename": "val_9_offset_goal.wbt",
+        "comment": "# Validation 9 — Stage 5: 5 obstacles, goal shifted to y=0.8",
+        "goal_y": 0.8,
+        "obstacles": [
+            _cyl("VAL_CYL_1",  0.4,  0.3, color="0.8 0.2 0.2"),
+            _cyl("VAL_CYL_2", -0.6, -0.6, color="0.2 0.5 0.8"),
+            _cyl("VAL_CYL_3",  1.2,  0.2, color="0.8 0.7 0.1"),
+            _box("VAL_BOX_1", -0.1,  1.3, color="0.5 0.3 0.7"),
+            _box("VAL_BOX_2",  0.7, -0.9, color="0.9 0.4 0.1"),
+        ],
+    },
 ]
 
 for world in WORLDS:
@@ -175,4 +225,4 @@ for world in WORLDS:
     out_path.write_text(content, encoding="utf-8")
     print(f"Written: {out_path}")
 
-print("Done. 5 validation worlds created in worlds/validation/")
+print(f"Done. {len(WORLDS)} validation worlds created in worlds/validation/")
