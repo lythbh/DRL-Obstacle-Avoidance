@@ -213,6 +213,7 @@ class PPOAgent:
             model_class = GRUActorCritic if recurrent_cell == "gru" else LSTMActorCritic
         self.model = model_class(self.obs_size, self.action_dim, self.config).to(self.device)
         self.actor = self.model.policy_head
+        self.critic = self.model.value_head
         self.actor_log_std = nn.Parameter(torch.full((self.action_dim,), -0.5, dtype=torch.float32, device=self.device))
         params = list(self.model.parameters()) + [self.actor_log_std]
         self.optimizer = torch.optim.Adam(params, lr=self.config.learning_rate)
@@ -349,15 +350,15 @@ class PPOAgent:
         rnn_attr = "gru" if hasattr(self.model, "gru") else ("lstm" if hasattr(self.model, "lstm") else None)
         rnn_clip = list(getattr(self.model, rnn_attr).parameters()) if rnn_attr else []
 
-        actor_params = [self.model.policy_head.weight, self.model.policy_head.bias, self.actor_log_std]
-        critic_params = [self.model.value_head.weight, self.model.value_head.bias]
+        actor_params = [self.actor.weight, self.actor.bias, self.actor_log_std]
+        critic_params = [self.critic.weight, self.critic.bias]
 
         grad_norm_actor = MetricsLogger.compute_grad_norm(actor_params)
         grad_norm_critic = MetricsLogger.compute_grad_norm(critic_params)
         grad_norm_rnn = MetricsLogger.compute_grad_norm(rnn_clip) if rnn_clip else 0.0
 
-        actor_clip = list(self.model.policy_head.parameters()) + [self.actor_log_std]
-        critic_clip = list(self.model.value_head.parameters())
+        actor_clip = list(self.actor.parameters()) + [self.actor_log_std]
+        critic_clip = list(self.critic.parameters())
         encoder_clip = [p for n, p in self.model.named_parameters()
                         if "policy_head" not in n and "value_head" not in n and (rnn_attr is None or rnn_attr not in n)]
         nn.utils.clip_grad_norm_(actor_clip, max_norm=0.5)
@@ -689,6 +690,116 @@ def train(config=None):
     env.robot.supervisor.simulationQuit(0)
     print("[TRAIN][PPO] done", flush=True)
 
+def evaluate(config=None, model_path=None, episodes=10, deterministic=True):
+    """Run a saved PPO policy without updating model parameters."""
+    if config is None:
+        config = Config()
+    config, load_model_path, run_id_override = _apply_env_overrides(config)
+    model_path = model_path or os.getenv("PPO_EVAL_MODEL") or load_model_path
+    if model_path is None:
+        raise ValueError("evaluate() requires model_path or PPO_LOAD_MODEL/PPO_EVAL_MODEL.")
+
+    _init_supervisor()
+    reward_computer = PPORewardComputer(
+        endpoint=config.endpoint,
+        collision_penalty=config.collision_penalty,
+        progress_reward_scale=config.progress_reward_scale,
+        distance_reward_scale=config.distance_reward_scale,
+        heading_reward_scale=config.heading_reward_scale,
+        safety_reward_scale=config.safety_reward_scale,
+        motion_reward_scale=config.motion_reward_scale,
+        new_best_distance_bonus=config.new_best_distance_bonus,
+        step_penalty=config.step_penalty,
+        goal_threshold=config.goal_threshold,
+        goal_success_reward=config.goal_success_reward,
+        goal_hold_reward=config.goal_hold_reward,
+    )
+    env = WebotsEnv(config, reward_computer)
+    env.reset()
+    if run_id_override:
+        env.run_folder = str(Path(env.run_folder).parent / run_id_override)
+        os.makedirs(env.run_folder, exist_ok=True)
+
+    agent = PPOAgent(env.observation_size, env.action_dim, config)
+    agent.load_model(str(model_path))
+    agent.model.eval()
+
+    rewards, successes, goal_touches, collisions, timeouts = [], [], [], [], []
+    total_steps = 0
+    start_time = time.perf_counter()
+    print(
+        f"[EVAL][PPO] model={model_path} episodes={episodes} "
+        f"deterministic={deterministic} cell={agent.config.recurrent_cell.upper()}",
+        flush=True,
+    )
+
+    try:
+        for episode in range(episodes):
+            obs, _ = env.reset()
+            done = False
+            ep_step = 0
+            ep_reward = 0.0
+            ep_goal = False
+            ep_success = False
+            ep_end_reason = "max_steps"
+            ep_speeds = []
+            recurrent_state = agent.get_initial_state(batch_size=1)
+            prev_done = True
+
+            while not done:
+                action, _, _, recurrent_state = agent.select_action(
+                    obs, recurrent_state, done=prev_done, deterministic=deterministic,
+                )
+                obs, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
+                prev_done = done
+                ep_step += 1
+                total_steps += 1
+                ep_reward += float(reward)
+                ep_goal = ep_goal or bool(info.get("goal_reached", False))
+                ep_success = bool(info.get("success", False))
+                ep_speeds.append(float(info.get("speed_norm", 0.0)))
+                if done:
+                    reason = info.get("reset_reason", "")
+                    ep_end_reason = reason if reason else ("max_steps" if truncated else ep_end_reason)
+
+            rewards.append(ep_reward)
+            successes.append(1.0 if ep_success else 0.0)
+            goal_touches.append(1.0 if ep_goal else 0.0)
+            collisions.append(1.0 if ep_end_reason == "collision" else 0.0)
+            timeouts.append(1.0 if ep_end_reason == "max_steps" else 0.0)
+            avg_spd = float(np.mean(ep_speeds)) * config.max_speed if ep_speeds else 0.0
+            print(
+                f"[EVAL][PPO] ep={episode + 1:03d}/{episodes} r={ep_reward:8.2f} "
+                f"steps={ep_step:4d} success={int(ep_success)} touch={int(ep_goal)} "
+                f"min_d={env.min_episode_distance:5.2f} avg_spd={avg_spd:4.2f}m/s "
+                f"end={ep_end_reason}",
+                flush=True,
+            )
+    finally:
+        env.robot.stop()
+        env.robot.supervisor.simulationQuit(0)
+
+    elapsed = time.perf_counter() - start_time
+    summary = {
+        "episodes": episodes,
+        "mean_reward": float(np.mean(rewards)) if rewards else 0.0,
+        "success_rate": float(np.mean(successes)) if successes else 0.0,
+        "goal_touch_rate": float(np.mean(goal_touches)) if goal_touches else 0.0,
+        "collision_rate": float(np.mean(collisions)) if collisions else 0.0,
+        "timeout_rate": float(np.mean(timeouts)) if timeouts else 0.0,
+        "total_steps": total_steps,
+        "elapsed_s": elapsed,
+    }
+    print(
+        f"[EVAL][PPO] mean_reward={summary['mean_reward']:.2f} "
+        f"success={summary['success_rate']:.2f} touch={summary['goal_touch_rate']:.2f} "
+        f"collision={summary['collision_rate']:.2f} timeout={summary['timeout_rate']:.2f} "
+        f"steps={total_steps} t={elapsed:.1f}s",
+        flush=True,
+    )
+    return summary
 
 if __name__ == "__main__":
     train()
+    # evaluate()
