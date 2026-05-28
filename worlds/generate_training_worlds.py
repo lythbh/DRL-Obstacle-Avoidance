@@ -4,7 +4,7 @@ import math
 import re
 from pathlib import Path
 
-TEMPLATE = Path(__file__).parent / "ObstacleCourse.wbt"
+TEMPLATE = Path(__file__).parent / "testing" / "ObstacleCourse.wbt"
 OUT_DIR = Path(__file__).parent / "training"
 OUT_DIR.mkdir(exist_ok=True)
 
@@ -210,6 +210,27 @@ WORLDS = [
         "filename": "train_10_full.wbt",
         "comment": "# Training 10 — 18 obstacles, goal fixed at (2.0, 0.0)",
         "n_obs": 18,
+        "goal_y": 0.0,
+        "randomize_goal": False,
+    },
+    {
+        "filename": "train_11_partial_moving.wbt",
+        "comment": "# Training 11 — 8 obstacles, goal fixed at (2.0, 0.0), partial moving",
+        "n_obs": 8,
+        "goal_y": 0.0,
+        "randomize_goal": False,
+    },
+    {
+        "filename": "train_12_all_moving.wbt",
+        "comment": "# Training 12 — 12 obstacles, goal fixed at (2.0, 0.0), all moving",
+        "n_obs": 12,
+        "goal_y": 0.0,
+        "randomize_goal": False,
+    },
+    {
+        "filename": "train_13_moving_goal.wbt",
+        "comment": "# Training 13 — 12 obstacles, goal at (2.0, 0.0), all moving + goal moving",
+        "n_obs": 12,
         "goal_y": 0.0,
         "randomize_goal": False,
     },

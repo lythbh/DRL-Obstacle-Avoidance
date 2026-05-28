@@ -87,6 +87,13 @@ class Config:
     max_speed: float = d.ENV_MAX_SPEED
     reset_settle_steps: int = d.ENV_RESET_SETTLE_STEPS
 
+    moving_obstacle_indices: Optional[List[int]] = None
+    moving_obstacle_speed: float = d.MOVING_OBSTACLE_SPEED
+    moving_obstacle_amplitude: float = d.MOVING_OBSTACLE_AMPLITUDE
+    moving_goal: bool = d.MOVING_GOAL
+    moving_goal_speed: float = d.MOVING_GOAL_SPEED
+    moving_goal_amplitude: float = d.MOVING_GOAL_AMPLITUDE
+
     def __post_init__(self):
         """Initialize mutable fields and validate recurrent cell type."""
         self.recurrent_cell = self.recurrent_cell.lower().strip()
@@ -104,6 +111,8 @@ class Config:
             start_xy = np.array(self.start_position[:2], dtype=np.float32)
             endpoint_xy = np.array(self.endpoint, dtype=np.float32)
             self.reference_distance = float(np.linalg.norm(start_xy - endpoint_xy))
+        if self.moving_obstacle_indices is None:
+            self.moving_obstacle_indices = []
 
 
 class FeedForwardActorCritic(nn.Module):
@@ -486,6 +495,22 @@ def _apply_env_overrides(config: Config) -> tuple[Config, Optional[str], Optiona
         config.force_cpu = _env_bool("PPO_FORCE_CPU", config.force_cpu)
     if os.getenv("PPO_SEED"):
         set_all_seeds(int(os.environ["PPO_SEED"]))
+    if os.getenv("PPO_MOVING_OBSTACLE_INDICES"):
+        raw = os.environ["PPO_MOVING_OBSTACLE_INDICES"].strip()
+        if raw.lower() == "all":
+            config.moving_obstacle_indices = list(range(18))
+        elif raw:
+            config.moving_obstacle_indices = [int(x) for x in raw.split(",")]
+    if os.getenv("PPO_MOVING_OBSTACLE_SPEED"):
+        config.moving_obstacle_speed = float(os.environ["PPO_MOVING_OBSTACLE_SPEED"])
+    if os.getenv("PPO_MOVING_OBSTACLE_AMPLITUDE"):
+        config.moving_obstacle_amplitude = float(os.environ["PPO_MOVING_OBSTACLE_AMPLITUDE"])
+    if os.getenv("PPO_MOVING_GOAL"):
+        config.moving_goal = _env_bool("PPO_MOVING_GOAL", False)
+    if os.getenv("PPO_MOVING_GOAL_SPEED"):
+        config.moving_goal_speed = float(os.environ["PPO_MOVING_GOAL_SPEED"])
+    if os.getenv("PPO_MOVING_GOAL_AMPLITUDE"):
+        config.moving_goal_amplitude = float(os.environ["PPO_MOVING_GOAL_AMPLITUDE"])
     config.__post_init__()
     return config, os.getenv("PPO_LOAD_MODEL"), os.getenv("PPO_RUN_ID")
 
