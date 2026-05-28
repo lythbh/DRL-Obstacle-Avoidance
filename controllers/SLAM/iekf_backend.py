@@ -1,4 +1,4 @@
-"""IEKF odometry: dead-reckons position and heading from wheel speed and gyro."""
+"""IEKF odometry: propagates position and heading from wheel speed and gyro."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def _wrap_angle(a: float) -> float:
 
 
 class IEKFBackend:
-    """Dead-reckons position and heading from wheel odometry and gyro bias correction."""
+    """Integrates position and heading from wheel odometry and gyro bias correction."""
 
     def __init__(
         self,
@@ -60,24 +60,24 @@ class IEKFBackend:
         self._sigma_accel = sigma_accel
 
     def propagate_odom(self, speed: float, gyro_z: float, dt: float) -> None:
-        """Dead-reckon position, heading, and covariance from wheel speed and gyro yaw rate."""
+        """Integrate position, heading, and covariance from wheel speed and gyro yaw rate."""
         x = self.state.x.copy()
-        θ = x[2]
-        bωz = x[5]
-        ω = gyro_z - bωz
+        heading = x[2]
+        gyro_bias_z = x[5]
+        yaw_rate = gyro_z - gyro_bias_z
 
-        x[0] += speed * np.cos(θ) * dt
-        x[1] += speed * np.sin(θ) * dt
-        x[2] = _wrap_angle(θ + ω * dt)
-        x[3] = speed * np.cos(θ)
-        x[4] = speed * np.sin(θ)
+        x[0] += speed * np.cos(heading) * dt
+        x[1] += speed * np.sin(heading) * dt
+        x[2] = _wrap_angle(heading + yaw_rate * dt)
+        x[3] = speed * np.cos(heading)
+        x[4] = speed * np.sin(heading)
 
         F = np.eye(STATE_DIM)
-        F[0, 2] = -speed * np.sin(θ) * dt
-        F[1, 2] =  speed * np.cos(θ) * dt
+        F[0, 2] = -speed * np.sin(heading) * dt
+        F[1, 2] =  speed * np.cos(heading) * dt
         F[2, 5] = -dt
-        F[3, 2] = -speed * np.sin(θ)
-        F[4, 2] =  speed * np.cos(θ)
+        F[3, 2] = -speed * np.sin(heading)
+        F[4, 2] =  speed * np.cos(heading)
 
         self.state.x = x
         self.state.P = F @ self.state.P @ F.T + self._build_process_noise(dt)
