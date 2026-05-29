@@ -35,7 +35,7 @@ controllers/SAC/checkpoints/
 # controllers/PPO/slam_runs/
 # controllers/SAC/slam_runs
 # controllers/SAC/slam_runs/
-# plots/
+plots/
 # data/
 # datasets/
 # logs/
