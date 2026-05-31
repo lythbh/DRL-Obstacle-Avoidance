@@ -11,3 +11,29 @@ INFO: PPO: Starting controller: python3 -u PPO.py
 [TRAIN][PPO] arch=LSTM weights_dir=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260531_131704_step01_partial_moving_1_lstm_seed02_stage01_train_11_partial_moving final=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260531_131704_step01_partial_moving_1_lstm_seed02_stage01_train_11_partial_moving/final_moving_20260531_131704_step01_partial_moving_1_lstm_seed02_stage01_train_11_partial_moving.pth
 [TRAIN][PPO] episodes=500 update_every=4 obs=31 act=2 cell=LSTM seq=32 burn_in=8
 [TRAIN][PPO] ep=001/500 r= -500.14 avg10= -500.14 steps=2270 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.83 avg_spd=1.28m/s end=low_score t=   33.1s ckpt=best
+[TRAIN][PPO] ep=002/500 r= -500.45 avg10= -500.30 steps=2273 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.86 avg_spd=1.28m/s end=low_score t=   66.4s
+[TRAIN][PPO] ep=003/500 r= -500.20 avg10= -500.26 steps=2223 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.89 avg_spd=1.29m/s end=low_score t=   99.3s
+[TRAIN][PPO] ep=004/500 r= -500.00 avg10= -500.20 steps=2291 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.85 avg_spd=1.29m/s end=low_score t=  142.1s ckpt=best
+[TRAIN][PPO] ep=005/500 r= -500.18 avg10= -500.19 steps=2237 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.79 avg_spd=1.29m/s end=low_score t=  175.0s
+[TRAIN][PPO] ep=006/500 r= -500.46 avg10= -500.24 steps=2241 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.78 avg_spd=1.29m/s end=low_score t=  207.6s
+[TRAIN][PPO] ep=007/500 r= -500.39 avg10= -500.26 steps=2312 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.84 avg_spd=1.29m/s end=low_score t=  241.5s
+[TRAIN][PPO] ep=008/500 r= -500.27 avg10= -500.26 steps=2283 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.86 avg_spd=1.29m/s end=low_score t=  283.5s
+[TRAIN][PPO] ep=009/500 r= -500.04 avg10= -500.24 steps=2258 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.88 avg_spd=1.29m/s end=low_score t=  316.7s
+[TRAIN][PPO] ep=010/500 r= -500.13 avg10= -500.23 steps=2199 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.88 avg_spd=1.30m/s end=low_score t=  349.4s
+[TRAIN][PPO] ep=011/500 r= -500.20 avg10= -500.23 steps=2253 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.83 avg_spd=1.29m/s end=low_score t=  382.9s
+[TRAIN][PPO] ep=012/500 r= -500.15 avg10= -500.20 steps=2310 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.73 avg_spd=1.28m/s end=low_score t=  422.8s
+[TRAIN][PPO] ep=013/500 r= -500.14 avg10= -500.20 steps=2233 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.82 avg_spd=1.29m/s end=low_score t=  456.1s
+[TRAIN][PPO] ep=014/500 r= -500.60 avg10= -500.26 steps=2224 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.79 avg_spd=1.29m/s end=low_score t=  489.5s
+[TRAIN][PPO] ep=015/500 r= -500.18 avg10= -500.26 steps=2158 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.92 avg_spd=1.30m/s end=low_score t=  521.8s
+[TRAIN][PPO] ep=016/500 r= -500.39 avg10= -500.25 steps=2216 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.85 avg_spd=1.29m/s end=low_score t=  560.9s
+[TRAIN][PPO] ep=017/500 r= -500.01 avg10= -500.21 steps=2134 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.98 avg_spd=1.31m/s end=low_score t=  593.3s
+[TRAIN][PPO] ep=018/500 r= -500.31 avg10= -500.22 steps=2281 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.82 avg_spd=1.29m/s end=low_score t=  627.6s
+[TRAIN][PPO] ep=019/500 r= -500.26 avg10= -500.24 steps=1710 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 4.01 avg_spd=1.31m/s end=low_score t=  653.1s
+[TRAIN][PPO] ep=020/500 r= -500.15 avg10= -500.24 steps=2159 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.86 avg_spd=1.30m/s end=low_score t=  690.3s
+[TRAIN][PPO] ep=021/500 r= -500.01 avg10= -500.22 steps=2226 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.90 avg_spd=1.30m/s end=low_score t=  723.8s
+[TRAIN][PPO] ep=022/500 r= -500.56 avg10= -500.26 steps=2109 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.96 avg_spd=1.31m/s end=low_score t=  754.9s
+[TRAIN][PPO] ep=023/500 r= -500.12 avg10= -500.26 steps=2269 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.82 avg_spd=1.29m/s end=low_score t=  789.0s
+[TRAIN][PPO] ep=024/500 r= -500.48 avg10= -500.25 steps=2143 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.95 avg_spd=1.31m/s end=low_score t=  825.7s
+[TRAIN][PPO] ep=025/500 r= -500.67 avg10= -500.30 steps=2343 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.71 avg_spd=1.30m/s end=low_score t=  859.8s
+[TRAIN][PPO] ep=026/500 r= -500.08 avg10= -500.26 steps=2215 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.81 avg_spd=1.30m/s end=low_score t=  893.7s
+Warning: The X11 connection broke (error 1). Did the X11 server die?

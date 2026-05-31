@@ -8,7 +8,9 @@ WARNING: Could not listen to extern controllers and robot windows on port 2108. 
 INFO: PPO: Starting controller: python3 -u PPO.py
 [PPO] Using architecture: NONE
 [PPO] Loaded architecture: LSTM
-[TRAIN][PPO] arch=LSTM weights_dir=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260530_190026_step01_partial_moving_1_none_seed03_stage01_train_11_partial_moving final=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260530_190026_step01_partial_moving_1_none_seed03_stage01_train_11_partial_moving/final_moving_20260530_190026_step01_partial_moving_1_none_seed03_stage01_train_11_partial_moving.pth
+[TRAIN][PPO] arch=LSTM weights_dir=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260530_190026_step01_partial_moving_1_none_seed03_stage01_train_11_partial_moving final=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260530_190026_step01_partial_moving_1_none_seed03_stagWarning: The X11 connection broke: I/O error (code 1)
+X connection to :288 broken (explicit kill or server shutdown).
+oving.pth
 [TRAIN][PPO] episodes=500 update_every=4 obs=31 act=2 cell=LSTM seq=32 burn_in=0
 [TRAIN][PPO] ep=001/500 r=  164.94 avg10=  164.94 steps= 634 succ10=0.00 touch10=0.00 col10=1.00 to10=0.00 min_d= 2.31 avg_spd=2.10m/s end=collision t=   15.5s ckpt=best
 [TRAIN][PPO] ep=002/500 r=  589.06 avg10=  377.00 steps=1544 succ10=0.50 touch10=0.50 col10=0.50 to10=0.00 min_d= 0.30 avg_spd=2.11m/s end=goal t=   35.4s ckpt=best_goal

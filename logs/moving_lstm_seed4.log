@@ -8,7 +8,8 @@ WARNING: Could not listen to extern controllers and robot windows on port 2084. 
 INFO: PPO: Starting controller: python3 -u PPO.py
 [PPO] Using architecture: LSTM
 [PPO] Loaded architecture: LSTM
-[TRAIN][PPO] arch=LSTM weights_dir=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260530_190026_step01_partial_moving_1_lstm_seed04_stage01_train_11_partial_moving final=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260530_190026_step01_partial_moving_1_lstm_seed04_stage01_train_11_partial_moving/final_moving_20260530_190026_step01_partial_moving_1_lstm_seed04_stage01_train_11_partial_moving.pth
+[TRAIN][PPO] arch=LSTM weights_dir=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260530_190026_step01_partial_moving_1_lstm_seed04_stage01_train_11_partial_moving final=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260530_190026_step01_partial_moving_1_lstm_seed04_stagWarning: The X11 connection broke (error 1). Did the X11 server die?
+al_moving_1_lstm_seed04_stage01_train_11_partial_moving.pth
 [TRAIN][PPO] episodes=500 update_every=4 obs=31 act=2 cell=LSTM seq=32 burn_in=8
 [TRAIN][PPO] ep=001/500 r=  593.22 avg10=  593.22 steps=1463 succ10=1.00 touch10=1.00 col10=0.00 to10=0.00 min_d= 0.30 avg_spd=2.08m/s end=goal t=   25.1s ckpt=best_goal
 [TRAIN][PPO] ep=002/500 r=  -43.21 avg10=  275.01 steps=  26 succ10=0.50 touch10=0.50 col10=0.50 to10=0.00 min_d= 3.85 avg_spd=1.41m/s end=collision t=   25.5s
