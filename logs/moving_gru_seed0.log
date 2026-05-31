@@ -1,0 +1,15 @@
+[MOVING] initial checkpoint=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260530_190026_step05_moving_goal_lstm_seed04_stage01_train_13_moving_goal/final_moving_20260530_190026_step05_moving_goal_lstm_seed04_stage01_train_13_moving_goal.pth
+[MOVING] stage=1/5 name=partial_moving_1
+[MOVING] resume_from=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260530_190026_step05_moving_goal_lstm_seed04_stage01_train_13_moving_goal/final_moving_20260530_190026_step05_moving_goal_lstm_seed04_stage01_train_13_moving_goal.pth
+[MOVING] command=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/venv/bin/python controllers/run.py worker --arch gru --seed 0 --run-group moving_20260531_130315_step01_partial_moving_1 --resume-from /uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260530_190026_step05_moving_goal_lstm_seed04_stage01_train_13_moving_goal/final_moving_20260530_190026_step05_moving_goal_lstm_seed04_stage01_train_13_moving_goal.pth --worlds worlds/training/train_11_partial_moving.wbt --moving-obstacle-indices 0
+[RUN] arch=gru seed=0 stage=1/1 world=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/worlds/training/train_11_partial_moving.wbt
+[RUN] resuming from /uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260530_190026_step05_moving_goal_lstm_seed04_stage01_train_13_moving_goal/final_moving_20260530_190026_step05_moving_goal_lstm_seed04_stage01_train_13_moving_goal.pth
+INFO: PPO: Starting controller: python3 -u PPO.py
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: LSTM
+[TRAIN][PPO] arch=LSTM weights_dir=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260531_130315_step01_partial_moving_1_gru_seed00_stage01_train_11_partial_moving final=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260531_130315_step01_partial_moving_1_gru_seed00_stage01_train_11_partial_moving/final_moving_20260531_130315_step01_partial_moving_1_gru_seed00_stage01_train_11_partial_moving.pth
+[TRAIN][PPO] episodes=500 update_every=4 obs=31 act=2 cell=LSTM seq=32 burn_in=8
+[TRAIN][PPO] ep=001/500 r= -500.32 avg10= -500.32 steps=2211 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.85 avg_spd=1.29m/s end=low_score t=   33.9s ckpt=best
+[TRAIN][PPO] ep=002/500 r= -500.03 avg10= -500.18 steps=1725 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.96 avg_spd=1.30m/s end=low_score t=   60.2s ckpt=best
+[TRAIN][PPO] ep=003/500 r= -500.46 avg10= -500.27 steps=2224 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.88 avg_spd=1.29m/s end=low_score t=   94.4s
+[TRAIN][PPO] ep=004/500 r= -500.17 avg10= -500.24 steps=2330 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.74 avg_spd=1.29m/s end=low_score t=  138.6s
