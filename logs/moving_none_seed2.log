@@ -14,3 +14,10 @@ INFO: PPO: Starting controller: python3 -u PPO.py
 [TRAIN][PPO] ep=002/500 r= -500.45 avg10= -500.30 steps=2273 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.86 avg_spd=1.28m/s end=low_score t=   68.7s
 [TRAIN][PPO] ep=003/500 r= -500.20 avg10= -500.26 steps=2223 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.89 avg_spd=1.29m/s end=low_score t=  101.9s
 [TRAIN][PPO] ep=004/500 r= -500.00 avg10= -500.20 steps=2291 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.85 avg_spd=1.29m/s end=low_score t=  147.4s ckpt=best
+[TRAIN][PPO] ep=005/500 r= -500.66 avg10= -500.29 steps=2236 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.80 avg_spd=1.29m/s end=low_score t=  180.8s
+[TRAIN][PPO] ep=006/500 r= -500.23 avg10= -500.28 steps=2241 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.78 avg_spd=1.29m/s end=low_score t=  214.4s
+[TRAIN][PPO] ep=007/500 r= -500.18 avg10= -500.27 steps=2311 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.85 avg_spd=1.29m/s end=low_score t=  248.7s
+[TRAIN][PPO] ep=008/500 r= -500.12 avg10= -500.25 steps=2284 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.86 avg_spd=1.29m/s end=low_score t=  292.9s
+[TRAIN][PPO] ep=009/500 r= -500.55 avg10= -500.28 steps=2260 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.88 avg_spd=1.29m/s end=low_score t=  327.6s
+[TRAIN][PPO] ep=010/500 r= -500.57 avg10= -500.31 steps=2199 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.88 avg_spd=1.30m/s end=low_score t=  360.6s
+[TRAIN][PPO] ep=011/500 r= -500.62 avg10= -500.36 steps=2253 succ10=0.00 touch10=0.00 col10=0.00 to10=0.00 min_d= 3.83 avg_spd=1.29m/s end=low_score t=  395.0s
