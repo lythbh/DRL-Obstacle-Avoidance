@@ -52,11 +52,30 @@ STAGES = [
 ]
 
 
-def _latest_checkpoint(after: float | None = None) -> Path:
+def _checkpoint_arch(path: Path) -> str | None:
+    """Return the recurrent_cell stored in a checkpoint, or None on error."""
+    try:
+        import torch
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+        return str(ckpt.get("recurrent_cell", "")).lower().strip() or None
+    except Exception:
+        return None
+
+
+def _latest_checkpoint(after: float | None = None, arch: str | None = None) -> Path:
     candidates = [path for path in CHECKPOINT_ROOT.rglob("*.pth") if after is None or path.stat().st_mtime >= after]
     if not candidates:
         detail = f" modified after {after}" if after is not None else ""
         raise FileNotFoundError(f"No PPO checkpoints found in {CHECKPOINT_ROOT}{detail}.")
+
+    if arch is not None:
+        arch_norm = {"mlp": "none", "feedforward": "none", "ff": "none"}.get(arch, arch)
+        matched = [p for p in candidates if _checkpoint_arch(p) == arch_norm]
+        if not matched:
+            raise FileNotFoundError(
+                f"No PPO checkpoints with recurrent_cell='{arch}' found in {CHECKPOINT_ROOT}."
+            )
+        candidates = matched
 
     finals = [path for path in candidates if path.name.startswith("final_")]
     pool = finals or candidates
@@ -104,10 +123,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    resume_from = Path(args.resume_from).resolve() if args.resume_from else _latest_checkpoint()
+    arch = args.arch
+    resume_from = Path(args.resume_from).resolve() if args.resume_from else _latest_checkpoint(arch=arch)
     run_group_prefix = args.run_group or datetime.now().strftime("moving_%Y%m%d_%H%M%S")
 
-    print(f"[MOVING] initial checkpoint={resume_from}", flush=True)
+    print(f"[MOVING] arch={arch} initial checkpoint={resume_from}", flush=True)
     for index, stage in enumerate(STAGES, start=1):
         run_group = f"{run_group_prefix}_step{index:02d}_{stage['name']}"
         cmd = _build_command(args, stage, resume_from, run_group)
@@ -124,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[MOVING] stage failed with exit code {result.returncode}: {stage['name']}", file=sys.stderr, flush=True)
             return result.returncode
 
-        resume_from = _latest_checkpoint(after=started_at)
+        resume_from = _latest_checkpoint(after=started_at, arch=arch)
         print(f"[MOVING] completed stage checkpoint={resume_from}", flush=True)
 
     print(f"[MOVING] moving-world curriculum complete final_checkpoint={resume_from}", flush=True)

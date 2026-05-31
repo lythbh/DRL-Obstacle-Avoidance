@@ -442,7 +442,7 @@ class PPOAgent:
         return update_metrics
 
     def load_model(self, model_path: str) -> None:
-        """Load a pre-trained PPO model checkpoint, adjusting recurrent cell type if needed."""
+        """Load a pre-trained PPO model checkpoint."""
         checkpoint = load_checkpoint(model_path, map_location=self.device)
         algo = str(checkpoint.get("algorithm", "ppo")).lower().strip()
         assert algo == "ppo", f"Checkpoint algorithm '{algo}' does not match PPO."
@@ -455,8 +455,10 @@ class PPOAgent:
         cell = {"mlp": "none", "feedforward": "none", "ff": "none"}.get(cell, cell)
         assert cell in {"none", "lstm", "gru"}, f"Unsupported recurrent_cell in checkpoint: {cell}"
         if cell != self.config.recurrent_cell:
-            self.config.recurrent_cell = cell
-            self._build_model(cell)
+            raise ValueError(
+                f"Checkpoint recurrent_cell='{cell}' does not match configured '{self.config.recurrent_cell}'. "
+                f"Use --arch {cell} or provide a {self.config.recurrent_cell} checkpoint."
+            )
         print(f"[PPO] Loaded architecture: {cell.upper()}", flush=True)
         self.model.load_state_dict(checkpoint["model"])
         if "actor_log_std" in checkpoint:
