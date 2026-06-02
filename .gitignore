@@ -20,7 +20,7 @@ dist/
 .eggs/
 
 #Saved model checkpoints per controller
-controllers/PPO/checkpoints/
+# controllers/PPO/checkpoints/
 controllers/SAC/checkpoints/
 
 #Serialised model weight formats
