@@ -62,7 +62,7 @@ def _checkpoint_arch(path: Path) -> str | None:
         return None
 
 
-def _latest_checkpoint(after: float | None = None, arch: str | None = None) -> Path:
+def _latest_checkpoint(after: float | None = None, arch: str | None = None, seed: int | None = None) -> Path:
     candidates = [path for path in CHECKPOINT_ROOT.rglob("*.pth") if after is None or path.stat().st_mtime >= after]
     if not candidates:
         detail = f" modified after {after}" if after is not None else ""
@@ -74,6 +74,15 @@ def _latest_checkpoint(after: float | None = None, arch: str | None = None) -> P
         if not matched:
             raise FileNotFoundError(
                 f"No PPO checkpoints with recurrent_cell='{arch}' found in {CHECKPOINT_ROOT}."
+            )
+        candidates = matched
+
+    if seed is not None:
+        seed_tag = f"seed{seed:02d}"
+        matched = [p for p in candidates if seed_tag in str(p)]
+        if not matched:
+            raise FileNotFoundError(
+                f"No PPO checkpoints containing '{seed_tag}' found in {CHECKPOINT_ROOT}."
             )
         candidates = matched
 
@@ -124,7 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     arch = args.arch
-    resume_from = Path(args.resume_from).resolve() if args.resume_from else _latest_checkpoint(arch=arch)
+    resume_from = Path(args.resume_from).resolve() if args.resume_from else _latest_checkpoint(arch=arch, seed=args.seed)
     run_group_prefix = args.run_group or datetime.now().strftime("moving_%Y%m%d_%H%M%S")
 
     print(f"[MOVING] arch={arch} initial checkpoint={resume_from}", flush=True)
@@ -144,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[MOVING] stage failed with exit code {result.returncode}: {stage['name']}", file=sys.stderr, flush=True)
             return result.returncode
 
-        resume_from = _latest_checkpoint(after=started_at, arch=arch)
+        resume_from = _latest_checkpoint(after=started_at, arch=arch, seed=args.seed)
         print(f"[MOVING] completed stage checkpoint={resume_from}", flush=True)
 
     print(f"[MOVING] moving-world curriculum complete final_checkpoint={resume_from}", flush=True)
