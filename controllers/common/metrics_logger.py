@@ -394,5 +394,3 @@ def _empty_obs_stats() -> OBSSTATS:
         A dictionary with zero values for observation aggregates.
     """
     return {"obs_mean": 0.0, "obs_std": 0.0, "obs_min": 0.0, "obs_max": 0.0}
-
-

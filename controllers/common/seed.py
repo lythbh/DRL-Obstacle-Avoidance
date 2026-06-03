@@ -1,4 +1,8 @@
-"""Reproducible seed helpers shared across all controllers."""
+"""
+Reproducible seed helpers shared across all controllers.
+
+LLM-level: 0 - Written independently
+"""
 
 import random
 import numpy as np

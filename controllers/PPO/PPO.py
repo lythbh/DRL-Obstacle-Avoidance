@@ -24,9 +24,15 @@ from controllers.common.checkpoints import (
 )
 from controllers.common.metrics_logger import MetricsLogger
 from controllers.common.seed import set_all_seeds
-from controllers.common.training_utils import sequence_loss_mask
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
+
+
+def _sequence_loss_mask(valid_mask: torch.Tensor, burn_in: int) -> torch.Tensor:
+    """Create learning mask that excludes burn-in steps from gradient computation."""
+    valid_lengths = valid_mask.sum(dim=1).to(dtype=torch.long)
+    start_index = torch.minimum(torch.full_like(valid_lengths, burn_in), torch.clamp(valid_lengths - 1, min=0))
+    return valid_mask * (torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0) >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)
 _CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 
 
@@ -328,7 +334,7 @@ class PPOAgent:
         if not (torch.isfinite(log_probs_new).all() and torch.isfinite(values).all() and torch.isfinite(entropy).all()):
             return None
         valid_mask = batch["valid_mask"]
-        learn_mask = sequence_loss_mask(valid_mask, self.config.burn_in)
+        learn_mask = _sequence_loss_mask(valid_mask, self.config.burn_in)
         mask_bool = learn_mask > 0
         log_ratio = torch.nan_to_num(log_probs_new - batch["log_probs"], nan=0.0, posinf=20.0, neginf=-20.0).clamp(-20.0, 20.0)
         ratio = torch.exp(log_ratio)
