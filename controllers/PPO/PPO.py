@@ -697,7 +697,6 @@ def train(config=None):
             end_reason=ep_end_reason,
             elapsed_s=round(elapsed, 1),
             recurrent_cell=config.recurrent_cell,
-            replay_buffer_size=0,
             **act_stats,
             **obs_stats,
             **agg_upd,

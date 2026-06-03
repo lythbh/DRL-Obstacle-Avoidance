@@ -8,6 +8,7 @@ paths remain pinned to the specific controller folder.
 
 LLM level: 4 - LLM generated most of logic, minor improvements and complete functional test by us.
 """
+
 from pathlib import Path
 from typing import Any, Dict, Union
 import torch
@@ -56,7 +57,6 @@ def run_checkpoint_path(controller_checkpoints_dir: Path, run_id: str, prefix: s
     str
         The checkpoint file path.
     """
-    
     return str(run_checkpoint_dir(controller_checkpoints_dir, run_id) / f"{prefix}_{run_id}.{extension}")
 
 
@@ -76,7 +76,6 @@ def load_checkpoint(path: str, map_location: Union[str, torch.device]) -> Dict[s
     Dict[str, Any]
         The loaded checkpoint.
     """
-    
     try:
         return torch.load(path, map_location=map_location, weights_only=False)
     except TypeError:
@@ -88,7 +87,7 @@ def make_checkpoint_header(episode: Any, reward: float, goal_episode: bool, algo
     Construct a minimal, consistent checkpoint header used by controllers.
     
     Parameters
-    ---------
+    ----------
     episode : Any
         The episode number.
     reward : float
@@ -105,7 +104,6 @@ def make_checkpoint_header(episode: Any, reward: float, goal_episode: bool, algo
     Dict[str, Any]
         The checkpoint header.
     """
-    
     return {
         "episode": episode,
         "reward": reward,
@@ -136,7 +134,6 @@ def save_checkpoint_file(controller_checkpoints_dir: Path, run_id: str, prefix: 
     str
         The checkpoint file path.
     """
-    
     path = run_checkpoint_path(controller_checkpoints_dir, run_id, prefix)
     torch.save(checkpoint, path)
     
