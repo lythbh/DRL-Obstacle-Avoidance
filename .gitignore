@@ -40,6 +40,7 @@ plots/
 # datasets/
 # logs/
 # runs/
+paper/
 
 #Jupyter Notebook auto-save files
 .ipynb_checkpoints/
