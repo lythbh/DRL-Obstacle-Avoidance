@@ -177,6 +177,7 @@ def train(config=None) -> None:
         agg_upd = MetricsLogger.aggregate_update_metrics(all_update_metrics)
 
         decay_frac = min(1.0, episode / max(1, config.episodes))
+        #Added 1.35 to LSTM as it was unstable and suffered catastrophic forgetting
         arch_scale = {"none": 1.0, "gru": 1.0, "lstm": 1.35}.get(config.recurrent_cell, 1.0)
         base_entropy = d.PPODefaults.entropy_coef * arch_scale
         agent.config.entropy_coef = base_entropy * (1.0 - 0.30 * decay_frac)
