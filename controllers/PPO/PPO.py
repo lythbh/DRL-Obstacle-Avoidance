@@ -192,12 +192,12 @@ def train(config=None) -> None:
         if ep_end_reason == "goal" and ep_sum > best_goal_reward:
             best_goal_reward = ep_sum
             best_goal_episode = episode + 1
-            env.robot.slam.save_episode(env.run_folder, episode + 1, ep_sum)
+            env.robot.mapping.save_episode(env.run_folder, episode + 1, ep_sum)
             _save_checkpoint(agent, best_goal_episode, best_goal_reward, True, "best", run_id)
             ckpt_flags.append("best_goal")
         elif best_goal_episode is None and ep_sum > best_reward:
             best_reward = ep_sum
-            env.robot.slam.save_episode(env.run_folder, episode + 1, ep_sum)
+            env.robot.mapping.save_episode(env.run_folder, episode + 1, ep_sum)
             _save_checkpoint(agent, episode + 1, best_reward, False, "best", run_id)
             ckpt_flags.append("best")
 

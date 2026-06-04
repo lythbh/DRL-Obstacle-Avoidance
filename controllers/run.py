@@ -1,4 +1,5 @@
-"""HPC and local launcher for PPO curriculum training in Webots.
+"""
+HPC and local launcher for PPO curriculum training in Webots.
 
 Usage examples:
   python controllers/run.py submit --sessions 10 --episodes 2500
@@ -7,10 +8,11 @@ Usage examples:
   python controllers/run.py worker --arch gru --seed 0 --worlds worlds/training/train_11_partial_moving.wbt --moving-obstacle-indices "0,1,2,3,4"
   python controllers/run.py worker --arch gru --seed 0 --worlds worlds/training/train_12_all_moving.wbt --moving-obstacle-indices all
   python controllers/run.py worker --arch gru --seed 0 --worlds worlds/training/train_13_moving_goal.wbt --moving-obstacle-indices all --moving-goal
+
+LLM level: 2 - LLM provided run worker function and helped finish the others, mostly written by us and tested by us.
 """
 
 from __future__ import annotations
-
 import argparse
 import gc
 import os
@@ -32,43 +34,120 @@ DEFAULT_ARCHES = ("none", "gru", "lstm")
 
 
 def _default_training_worlds() -> list[str]:
+    """
+    Worlds are sorted numerically, e.g. train_1_empty.wbt, train_2_empty.wbt, ..., train_10_full.wbt.
+
+    Returns
+    -------
+    list[str]
+        List of relative paths to training worlds.
+    """
     def natural_key(path: Path) -> list[object]:
+        """
+        Sorts paths numerically by extracting numbers from filenames.
+        
+        Parameters
+        ----------
+        path : Path
+            Path to a training world file.
+        
+        Returns
+        -------
+        list[object]
+            List of strings and integers for sorting.
+        """
         return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", path.name)]
 
     worlds = sorted(TRAINING_WORLDS_DIR.glob("*.wbt"), key=natural_key)
     if not worlds:
         raise FileNotFoundError(f"No .wbt training worlds found in {TRAINING_WORLDS_DIR}")
+   
     return [str(path.relative_to(REPO_ROOT)) for path in worlds]
 
 
 def _normalize_arch(arch: str) -> str:
+    """
+    Normalizes architecture names to lowercase and handles aliases.
+
+    Parameters
+    ----------
+    arch : str
+        Architecture name to normalize.
+
+    Returns
+    -------
+    str
+        Normalized architecture name.
+    """
     arch = arch.lower().strip()
     aliases = {"mlp": "none", "feedforward": "none", "ff": "none", "rnnless": "none"}
     arch = aliases.get(arch, arch)
     if arch not in {"none", "gru", "lstm"}:
         raise ValueError(f"Unsupported PPO architecture: {arch}")
+    
     return arch
 
 
 def _resolve_worlds(worlds: Iterable[str]) -> list[Path]:
+    """
+    Resolves world paths to absolute paths, checking existence.
+
+    Parameters
+    ----------
+    worlds : Iterable[str]
+        Iterable of world paths to resolve.
+
+    Returns
+    -------
+    list[Path]
+        List of resolved world paths.
+    """
     worlds = list(worlds) if worlds else _default_training_worlds()
     resolved = []
     for world in worlds:
         path = Path(world)
         if not path.is_absolute():
             path = REPO_ROOT / path
+        
         if not path.exists():
             raise FileNotFoundError(f"World does not exist: {path}")
+        
         resolved.append(path)
+    
     return resolved
 
 
 def _checkpoint_path(run_id: str) -> Path:
+    """
+    Checkpoint path for a given run ID.
+
+    Parameters
+    ----------
+    run_id : str
+        Run ID to generate checkpoint path for.
+
+    Returns
+    -------
+    Path
+        Path to checkpoint file.
+    """
     return PPO_CHECKPOINT_DIR / run_id / f"final_{run_id}.pth"
 
 
 def run_worker(args: argparse.Namespace) -> int:
-    """Run one architecture through all worlds serially, resuming between worlds."""
+    """
+    Run one architecture through all worlds serially, resuming between worlds.
+    
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command line arguments.
+
+    Returns
+    -------
+    int
+        Exit code.
+    """
     arch = _normalize_arch(args.arch)
     worlds = _resolve_worlds(args.worlds)
     run_group = args.run_group or datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -85,14 +164,18 @@ def run_worker(args: argparse.Namespace) -> int:
         env["PPO_RUN_ID"] = run_id
         if args.episodes is not None:
             env["PPO_EPISODES"] = str(args.episodes)
+        
         if args.max_steps is not None:
             env["PPO_MAX_STEPS"] = str(args.max_steps)
+        
         if previous_checkpoint is not None:
             env["PPO_LOAD_MODEL"] = str(previous_checkpoint)
+        
         if args.moving_obstacle_indices is not None:
             env["PPO_MOVING_OBSTACLE_INDICES"] = args.moving_obstacle_indices
             env["PPO_MOVING_OBSTACLE_SPEED"] = str(args.moving_obstacle_speed)
             env["PPO_MOVING_OBSTACLE_AMPLITUDE"] = str(args.moving_obstacle_amplitude)
+        
         if args.moving_goal:
             env["PPO_MOVING_GOAL"] = "1"
             env["PPO_MOVING_GOAL_SPEED"] = str(args.moving_goal_speed)
@@ -115,12 +198,15 @@ def run_worker(args: argparse.Namespace) -> int:
         print(f"[RUN] arch={arch} seed={args.seed} stage={stage_index}/{len(worlds)} world={world}", flush=True)
         if previous_checkpoint:
             print(f"[RUN] resuming from {previous_checkpoint}", flush=True)
+        
         result = subprocess.run(cmd, cwd=REPO_ROOT, env=env, check=False)
         time.sleep(5)
         gc.collect()
+        
         if result.returncode != 0:
             print(f"[RUN] Webots failed with exit code {result.returncode}: {world}", file=sys.stderr, flush=True)
             return result.returncode
+        
         if not final_checkpoint.exists():
             print(f"[RUN] Missing expected final checkpoint: {final_checkpoint}", file=sys.stderr, flush=True)
             return 2
@@ -128,6 +214,7 @@ def run_worker(args: argparse.Namespace) -> int:
         print(f"[RUN] completed stage checkpoint={final_checkpoint}", flush=True)
 
     print(f"[RUN] curriculum complete arch={arch} seed={args.seed}", flush=True)
+    
     return 0
 
 
@@ -140,6 +227,29 @@ def _worker_command(
     episodes: int | None,
     max_steps: int | None,
 ) -> str:
+    """
+    Worker command for a single curriculum stage.
+
+    Parameters
+    ----------
+    arch : str
+        Architecture name (e.g. "PPO").
+    seed : int
+        Random seed.
+    run_group : str
+        Run group name.
+    worlds : list[str]
+        List of world files.
+    episodes : int | None
+        Number of episodes to run.
+    max_steps : int | None
+        Maximum number of steps per episode.
+
+    Returns
+    -------
+    str
+        Command to run.
+    """
     cmd = [
         "python",
         "controllers/run.py",
@@ -153,14 +263,36 @@ def _worker_command(
     ]
     if episodes is not None:
         cmd.extend(["--episodes", str(episodes)])
+    
     if max_steps is not None:
         cmd.extend(["--max-steps", str(max_steps)])
+    
     cmd.append("--worlds")
     cmd.extend(worlds)
+    
     return shlex.join(cmd)
 
 
 def _sbatch_command(args: argparse.Namespace, *, arch: str, seed: int, run_group: str) -> list[str]:
+    """
+    Constructs an sbatch command for a single curriculum stage.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command line arguments.
+    arch : str
+        Architecture name (e.g. "PPO").
+    seed : int
+        Random seed.
+    run_group : str
+        Run group name.
+
+    Returns
+    -------
+    list[str]
+        Command to run.
+    """
     job_name = f"drl_ppo_{arch}_s{seed:02d}"
     worker_command = _worker_command(
         arch=arch,
@@ -170,6 +302,7 @@ def _sbatch_command(args: argparse.Namespace, *, arch: str, seed: int, run_group
         episodes=args.episodes,
         max_steps=args.max_steps,
     )
+
     return [
         "sbatch",
         "--job-name",
@@ -193,8 +326,22 @@ def _sbatch_command(args: argparse.Namespace, *, arch: str, seed: int, run_group
 
 
 def run_submit(args: argparse.Namespace) -> int:
+    """
+    Submit multiple sbatch jobs for curriculum training.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command line arguments.
+    
+    Returns
+    -------
+    int
+        Exit code.
+    """
     if not SLURM_SCRIPT.exists():
         raise FileNotFoundError(f"Missing SLURM script: {SLURM_SCRIPT}")
+    
     arches = [_normalize_arch(arch) for arch in args.arches]
     args.worlds = args.worlds or _default_training_worlds()
     run_group = args.run_group or datetime.now().strftime("hpc_%Y%m%d_%H%M%S")
@@ -208,15 +355,25 @@ def run_submit(args: argparse.Namespace) -> int:
     if args.no_submit:
         for command in commands:
             print(shlex.join(command), flush=True)
+        
         return 0
 
     for command in commands:
         print(f"[RUN] {shlex.join(command)}", flush=True)
         subprocess.run(command, cwd=REPO_ROOT, check=True)
+    
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """
+    Build CLI argument parser.
+
+    Returns
+    -------
+    argparse.ArgumentParser
+        CLI argument parser.
+    """
     parser = argparse.ArgumentParser(description="Launch PPO Webots curriculum training.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -255,6 +412,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """
+    Main entry point for CLI.
+
+    Parameters
+    ----------
+    argv : list[str] | None
+        Command line arguments. If None, uses sys.argv[1:].
+    
+    Returns
+    -------
+    int
+        Exit code.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

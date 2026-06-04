@@ -1,39 +1,20 @@
-﻿"""Webots simulation stack for the ALTINO robot."""
+﻿"""
+Webots simulation stack for the ALTINO robot.
+
+LLM level: 4 - LLM wrote majority of file, we debuged and made it work for our usecase.
+"""
 
 import math
 import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
-
 import numpy as np
 
 from controller import Supervisor # type: ignore
-
-_SLAM_IMPORT_ERROR: Optional[Exception] = None
-try:
-    from controllers.state_estimation.imu_filter import IMUProcessor, IMUState
-    from controllers.state_estimation.iekf_backend import IEKFBackend
-    from controllers.state_estimation.mapping import SLAMMap
-    _SLAM_AVAILABLE = True
-except ImportError as _slam_err:
-    _SLAM_AVAILABLE = False
-    _SLAM_IMPORT_ERROR = _slam_err
-
-_SLAM_STATUS_REPORTED = False
-
-
-def _report_slam_status() -> None:
-    """Report SLAM availability status once at startup."""
-    global _SLAM_STATUS_REPORTED
-    if _SLAM_STATUS_REPORTED:
-        return
-    _SLAM_STATUS_REPORTED = True
-    if not _SLAM_AVAILABLE:
-        print(
-            f"[ENV] WARNING: SLAM modules unavailable ({_SLAM_IMPORT_ERROR}); using basic sensor processing.",
-            flush=True,
-        )
+from controllers.state_estimation.imu_filter import IMUProcessor
+from controllers.state_estimation.iekf_backend import IEKFBackend
+from controllers.state_estimation.mapping import MappingMap
 
 _supervisor: Optional[Supervisor] = None
 
@@ -46,8 +27,10 @@ def _init_supervisor() -> None:
     _supervisor = supervisor
 
 
-class SLAMProcessor:
-    """IMU filtering + IEKF heading + optional occupancy map for visualization."""
+class MappingProcessor:
+    """
+    IMU filtering + IEKF heading + optional occupancy map for visualization.
+    """
 
     WHEEL_RADIUS: float = 0.033
     N_SECTORS: int = 16
@@ -62,7 +45,26 @@ class SLAMProcessor:
         enabled: bool = True,
         save_episodes: bool = False,
     ) -> None:
-        """Initialize SLAM processor with IMU filtering, IEKF backend, and occupancy mapping."""
+        """
+        Initialize mapping processor with IMU filtering, IEKF backend, and occupancy mapping.
+        
+        Parameters
+        ----------
+        lidar_max_range: float
+            Maximum range of the LiDAR sensor in meters.
+        lidar_fov: float
+            Field of view of the LiDAR sensor in radians.
+        dt: float
+            Time step for the simulation in seconds.
+        goal: Tuple[float, float], optional
+            Goal position for the robot in meters, by default (0.0, 0.0).
+        lidar_sector_dim: int, optional
+            Number of sectors for LiDAR data, by default N_SECTORS.
+        enabled: bool, optional
+            Whether to enable the mapping processor, by default True.
+        save_episodes: bool, optional
+            Whether to save episodes to disk, by default False.
+        """
         self._dt = dt
         self._lidar_max_range = lidar_max_range
         self._lidar_max_range_inv = 1.0 / max(lidar_max_range, 1e-6)
@@ -70,7 +72,7 @@ class SLAMProcessor:
         self._lidar_angles: Optional[np.ndarray] = None
         self._goal = goal
         self.n_sectors = int(lidar_sector_dim)
-        self.enabled = bool(enabled) and _SLAM_AVAILABLE
+        self.enabled = bool(enabled)
         self.save_episodes = bool(save_episodes) and self.enabled
         if self.n_sectors <= 0:
             raise ValueError(f"lidar_sector_dim must be positive, got {lidar_sector_dim}.")
@@ -78,60 +80,123 @@ class SLAMProcessor:
         if self.enabled:
             self.imu_proc: Any = IMUProcessor(dt=dt)
             self.iekf: Any = IEKFBackend()
-            self.slam_map: Any = SLAMMap(map_resolution=0.05) if self.save_episodes else None
+            self.mapping_map: Any = MappingMap(map_resolution=0.05) if self.save_episodes else None
         else:
             self.imu_proc = None
             self.iekf = None
-            self.slam_map = None
+            self.mapping_map = None
+
 
     def reset(self, init_pos: np.ndarray, init_heading: float) -> None:
-        """Reset IMU processor and IEKF backend with initial position and heading."""
+        """
+        Reset IMU processor and IEKF backend with initial position and heading.
+        
+        Parameters
+        ---------
+        init_pos: np.ndarray
+            Initial position of the robot in meters.
+        init_heading: float
+            Initial heading of the robot in radians.
+        """
         if not self.enabled or self.imu_proc is None:
             return
+        
         self.imu_proc.reset()
         self.iekf = IEKFBackend(
             init_pos=init_pos.astype(np.float64),
             init_heading=float(init_heading),
         )
 
+
     def reset_map(self) -> None:
-        """Clear occupancy grid map and reset SLAM state."""
+        """
+        Clear occupancy grid map and reset mapping state.
+        """
         if self.save_episodes:
-            self.slam_map = SLAMMap(map_resolution=0.05)
+            self.mapping_map = MappingMap(map_resolution=0.05)
+
 
     def save_episode(self, run_folder: str, episode: int, reward: float = 0.0) -> None:
-        """Save occupancy map visualization for the episode."""
-        if not self.save_episodes or self.slam_map is None:
+        """
+        Save occupancy map visualization for the episode.
+        
+        Parameters
+        ---------
+        run_folder: str
+            Path to the run folder.
+        episode: int
+            Episode number.
+        reward: float, optional
+            Episode reward, by default 0.0.
+        """
+        if not self.save_episodes or self.mapping_map is None:
             return
+        
         path = os.path.join(run_folder, f"episode_{episode:04d}_reward_{reward:.0f}.png")
-        self.slam_map.save_plot(path, goal=self._goal)
+        self.mapping_map.save_plot(path, goal=self._goal)
+
 
     def sector_lidar(self, raw_ranges: np.ndarray) -> np.ndarray:
-        """Bin raw lidar ranges into equal sectors and normalize by max range."""
+        """
+        Bin raw lidar ranges into equal sectors and normalize by max range.
+        
+        Parameters
+        ----------
+        raw_ranges: np.ndarray
+            Raw lidar ranges in meters.
+        
+        Returns
+        -------
+        np.ndarray
+            Sectorized lidar ranges normalized to [0, 1].
+        """
         valid = np.where((raw_ranges > 0.01) & np.isfinite(raw_ranges), raw_ranges, self._lidar_max_range)
         remainder = len(valid) % self.n_sectors
         if remainder:
             valid = np.concatenate(
                 [valid, np.full(self.n_sectors - remainder, self._lidar_max_range, dtype=np.float32)]
             )
+        
         sectors = valid.reshape(self.n_sectors, -1).min(axis=1)
+        
         return np.clip(sectors * self._lidar_max_range_inv, 0.0, 1.0).astype(np.float32)
 
+
     def _scan_to_world(self, raw_ranges: np.ndarray, pos: np.ndarray, heading: float) -> np.ndarray:
-        """Transform lidar scan points from robot frame to world frame using position and heading."""
+        """
+        Transform lidar scan points from robot frame to world frame using position and heading.
+        
+        Parameters
+        ----------
+        raw_ranges: np.ndarray
+            Raw lidar ranges in meters.
+        pos: np.ndarray
+            Robot position in world frame.
+        heading: float
+            Robot heading in radians.
+
+        Returns
+        -------
+        np.ndarray
+            Lidar scan points in world frame.
+        """
         n = len(raw_ranges)
         if self._lidar_angles is None or len(self._lidar_angles) != n:
             self._lidar_angles = np.linspace(
                 -self._lidar_fov / 2.0, self._lidar_fov / 2.0, n, dtype=np.float32,
             )
+        
         mask = (raw_ranges > 0.01) & np.isfinite(raw_ranges)
         r = raw_ranges[mask]
         assert self._lidar_angles is not None
+        
         a = self._lidar_angles[mask]
         c, s = float(np.cos(heading)), float(np.sin(heading))
         xl = r * np.cos(a);  yl = r * np.sin(a)
         xw = c * xl - s * yl + pos[0];  yw = s * xl + c * yl + pos[1]
+        
         return np.column_stack([xw, yw]).astype(np.float32)
+
 
     def process(
         self,
@@ -141,7 +206,27 @@ class SLAMProcessor:
         cmd_speed_rads: float,
         gps_pos: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, Any]:
-        """Process sensor data: compute lidar sectors, update IMU/IEKF, add keyframes to occupancy map."""
+        """
+        Process sensor data: compute lidar sectors, update IMU/IEKF, add keyframes to occupancy map.
+        
+        Parameters
+        ----------
+        raw_ranges: np.ndarray
+            Raw lidar ranges in meters.
+        accel: np.ndarray
+            Accelerometer data in m/s².
+        gyro: np.ndarray
+            Gyroscope data in rad/s.
+        cmd_speed_rads: float
+            Commanded speed in rad/s.
+        gps_pos: Optional[np.ndarray]
+            GPS position in world frame. If None, use IEKF position.
+
+        Returns
+        -------
+        Tuple[np.ndarray, Any]
+            Lidar sectors and IMU state.
+        """
         lidar_sectors = self.sector_lidar(raw_ranges)
 
         if not self.enabled or self.imu_proc is None or self.iekf is None:
@@ -150,21 +235,31 @@ class SLAMProcessor:
         imu_state = self.imu_proc.step(gyro, accel)
         self.iekf.propagate_odom(cmd_speed_rads * self.WHEEL_RADIUS, float(gyro[2]), self._dt)
 
-        if self.slam_map is not None:
+        if self.mapping_map is not None:
             pos = gps_pos if gps_pos is not None else self.iekf.state.position
             pts_2d = self._scan_to_world(raw_ranges, pos, self.iekf.state.heading)
-            self.slam_map.try_add_keyframe(float(pos[0]), float(pos[1]), self.iekf.state.heading, scan_points=pts_2d)
+            self.mapping_map.try_add_keyframe(float(pos[0]), float(pos[1]), self.iekf.state.heading, scan_points=pts_2d)
 
         return lidar_sectors, imu_state
 
 
 class AltinoDriver:
-    """High-level robot control interface."""
+    """
+    High-level robot control interface.
+    """
 
     def __init__(self, config: Any):
-        """Initialize ALTINO robot driver with steering, wheels, sensors, and SLAM processor."""
+        """
+        Initialize ALTINO robot driver with steering, wheels, sensors, and mapping processor.
+        
+        Parameters
+        ---------
+        config: Any
+            Configuration object with robot parameters.
+        """
         global _supervisor
         assert _supervisor is not None, "Supervisor not initialized. Call _init_supervisor() first."
+        
         self.supervisor = _supervisor
         self.config = config
         self.timestep = int(self.supervisor.getBasicTimeStep())
@@ -207,7 +302,7 @@ class AltinoDriver:
 
         self._cmd_speed_rads = 0.0
 
-        self.slam = SLAMProcessor(
+        self.mapping = MappingProcessor(
             lidar_max_range=self.lidar_max_range,
             lidar_fov=self.lidar.getFov(),
             dt=self._dt,
@@ -231,36 +326,79 @@ class AltinoDriver:
         self._goal_base: Optional[List[float]] = None
         self._cache_dynamic_nodes()
 
+
     def set_steering(self, angle: float) -> None:
-        """Set steering angle for both left and right wheels."""
+        """
+        Set steering angle for both left and right wheels.
+        
+        Parameters
+        ----------
+        angle: float
+            Steering angle in radians.
+        """
         self.left_steer.setPosition(angle)
         self.right_steer.setPosition(angle)
 
+
     def set_speed(self, speed: float) -> None:
-        """Set velocity target for all four wheels (front and rear)."""
+        """
+        Set velocity target for all four wheels (front and rear).
+        
+        Parameters
+        ---------
+        speed: float
+            Target speed in radians per second.
+        """
         for motor in self.wheels:
             motor.setVelocity(speed)
 
+
     def stop(self) -> None:
-        """Stop the robot by setting steering to zero and speed to zero."""
+        """
+        Stop the robot by setting steering to zero and speed to zero.
+        """
         self.set_steering(0.0)
         self.set_speed(0.0)
 
+
     def step(self, timestep: int) -> int:
-        """Advance simulation by one timestep."""
+        """
+        Advance simulation by one timestep.
+        
+        Parameters
+        ---------
+        timestep: int
+            Simulation timestep in milliseconds.
+
+        Returns
+        -------
+        int
+            The number of milliseconds until the next step.
+        """
         return self.supervisor.step(timestep)
 
+
     def _get_heading(self) -> float:
-        """Extract yaw angle from robot's rotation matrix representation."""
+        """
+        Extract yaw angle from robot's rotation matrix representation.
+
+        Returns
+        -------
+        float
+            Yaw angle in radians.
+        """
         if self.rotation_field is None:
             return 0.0
+        
         rotation = self.rotation_field.getSFRotation()
         if rotation is None or len(rotation) < 4:
             return 0.0
+        
         x, y, z, angle = map(float, rotation)
         axis_norm = np.sqrt(x * x + y * y + z * z)
         if axis_norm < 1e-8:
             return 0.0
+        
         x /= axis_norm
         y /= axis_norm
         z /= axis_norm
@@ -270,16 +408,28 @@ class AltinoDriver:
         r00 = c + x * x * one_c
         r10 = z * s + y * x * one_c
         yaw = float(np.arctan2(r10, r00))
+        
         return float(np.arctan2(np.sin(yaw), np.cos(yaw)))
 
-    def reset_slam(self) -> None:
-        """Reset SLAM state with current GPS position and computed heading."""
+
+    def reset_mapping(self) -> None:
+        """
+        Reset mapping state with current GPS position and computed heading.
+        """
         gps_vals = self.gps.getValues()
         init_pos = np.array([gps_vals[0], gps_vals[1]], dtype=np.float32)
-        self.slam.reset(init_pos, self._get_heading())
+        self.mapping.reset(init_pos, self._get_heading())
+
 
     def read_sensors(self) -> Tuple[np.ndarray, np.ndarray, float, Any, bool]:
-        """Read all robot sensors: lidar, GPS, accelerometer, gyro; process through SLAM."""
+        """
+        Read all robot sensors: lidar, GPS, accelerometer, gyro, process through mapping.
+        
+        Returns
+        -------
+        Tuple[np.ndarray, np.ndarray, float, Any, bool]
+            lidar_sectors, pos, heading, imu_state, collision
+        """
         raw_ranges = np.array(self.lidar.getRangeImage(), dtype=np.float32)
         gps_values = self.gps.getValues()
         pos = np.array([gps_values[0], gps_values[1]], dtype=np.float32)
@@ -290,15 +440,19 @@ class AltinoDriver:
             gyro = np.array([gyro_values[0], gyro_values[1], gyro_values[2]], dtype=np.float32)
         else:
             gyro = np.zeros(3, dtype=np.float32)
+        
         valid = raw_ranges[raw_ranges > 0.01]
         collision = bool(len(valid) > 0 and float(valid.min()) < self.config.collision_threshold)
 
-        lidar_sectors, imu_state = self.slam.process(raw_ranges, accel, gyro, self._cmd_speed_rads, gps_pos=pos)
-        heading = (self.slam.iekf.state.heading
-                   if (_SLAM_AVAILABLE and self.slam.iekf is not None)
+        lidar_sectors, imu_state = self.mapping.process(raw_ranges, accel, gyro, self._cmd_speed_rads, gps_pos=pos)
+        heading = (self.mapping.iekf.state.heading
+                   if self.mapping.iekf is not None
                    else self._get_heading())
+        
         return lidar_sectors, pos, heading, imu_state, collision
 
+
+    _DYNAMIC_OBS_MAX: int = 18
     _OBSTACLE_DEFS: List[Tuple[str, float]] = [
         ("OBS_BARREL",   0.0),
         ("OBS_CONE",     0.0),
@@ -317,8 +471,21 @@ class AltinoDriver:
         ("OBS_BOX_3",    0.15),
     ]
 
+
     def randomize_goal(self, y_range: float = 1.5) -> np.ndarray:
-        """Randomise goal y-position and move the barrier wall gap to match."""
+        """
+        Randomise goal y-position and move the barrier wall gap to match.
+        
+        Parameters
+        ----------
+        y_range : float
+            Half the total y-range of the goal position.
+
+        Returns
+        -------
+        np.ndarray
+            The goal position.
+        """
         goal_x = float(self.config.endpoint[0])
         goal_y = float(np.random.uniform(-y_range, y_range))
         wall_x = goal_x - 0.5
@@ -333,8 +500,11 @@ class AltinoDriver:
 
         return np.array([goal_x, goal_y], dtype=np.float32)
 
+
     def randomize_obstacles(self) -> None:
-        """Move each obstacle into the travel corridor with 75 % probability."""
+        """
+        Move each obstacle into the travel corridor with 75 % probability.
+        """
         start_xy = np.array(self.config.start_position[:2], dtype=np.float32)
         goal_xy  = np.array(self.config.endpoint, dtype=np.float32)
         placed: List[np.ndarray] = []
@@ -343,6 +513,7 @@ class AltinoDriver:
             node = self.supervisor.getFromDef(def_name)
             if node is None:
                 continue
+            
             field = node.getField("translation")
             for _ in range(60):
                 if np.random.random() < 0.75:
@@ -351,19 +522,26 @@ class AltinoDriver:
                 else:
                     x = float(np.random.uniform(-2.2, 2.2))
                     y = float(np.random.uniform(-2.2, 2.2))
+                
                 pos = np.array([x, y])
                 if np.linalg.norm(pos - start_xy) < 1.0:
                     continue
+                
                 if np.linalg.norm(pos - goal_xy) < 1.0:
                     continue
+                
                 if any(np.linalg.norm(pos - p) < 0.45 for p in placed):
                     continue
+                
                 field.setSFVec3f([x, y, z])
                 placed.append(pos)
                 break
 
+
     def reset_position(self) -> None:
-        """Reset robot to start position and rotation with added noise."""
+        """
+        Reset robot to start position and rotation with added noise.
+        """
         if self.translation_field is not None and self.rotation_field is not None:
             start_position_values = self.config.start_position or [-2.0, 0.0, 0.02]
             start_rotation_values = self.config.start_rotation or [0.0, 0.0, 1.0, 0.0]
@@ -389,10 +567,11 @@ class AltinoDriver:
         else:
             print("[ENV] WARNING: cannot reset; ALTINO node not accessible!", flush=True)
 
-    _DYNAMIC_OBS_MAX: int = 18
 
     def _cache_dynamic_nodes(self) -> None:
-        """Cache base translations of TR_OBS_N and GOAL_MARKER for motion updates."""
+        """
+        Cache base translations of TR_OBS_N and GOAL_MARKER for motion updates.
+        """
         self._tr_obs_bases.clear()
         for i in range(1, self._DYNAMIC_OBS_MAX + 1):
             def_name = f"TR_OBS_{i}"
@@ -405,34 +584,55 @@ class AltinoDriver:
         if goal_node is not None:
             self._goal_base = list(goal_node.getField("translation").getSFVec3f())
 
-    def update_moving_obstacles(
-        self,
-        sim_time: float,
-        indices: List[int],
-        speed: float,
-        amplitude: float,
-    ) -> None:
-        """Apply sinusoidal y-oscillation to the specified obstacle indices."""
+
+    def update_moving_obstacles(self, sim_time: float, indices: List[int], speed: float, amplitude: float) -> None:
+        """
+        Apply sinusoidal y-oscillation to the specified obstacle indices.
+        
+        Parameters
+        ----------
+        sim_time : float
+            Current simulation time.
+        indices : List[int]
+            Indices of obstacles to move.
+        speed : float
+            Oscillation speed.
+        amplitude : float
+            Oscillation amplitude.
+        """
         for i in indices:
             def_name = f"TR_OBS_{i + 1}"
             base = self._tr_obs_bases.get(def_name)
             if base is None:
                 continue
+            
             node = self.supervisor.getFromDef(def_name)
             if node is None:
                 continue
+            
             phase = base[0] * 1.5
             new_y = base[1] + amplitude * math.sin(speed * sim_time + phase)
             node.getField("translation").setSFVec3f([base[0], new_y, base[2]])
 
-    def update_moving_goal(
-        self,
-        sim_time: float,
-        speed: float,
-        amplitude: float,
-    ) -> Tuple[float, float]:
-        """Move GOAL_MARKER and barrier walls with sinusoidal y-oscillation.
+
+    def update_moving_goal(self, sim_time: float, speed: float, amplitude: float) -> Tuple[float, float]:
+        """
+        Move GOAL_MARKER and barrier walls with sinusoidal y-oscillation.
         Returns the new (goal_x, goal_y).
+        
+        Parameters
+        ----------
+        sim_time : float
+            Current simulation time.
+        speed : float
+            Oscillation speed.
+        amplitude : float
+            Oscillation amplitude.
+
+        Returns
+        -------
+        Tuple[float, float]
+            New (goal_x, goal_y) coordinates.
         """
         if self._goal_base is None:
             return (float(self.config.endpoint[0]), float(self.config.endpoint[1]))
@@ -450,6 +650,7 @@ class AltinoDriver:
         bot = self.supervisor.getFromDef("BARRIER_BOTTOM")
         if top is not None:
             top.getField("translation").setSFVec3f([wall_x, new_y + half_span, 0.25])
+        
         if bot is not None:
             bot.getField("translation").setSFVec3f([wall_x, new_y - half_span, 0.25])
 
@@ -457,11 +658,21 @@ class AltinoDriver:
 
 
 class WebotsEnv:
-    """Webots simulation environment for ALTINO obstacle avoidance."""
+    """
+    Webots simulation environment for ALTINO obstacle avoidance.
+    """
 
-    def __init__(self, config: Any, reward_computer: Any):
-        """Initialize Webots environment with robot, reward computer, and observation builders."""
-        _report_slam_status()
+    def __init__(self, config: Any, reward_computer: Any) -> None:
+        """
+        Initialize Webots environment with robot, reward computer, and observation builders.
+        
+        Parameters
+        ---------
+        config : Any
+            Configuration object with environment settings.
+        reward_computer : Any
+            Reward computation module.
+        """
         self.config = config
         self.action_dim = 2
         self._lidar_sector_dim = int(config.lidar_sector_dim)
@@ -469,8 +680,10 @@ class WebotsEnv:
         self._imu_feature_dim = int(config.imu_feature_dim)
         if self._lidar_sector_dim <= 0:
             raise ValueError(f"lidar_sector_dim must be positive, got {config.lidar_sector_dim}.")
+        
         if self._pose_goal_dim != 5:
             raise ValueError(f"pose_goal_dim must be 5 for the active observation schema, got {config.pose_goal_dim}.")
+        
         if self._imu_feature_dim != 10:
             raise ValueError(f"imu_feature_dim must be 10 for the active observation schema, got {config.imu_feature_dim}.")
 
@@ -479,8 +692,10 @@ class WebotsEnv:
             grid_shape = tuple(int(dim) for dim in config.occupancy_grid_shape)
             if len(grid_shape) not in {2, 3} or any(dim <= 0 for dim in grid_shape):
                 raise ValueError(f"Invalid occupancy_grid_shape {config.occupancy_grid_shape}.")
+            
             if len(grid_shape) == 3 and grid_shape[0] != 1:
                 raise ValueError("WebotsEnv emits a single occupancy channel; use shape (1, H, W).")
+            
             self._occupancy_grid_shape = grid_shape
 
         self._occupancy_grid_size = (
@@ -489,6 +704,7 @@ class WebotsEnv:
         self.observation_size = (
             self._lidar_sector_dim + self._pose_goal_dim + self._imu_feature_dim + self._occupancy_grid_size
         )
+
         self._endpoint = np.array(config.endpoint, dtype=np.float32)
         self._reference_distance = float(config.reference_distance if config.reference_distance is not None else 1.0)
         self.robot = AltinoDriver(config)
@@ -508,23 +724,44 @@ class WebotsEnv:
         self.prev_distance: Optional[float] = None
         self.was_in_goal: bool = False
         self.last_min_lidar_norm: float = 1.0
-
         self._run_folder: Optional[str] = None
+
 
     @property
     def run_folder(self) -> str:
+        """
+        Return the run folder path, creating it if it doesn't exist.
+        
+        Returns
+        -------
+        str
+            Path to the run folder.
+        """
         if self._run_folder is None:
             ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             _repo_root = Path(__file__).parent.parent.parent
             self._run_folder = str(_repo_root / "plots" / ts)
+        
         return self._run_folder
+
 
     @run_folder.setter
     def run_folder(self, value: str) -> None:
+        """
+        Run folder setter.
+
+        Parameters
+        ---------
+        value : str
+            Path to the run folder.
+        """
         self._run_folder = value
 
+
     def _sync_endpoint_from_world(self) -> None:
-        """Read GOAL_MARKER position from world file and update self._endpoint."""
+        """
+        Read GOAL_MARKER position from world file and update self._endpoint.
+        """
         goal_node = self.robot.supervisor.getFromDef("GOAL_MARKER")
         if goal_node is not None:
             translation = goal_node.getField("translation").getSFVec3f()
@@ -534,16 +771,39 @@ class WebotsEnv:
             start_xy = np.array(self.config.start_position[:2], dtype=np.float32)
             self._reference_distance = float(np.linalg.norm(start_xy - goal_xy))
 
+
     def _goal_geometry(self, pos: np.ndarray, heading: float) -> Tuple[float, float]:
-        """Compute distance and direction error to goal from current position and heading."""
+        """
+        Compute distance and direction error to goal from current position and heading.
+        
+        Parameters
+        ----------
+        pos : np.ndarray
+            Current position (x, y).
+        heading : float
+            Current heading in radians.
+
+        Returns
+        -------
+        Tuple[float, float]
+            Distance to goal and direction error in radians.
+        """
         goal_vec = self._endpoint - pos
         goal_distance = float(np.linalg.norm(goal_vec))
         goal_direction = float(np.arctan2(goal_vec[1], goal_vec[0]))
         goal_error = float(np.arctan2(np.sin(goal_direction - heading), np.cos(goal_direction - heading)))
         return goal_distance, goal_error
 
+
     def _occupancy_grid_observation(self) -> np.ndarray:
-        """Extract occupancy grid features from SLAM map or generate default empty grid."""
+        """
+        Extract occupancy grid features from mapping map or generate default empty grid.
+        
+        Returns
+        -------
+        np.ndarray
+            Occupancy grid features.
+        """
         if self._occupancy_grid_shape is None:
             return np.empty((0,), dtype=np.float32)
 
@@ -553,8 +813,8 @@ class WebotsEnv:
             _, height, width = self._occupancy_grid_shape
 
         log_odds: Optional[np.ndarray] = None
-        if _SLAM_AVAILABLE and self.robot.slam.slam_map is not None:
-            log_odds = self.robot.slam.slam_map.occ_map.log_odds
+        if self.robot.mapping.mapping_map is not None:
+            log_odds = self.robot.mapping.mapping_map.occ_map.log_odds
 
         if log_odds is None:
             grid_2d = np.full((height, width), 0.5, dtype=np.float32)
@@ -567,10 +827,30 @@ class WebotsEnv:
         grid_2d = np.nan_to_num(np.clip(grid_2d, 0.0, 1.0), nan=0.5, posinf=1.0, neginf=0.0)
         if len(self._occupancy_grid_shape) == 3:
             return grid_2d.reshape(1, height, width).reshape(-1)
+        
         return grid_2d.reshape(-1)
 
-    def _build_observation(self, lidar_sectors, pos, heading, imu_state):
-        """Combine lidar, position, heading, IMU, and occupancy grid into observation vector."""
+
+    def _build_observation(self, lidar_sectors, pos, heading, imu_state) -> np.ndarray:
+        """
+        Combine lidar, position, heading, IMU, and occupancy grid into observation vector.
+        
+        Parameters
+        ----------
+        lidar_sectors : np.ndarray
+            Lidar sector measurements.
+        pos : np.ndarray
+            Robot position.
+        heading : float
+            Robot heading in radians.
+        imu_state : Optional[IMUState]
+            IMU state if available.
+        
+        Returns
+        -------
+        np.ndarray
+            Observation vector.
+        """
         goal_distance, goal_error = self._goal_geometry(pos, heading)
 
         direction_features = np.array([
@@ -579,7 +859,7 @@ class WebotsEnv:
             goal_distance / max(self._reference_distance, 1e-6),
         ], dtype=np.float32)
 
-        if _SLAM_AVAILABLE and imu_state is not None:
+        if imu_state is not None:
             accel_norm = np.clip(imu_state.accel_body, -10.0, 10.0) / 10.0
             gyro_norm = np.clip(imu_state.gyro_body, -np.pi, np.pi) / np.pi
             quat = imu_state.quaternion.astype(np.float32)
@@ -600,11 +880,20 @@ class WebotsEnv:
             raise RuntimeError(
                 f"Observation size {observation.size} does not match configured size {self.observation_size}."
             )
+        
         return np.nan_to_num(observation, nan=0.0, posinf=1.0, neginf=-1.0)
 
+
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
-        """Reset environment to start state, return initial observation and info."""
-        self.robot.slam.reset_map()
+        """
+        Reset environment to start state, return initial observation and info.
+        
+        Returns
+        -------
+        Tuple[np.ndarray, Dict[str, Any]]
+            Initial observation and info dictionary.
+        """
+        self.robot.mapping.reset_map()
         self.robot.stop()
 
         if getattr(self.config, "randomize_goal", False):
@@ -612,7 +901,7 @@ class WebotsEnv:
             new_goal = self.robot.randomize_goal(y_range=y_range)
             self._endpoint = new_goal
             self.reward_computer.endpoint = new_goal
-            self.robot.slam._goal = tuple(new_goal.tolist())
+            self.robot.mapping._goal = tuple(new_goal.tolist())
             start_xy = np.array(self.config.start_position[:2], dtype=np.float32)
             self._reference_distance = float(np.linalg.norm(start_xy - new_goal))
 
@@ -633,7 +922,7 @@ class WebotsEnv:
         for _ in range(self.config.reset_settle_steps):
             self.robot.step(self.timestep)
 
-        self.robot.reset_slam()
+        self.robot.reset_mapping()
 
         lidar_sectors, pos, heading, imu_state, collision = self.robot.read_sensors()
         self.current_pos = pos
@@ -647,11 +936,25 @@ class WebotsEnv:
         observation = self._build_observation(lidar_sectors, pos, heading, imu_state)
         return observation, {}
 
+
     def step(self, action: Union[np.ndarray, List[float], Tuple[float, float]]) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
-        """Execute action, compute reward, check termination, and return observation and info."""
+        """
+        Execute action, compute reward, check termination, and return observation and info.
+        
+        Parameters
+        ----------
+        action : Union[np.ndarray, List[float], Tuple[float, float]]
+            Action to execute, either as numpy array, list, or tuple of [steering, speed].
+
+        Returns
+        -------
+        Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]
+            Observation, reward, terminated, truncated, and info dictionary.
+        """
         action_arr = np.asarray(action, dtype=np.float32).reshape(-1)
         if action_arr.size != 2:
             raise ValueError(f"Expected action with 2 elements [steering, speed], got shape {action_arr.shape}")
+        
         steering = float(np.clip(action_arr[0], -self.config.max_steering_angle, self.config.max_steering_angle))
         requested_speed = float(np.clip(action_arr[1], self.config.min_speed, self.config.max_speed))
         steering_norm = abs(steering) / max(self.config.max_steering_angle, 1e-6)
@@ -671,6 +974,7 @@ class WebotsEnv:
                 self.config.moving_obstacle_speed,
                 self.config.moving_obstacle_amplitude,
             )
+       
         if self.config.moving_goal:
             new_goal = self.robot.update_moving_goal(
                 self._sim_time,
@@ -744,4 +1048,5 @@ class WebotsEnv:
             self.robot.stop()
 
         observation = self._build_observation(lidar_sectors, pos, heading, imu_state)
+        
         return observation, reward, terminated, truncated, info

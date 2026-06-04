@@ -176,7 +176,7 @@ class OccupancyMap:
         return cells
 
 
-class SLAMMap:
+class MappingMap:
     """
     Occupancy grid + keyframe trajectory tracker.
     """
@@ -186,7 +186,7 @@ class SLAMMap:
 
     def __init__(self, map_resolution: float = 0.05) -> None:
         """
-        Initialize SLAM map with occupancy grid and trajectory storage.
+        Initialize mapping map with occupancy grid and trajectory storage.
         
         Parameters
         ----------
@@ -227,7 +227,7 @@ class SLAMMap:
         
         return True
 
-    def save_plot(self, output_path: str = "slam_map.png", goal: Optional[Tuple[float, float]] = None) -> None:
+    def save_plot(self, output_path: str = "mapping_map.png", goal: Optional[Tuple[float, float]] = None) -> None:
         """
         Save a plot of the occupancy grid and trajectory to a file.
 
@@ -270,4 +270,4 @@ class SLAMMap:
             plt.savefig(output_path, dpi=150, bbox_inches="tight")
             plt.close(fig)
         except Exception as exc:
-            print(f"[SLAMMap] save_plot failed: {exc}", flush=True)
+            print(f"[MappingMap] save_plot failed: {exc}", flush=True)

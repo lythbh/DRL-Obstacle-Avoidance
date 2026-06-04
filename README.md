@@ -1,6 +1,6 @@
 # DRL Obstacle Avoidance (Webots ALTINO)
 
-This project trains recurrent PPO and SAC controllers for ALTINO obstacle avoidance in Webots, with shared environment, sensor, reward, and SLAM processing across algorithms. Curriculum training is orchestrated by `controllers/run.py` through 10 progressively harder worlds.
+This project trains recurrent PPO and SAC controllers for ALTINO obstacle avoidance in Webots, with shared environment, sensor, reward, and mapping processing across algorithms. Curriculum training is orchestrated by `controllers/run.py` through 10 progressively harder worlds.
 
 ## Environment Setup
 1. Create and activate a Python 3.10.19 environment.
@@ -24,8 +24,8 @@ This project trains recurrent PPO and SAC controllers for ALTINO obstacle avoida
 - `controllers/SAC/SAC_rewards.py`: SAC-specific reward computation.
 - `controllers/DDPG/DDPG.py`: DDPG controller (legacy/reference).
 - `controllers/RNN/`: `base.py` (shared base), `gru.py`, `lstm.py`, `__init__.py`.
-- `controllers/Webots/webots_env.py`: Webots environment, SLAM hooks, Altino driver.
-- `controllers/SLAM/`: IMU/IEKF/map processing modules.
+- `controllers/Webots/webots_env.py`: Webots environment, mapping hooks, Altino driver.
+- `controllers/state_estimation/`: IMU/IEKF/map processing modules.
 - `controllers/common/`: checkpoint utilities, metrics logger, seed, training_utils.
 - `run_model.py`: deterministic inference runner for PPO and SAC checkpoints.
 - `slurm.sh`: SLURM job script for HPC training.
@@ -69,10 +69,10 @@ Architecture aliases: `none`, `mlp`, `feedforward`, `ff` all map to feed-forward
 
 | File | Provides |
 |---|---|
-| `controllers/PPO/PPO_defaults.py` | `PPODefaults`, `RecurrentDefaults`, environment constants, SLAM flags, reward coefficients |
+| `controllers/PPO/PPO_defaults.py` | `PPODefaults`, `RecurrentDefaults`, environment constants, mapping flags, reward coefficients |
 | `controllers/SAC/SAC_defaults.py` | `SACDefaults`, environment constants, reward coefficients |
 
-**PPO defaults**: `episodes=500`, `update_every=4`, `epochs=4`, `batch_size=128`, `lr=1e-4`, `entropy_coef=0.005`, `gamma=0.99`, `gae_lambda=0.98`, `epsilon=0.1`, `max_steps=2500`, `save_every=100`, `SLAM_ENABLE=False`, `SLAM_FORCE_CPU=True`, `REW_SCALE=0.01`.
+**PPO defaults**: `episodes=500`, `update_every=4`, `epochs=4`, `batch_size=128`, `lr=1e-4`, `entropy_coef=0.005`, `gamma=0.99`, `gae_lambda=0.98`, `epsilon=0.1`, `max_steps=2500`, `save_every=100`, `enable_mapping=False`, `save_mapping_plots=False`, `REW_SCALE=0.01`.
 
 **Recurrent defaults**: `sequence_length=32`, `burn_in=8`, `sequence_stride=16`.
 
@@ -90,7 +90,7 @@ _init_supervisor()              # Creates Webots Supervisor, sets FAST mode
        │    ├─ GPS: 3D position
        │    ├─ Accelerometer: 3-axis
        │    ├─ Gyro: 3-axis yaw rate
-       │    └─ SLAMProcessor(config)     # IMU filtering + IEKF + occupancy map
+       │    └─ MappingProcessor(config)     # IMU filtering + IEKF + occupancy map
        ├─ PPORewardComputer (or SACRewardComputer)
        └─ _sync_endpoint_from_world()   # Reads GOAL_MARKER position from world file
 ```
@@ -99,22 +99,22 @@ _init_supervisor()              # Creates Webots Supervisor, sets FAST mode
 ```
 lidar.getRangeImage() ──────┐
 gps.getValues() ────────────┤
-accelerometer.getValues() ──┤──> SLAMProcessor.process()
+accelerometer.getValues() ──┤──> MappingProcessor.process()
 gyro.getValues() ───────────┘    │
                                   ├─ sector_lidar()    → 16 normalized sector minima
                                   ├─ imu_proc.step()   → EKF quaternion + bias
                                   ├─ iekf.propagate()  → dead-reckoned position/heading
-                                  └─ slam_map.update() → occupancy grid via Bresenham
+                                  └─ mapping_map.update() → occupancy grid via Bresenham
 ```
 
 #### Observation Vector (31 features by default, `_build_observation()`)
 
 | Segment | Size | Source |
 |---|---|---|
-| LiDAR sectors | 16 | `SLAMProcessor.sector_lidar()` — min range per angular bin, normalized [0,1] |
+| LiDAR sectors | 16 | `MappingProcessor.sector_lidar()` — min range per angular bin, normalized [0,1] |
 | Direction features | 5 | `sin(heading), cos(heading), sin(goal_error), cos(goal_error), goal_distance / reference_distance` |
 | IMU features | 10 | 3 accel_body, 3 gyro_body, 4 quaternion — all normalized |
-| Occupancy grid | variable | Downsampled SLAM occupancy probabilities (disabled by default, `ENV_OCCUPANCY_GRID_SHAPE=None`) |
+| Occupancy grid | variable | Downsampled mapping occupancy probabilities (disabled by default, `ENV_OCCUPANCY_GRID_SHAPE=None`) |
 
 Inference uses the observation layout from the training checkpoint; the reported obs_size equals `lidar_sector_dim + pose_goal_dim + imu_feature_dim + occupancy_grid_size`.
 
@@ -132,24 +132,24 @@ Inference uses the observation layout from the training checkpoint; the reported
 
 #### Episode Reset (`WebotsEnv.reset()`)
 Each episode begins with:
-1. Reset SLAM map
+1. Reset mapping map
 2. Stop robot
 3. Randomize goal Y position (if `randomize_goal=True`, within `goal_y_range` ±1.5m)
 4. Move obstacles into travel corridor with 75% probability (`AltinoDriver.randomize_obstacles()`)
 5. Reset robot position with noise (`start_position_noise=0.08m`, `start_yaw_noise=0.8rad`)
 6. Settle for `reset_settle_steps=10` timesteps
-7. Reset SLAM state
+7. Reset mapping state
 
 Goal endpoint is synced from the `GOAL_MARKER` node's position in the world file during `WebotsEnv.__init__()`, ensuring the agent always knows the actual goal location.
 
-### 4. SLAM Modules (`controllers/SLAM/`)
+### 4. Mapping Modules (`controllers/state_estimation/`)
 
 | Module | File | Purpose |
 |---|---|---|
 | `IMUProcessor` | `imu_filter.py` | EKF with 7 states (quaternion w,x,y,z + gyro bias bx,by,bz). Predict from gyro, correct from accelerometer. Outputs `IMUState` with quaternion, body-frame accel/gyro, world-frame accel. |
-| `IEKFBackend` | `iekf_backend.py` | 8-state dead-reckoning IEKF [px, py, theta, vx, vy, b_omega_z, b_ax, b_ay]. Propagates from wheel speed + gyro z-rate. Used for heading estimate when SLAM is enabled. |
-| `SLAMMap` | `slam_map.py` | Log-odds occupancy grid with Bresenham ray-casting + keyframe trajectory tracker. `KEYFRAME_DIST=0.3m`, `KEYFRAME_ANGLE=0.15rad`. Saves PNG plots via matplotlib. |
-| `OccupancyMap` | `slam_map.py` (same) | Core grid: `FREE_LOG_ODDS=-0.5`, `OCC_LOG_ODDS=1.5`, clip range [-5,5]. Resolution 0.05m, 40x40m grid. |
+| `IEKFBackend` | `iekf_backend.py` | 8-state dead-reckoning IEKF [px, py, theta, vx, vy, b_omega_z, b_ax, b_ay]. Propagates from wheel speed + gyro z-rate. Used for heading estimate when mapping is enabled. |
+| `MappingMap` | `mapping.py` | Log-odds occupancy grid with Bresenham ray-casting + keyframe trajectory tracker. `KEYFRAME_DIST=0.3m`, `KEYFRAME_ANGLE=0.15rad`. Saves PNG plots via matplotlib. |
+| `OccupancyMap` | `mapping.py` (same) | Core grid: `FREE_LOG_ODDS=-0.5`, `OCC_LOG_ODDS=1.5`, clip range [-5,5]. Resolution 0.05m, 40x40m grid. |
 | `NavigatingController` | `navigation_controller.py` | Standalone deterministic controller using potential fields: goal attraction + LiDAR repulsion + map repulsion. Not used by RL training. |
 
 ### 5. Reward Computation
@@ -463,10 +463,10 @@ Controllers/run.py (curriculum orchestrator)
             ├── WebotsEnv
             │    ├── AltinoDriver
             │    │    ├── Sensors → raw lidar, GPS, IMU
-            │    │    ├── SLAMProcessor
+            │    │    ├── MappingProcessor
             │    │    │    ├── IMUProcessor (EKF quaternion)
             │    │    │    ├── IEKFBackend (dead-reckoning)
-            │    │    │    └── SLAMMap (occupancy grid)
+            │    │    │    └── MappingMap (occupancy grid)
             │    │    └── randomize_goal / randomize_obstacles
             │    ├── _sync_endpoint_from_world() → reads GOAL_MARKER
             │    ├── _build_observation() → 31-feature vector
