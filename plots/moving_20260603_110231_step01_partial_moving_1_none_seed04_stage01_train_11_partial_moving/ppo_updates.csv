@@ -1,5 +1,0 @@
-global_step,episode,actor_loss,critic_loss,policy_entropy,entropy_coef,value_residual,grad_norm_actor,grad_norm_critic,grad_norm_rnn,lr_actor,lr_critic,alpha,alpha_loss,target_update_magnitude,recurrent_cell
-1668,4,-0.001542,0.013553,1.715565,0.004994,0.067515,0.212353,0.094873,0.0,3.7e-05,,,,,none
-1668,4,-0.000402,0.013255,1.715639,0.004994,0.065702,0.213318,0.086565,0.0,3.7e-05,,,,,none
-1668,4,-0.000416,0.013016,1.715713,0.004994,0.065387,0.382898,0.079029,0.0,3.7e-05,,,,,none
-1668,4,-0.000329,0.01267,1.715785,0.004994,0.0665,0.400589,0.06766,0.0,3.7e-05,,,,,none
