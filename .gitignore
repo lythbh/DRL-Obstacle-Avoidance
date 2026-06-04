@@ -30,13 +30,11 @@ dist/
 *.onnx
 
 #Training and evaluation output directories
-# controllers/PPO/slam_runs
-# controllers/PPO/slam_runs/
 plots/
-# data/
-# datasets/
-# logs/
-# runs/
+data/
+datasets/
+logs/
+runs/
 
 #Jupyter Notebook auto-save files
 .ipynb_checkpoints/
