@@ -1,7 +1,7 @@
 ﻿"""
 PPO training controller for ALTINO robot in Webots obstacle avoidance task.
 
-LLM level:
+LLM level: 4: LLM wrote the majority of the starting code, but we have since itterated on it a lot.
 """
 
 import math
@@ -9,7 +9,7 @@ import os
 import sys, time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Tuple, List, Optional, Generator, cast
+from typing import Any, Dict, Tuple, List, Optional, Generator, cast
 import numpy as np
 import torch
 from torch import nn
@@ -289,8 +289,19 @@ def _split_sequences(episodes, seq_len, stride) -> Generator[dict, None, None]:
 
 
 class PPOAgent:
-    def __init__(self, obs_size: int, action_dim: int, config: Config):
-        """Initialize PPO agent with observation and action dimensions, build the neural network model."""
+    def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
+        """
+        Initialize PPO agent with observation and action dimensions, build the neural network model.
+        
+        Parameters
+        ---------
+        obs_size : int
+            Size of the observation space.
+        action_dim : int
+            Dimension of the action space.
+        config : Config
+            Configuration object containing hyperparameters and settings.
+        """
         self.config = config
         self.device = self._get_device()
         self.action_dim = action_dim
@@ -302,13 +313,22 @@ class PPOAgent:
         self._build_model(config.recurrent_cell)
         print(f"[PPO] Using architecture: {config.recurrent_cell.upper()}", flush=True)
 
+
     def _build_model(self, recurrent_cell: str) -> None:
-        """Build or rebuild the actor-critic model with the specified recurrent cell type (GRU or LSTM)."""
+        """
+        Build or rebuild the actor-critic model with the specified recurrent cell type (GRU or LSTM).
+        
+        Parameters
+        ---------
+        recurrent_cell : str
+            Type of recurrent cell to use ("gru", "lstm", or "none").
+        """
         recurrent_cell = recurrent_cell.lower().strip()
         if recurrent_cell == "none":
             model_class = FeedForwardActorCritic
         else:
             model_class = GRUActorCritic if recurrent_cell == "gru" else LSTMActorCritic
+        
         self.model = model_class(self.obs_size, self.action_dim, self.config).to(self.device)
         self.actor = self.model.policy_head
         self.critic = self.model.value_head
@@ -316,44 +336,103 @@ class PPOAgent:
         params = list(self.model.parameters()) + [self.actor_log_std]
         self.optimizer = torch.optim.Adam(params, lr=self.config.learning_rate)
 
+
     def _get_device(self) -> torch.device:
-        """Determine whether to use CPU or CUDA GPU for training."""
+        """
+        Determine whether to use CPU or CUDA GPU for training.
+        
+        Returns
+        -------
+        torch.device
+            Device to use for training (CPU or CUDA GPU).
+        """
         if self.config.force_cpu or not torch.cuda.is_available():
             return torch.device("cpu")
         return torch.device("cuda")
 
+
     def get_initial_state(self, batch_size: int = 1) -> Optional[RecurrentState]:
-        """Get initial hidden state for the neural network."""
+        """
+        Get initial hidden state for the neural network.
+        
+        Parameters
+        ---------
+        batch_size : int, optional
+            Batch size for the initial state (default is 1).
+
+        Returns
+        -------
+        Optional[RecurrentState]
+            Initial hidden state for the neural network, or None if no recurrent cell is used.
+        """
         if self.config.recurrent_cell == "none":
             return self.model.get_initial_state(batch_size)
+        
         return cast(Any, self.model).get_initial_state(batch_size, device=self.device)
 
-    def _sample_action(self, policy_output, deterministic=False):
-        """Sample action from normal distribution with tanh squashing and proper log probability computation."""
+
+    def _sample_action(self, policy_output, deterministic=False) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Sample action from normal distribution with tanh squashing and proper log probability computation.
+        
+        Parameters
+        ---------
+        policy_output : torch.Tensor
+            Output from the policy network.
+        deterministic : bool, optional
+            Whether to sample deterministically (default is False).
+
+        Returns
+        -------
+        Tuple[torch.Tensor, torch.Tensor]
+            Sampled action and log probability of the action.
+        """
         mean = policy_output
         std = self.actor_log_std.expand_as(policy_output).exp().clamp_min(1e-3)
         dist = Normal(mean, std)
+        
         pre_tanh = mean if deterministic else dist.rsample()
         action_tanh = torch.tanh(pre_tanh)
+        
         action = action_tanh * self.action_scale + self.action_center
         eps = 1e-5
         action = torch.clamp(action, self.action_low + eps, self.action_high - eps)
         log_prob = dist.log_prob(pre_tanh)
         log_prob -= torch.log(self.action_scale + 1e-6)
         log_prob -= torch.log(1.0 - action_tanh.pow(2) + 1e-6)
+        
         return action, log_prob.sum(dim=-1)
 
-    def select_action(self, obs, recurrent_state=None, done=False, deterministic=False):
-        """Select an action given observation and recurrent state, returning action, log prob, value, and next state."""
+
+    def select_action(self, obs, recurrent_state=None, done=False, deterministic=False) -> Tuple[np.ndarray, torch.Tensor, torch.Tensor, Optional[RecurrentState]]:
+        """
+        Select an action given observation and recurrent state, returning action, log prob, value, and next state.
+        
+        Parameters
+        ---------
+        obs : torch.Tensor
+            Observation from the environment.
+        recurrent_state : Optional[RecurrentState]
+            Recurrent state from the previous step.
+        done : bool, optional
+            Whether the episode is done (default is False).
+        deterministic : bool, optional
+            Whether to sample deterministically (default is False).
+
+        Returns
+        -------
+        Tuple[np.ndarray, torch.Tensor, torch.Tensor, Optional[RecurrentState]]
+            Action, log probability, value, and next recurrent state.
+        """
         done_mask = torch.tensor([float(done)], dtype=torch.float32, device=self.device)
         with torch.no_grad():
             if self.config.recurrent_cell == "none":
                 policy_output, state_value, next_state = self.model(obs)
             else:
-                policy_output, state_value, next_state = self.model(
-                    obs, recurrent_state=recurrent_state, done_mask=done_mask,
-                )
+                policy_output, state_value, next_state = self.model(obs, recurrent_state=recurrent_state, done_mask=done_mask)
+            
             action, log_prob = self._sample_action(policy_output, deterministic=deterministic)
+        
         return (
             action.squeeze(0).cpu().numpy(),
             log_prob.squeeze(0),
@@ -361,8 +440,25 @@ class PPOAgent:
             next_state,
         )
 
-    def calculate_gae(self, rewards, values, bootstrap_value=0.0):
-        """Calculate Generalized Advantage Estimation (GAE) and returns from rewards and values."""
+
+    def calculate_gae(self, rewards, values, bootstrap_value=0.0) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Calculate Generalized Advantage Estimation (GAE) and returns from rewards and values.
+        
+        Parameters
+        ---------
+        rewards : np.ndarray
+            Array of rewards.
+        values : np.ndarray
+            Array of values.
+        bootstrap_value : float, optional
+            Value to bootstrap from (default is 0.0).
+
+        Returns
+        -------
+        Tuple[np.ndarray, np.ndarray]
+            Advantages and returns.
+        """
         T = len(rewards)
         advantages = np.zeros(T, dtype=np.float32)
         gae = 0.0
@@ -372,10 +468,24 @@ class PPOAgent:
             gae = delta + self.config.gamma * self.config.gae_lambda * gae
             advantages[t] = gae
             next_value = float(values[t])
+        
         return advantages.astype(np.float32), (advantages + values).astype(np.float32)
 
-    def _prepare_batch(self, trajectories):
-        """Pad trajectories of variable length into a batch tensor with valid masks."""
+
+    def _prepare_batch(self, trajectories) -> Dict[str, torch.Tensor]:
+        """
+        Pad trajectories of variable length into a batch tensor with valid masks.
+        
+        Parameters
+        ---------
+        trajectories : List[Dict[str, np.ndarray]]
+            List of trajectories to be padded.
+
+        Returns
+        -------
+        Dict[str, torch.Tensor]
+            Dictionary of padded tensors.
+        """
         pad_keys = ["observations", "actions", "log_probs", "returns", "advantages"]
         result = {}
         for key in pad_keys:
@@ -383,19 +493,31 @@ class PPOAgent:
                 [torch.as_tensor(t[key], dtype=torch.float32, device=self.device) for t in trajectories],
                 batch_first=True,
             )
+        
         valid_masks = [torch.ones(len(t["returns"]), dtype=torch.float32, device=self.device) for t in trajectories]
         result["valid_mask"] = pad_sequence(valid_masks, batch_first=True)
         reset_masks = []
+        
         for t in trajectories:
             mask = torch.zeros(len(t["returns"]), dtype=torch.float32, device=self.device)
             if len(mask) > 0:
                 mask[0] = 1.0
             reset_masks.append(mask)
+        
         result["done_mask"] = pad_sequence(reset_masks, batch_first=True)
+        
         return result
 
-    def _sanitize_trajectories(self, trajectories):
-        """Clean trajectories by removing NaNs and clamping actions to valid ranges."""
+
+    def _sanitize_trajectories(self, trajectories) -> None:
+        """
+        Clean trajectories by removing NaNs and clamping actions to valid ranges.
+        
+        Parameters
+        ---------
+        trajectories : List[Dict[str, np.ndarray]]
+            List of trajectories to be sanitized.
+        """
         low = np.array([-self.config.max_steering_angle, self.config.min_speed], dtype=np.float32)
         high = np.array([self.config.max_steering_angle, self.config.max_speed], dtype=np.float32)
         for t in trajectories:
@@ -405,22 +527,46 @@ class PPOAgent:
             t["returns"] = np.nan_to_num(t["returns"], nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
             t["advantages"] = np.nan_to_num(t["advantages"], nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
-    def _normalize_advantages(self, trajectories):
-        """Normalize advantages across all trajectories using mean and standard deviation."""
+
+    def _normalize_advantages(self, trajectories) -> None:
+        """
+        Normalize advantages across all trajectories using mean and standard deviation.
+        
+        Parameters
+        ---------
+        trajectories : List[Dict[str, np.ndarray]]
+            List of trajectories to be normalized.
+        """
         all_adv = np.concatenate([t["advantages"] for t in trajectories], axis=0)
         adv_mean = float(all_adv.mean())
         adv_std = float(all_adv.std() + 1e-8)
+        
         for t in trajectories:
             t["advantages"] = ((t["advantages"] - adv_mean) / adv_std).astype(np.float32)
             t["advantages"] = np.clip(t["advantages"], -5.0, 5.0)
 
-    def _update_batch(self, batch):
-        """Perform one PPO gradient update on a batch, returning a dict with loss components and gradient statistics."""
+
+    def _update_batch(self, batch) -> Optional[Dict[str, float]]:
+        """
+        Perform one PPO gradient update on a batch, returning a dict with loss components and gradient statistics.
+        
+        Parameters
+        ----------
+        batch : Dict[str, torch.Tensor]
+            Batch of data to train on.
+
+        Returns
+        -------
+        Dict[str, float]
+            Dictionary containing loss components and gradient statistics.
+        """
         log_probs_new, values, entropy = self.evaluate_sequences(
             batch["observations"], batch["actions"], batch["done_mask"],
         )
+        
         if not (torch.isfinite(log_probs_new).all() and torch.isfinite(values).all() and torch.isfinite(entropy).all()):
             return None
+        
         valid_mask = batch["valid_mask"]
         learn_mask = _sequence_loss_mask(valid_mask, self.config.burn_in)
         mask_bool = learn_mask > 0
@@ -433,6 +579,7 @@ class PPOAgent:
         entropy_term = torch.where(mask_bool, entropy, torch.zeros_like(entropy))
         valid_count = learn_mask.sum().clamp_min(1.0)
         loss = (-surrogate.sum() + 0.5 * torch.where(mask_bool, value_error, torch.zeros_like(value_error)).sum() - self.config.entropy_coef * entropy_term.sum()) / valid_count
+        
         if not torch.isfinite(loss):
             return None
 
@@ -466,14 +613,18 @@ class PPOAgent:
                         if "policy_head" not in n and "value_head" not in n and (rnn_attr is None or rnn_attr not in n)]
         nn.utils.clip_grad_norm_(actor_clip, max_norm=0.5)
         nn.utils.clip_grad_norm_(critic_clip, max_norm=5.0)
+
         if rnn_clip:
             nn.utils.clip_grad_norm_(rnn_clip, max_norm=1.0)
+        
         nn.utils.clip_grad_norm_(encoder_clip, max_norm=0.5)
         self.optimizer.step()
+        
         with torch.no_grad():
             self.actor_log_std.data.copy_(torch.nan_to_num(self.actor_log_std.data, nan=-0.5, posinf=2.0, neginf=-5.0).clamp(-5.0, 2.0))
 
         lr = float(self.optimizer.param_groups[0]["lr"])
+        
         return {
             "actor_loss": round(actor_loss_val, 6),
             "critic_loss": round(critic_loss_val, 6),
@@ -487,14 +638,34 @@ class PPOAgent:
             "lr_actor": lr,
         }
 
-    def evaluate_sequences(self, observations, actions, done_mask):
-        """Evaluate log probabilities, state values, and entropy for given observations and actions (batch)."""
+
+    def evaluate_sequences(self, observations, actions, done_mask) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Evaluate log probabilities, state values, and entropy for given observations and actions (batch).
+        
+        Parameters
+        ----------
+        observations : torch.Tensor
+            The observations tensor of shape (batch_size, sequence_length, observation_dim).
+        actions : torch.Tensor
+            The actions tensor of shape (batch_size, sequence_length, action_dim).
+        done_mask : torch.Tensor
+            The done mask tensor of shape (batch_size, sequence_length).
+
+        Returns
+        -------
+        log_prob : torch.Tensor
+            The log probabilities of the actions.
+        state_values : torch.Tensor
+            The state values.
+        entropy : torch.Tensor
+            The entropy of the policy.
+        """
         if self.config.recurrent_cell == "none":
             policy_output, state_values, _ = self.model(observations)
         else:
-            policy_output, state_values, _ = self.model(
-                observations, recurrent_state=self.get_initial_state(observations.shape[0]), done_mask=done_mask,
-            )
+            policy_output, state_values, _ = self.model(observations, recurrent_state=self.get_initial_state(observations.shape[0]), done_mask=done_mask)
+        
         mean = policy_output
         std = self.actor_log_std.expand_as(policy_output).exp().clamp_min(1e-3)
         dist = Normal(mean, std)
@@ -509,23 +680,37 @@ class PPOAgent:
         log_prob = log_prob.sum(dim=-1)
         flat_entropy = 0.5 * self.action_dim * (1.0 + math.log(2.0 * math.pi)) + self.actor_log_std.sum()
         entropy = flat_entropy.expand(observations.shape[0], observations.shape[1])
+        
         return log_prob, state_values, entropy
 
-    def update(self, trajectories):
-        """Perform multiple PPO epochs of training on collected trajectories, returning per-update metrics."""
+
+    def update(self, trajectories) -> list[dict[str, float]]:
+        """
+        Perform multiple PPO epochs of training on collected trajectories, returning per-update metrics.
+        
+        Parameters
+        ----------
+        trajectories : list[Trajectory]
+            The collected trajectories to train on.
+
+        Returns
+        -------
+        list[dict[str, float]]
+            The per-update metrics.
+        """
         if not trajectories:
             return []
+        
         self._sanitize_trajectories(trajectories)
         self._normalize_advantages(trajectories)
+        
         trajectories = list(_split_sequences(trajectories, self.config.sequence_length, self.config.sequence_stride))
         if not trajectories:
             return []
+        
         update_metrics = []
         num = len(trajectories)
-        early_stop = False
         for epoch in range(self.config.epochs):
-            if early_stop:
-                break
             indices = torch.randperm(num).tolist()
             for start in range(0, num, self.config.batch_size):
                 batch_indices = indices[start: start + self.config.batch_size]
@@ -533,37 +718,64 @@ class PPOAgent:
                 metrics = self._update_batch(batch)
                 if metrics is not None:
                     update_metrics.append(metrics)
-                    if metrics.get("approx_kl", 0) > 0.05:
-                        early_stop = True
-                        break
+        
         return update_metrics
 
     def load_model(self, model_path: str) -> None:
-        """Load a pre-trained PPO model checkpoint."""
+        """
+        Load a pre-trained PPO model checkpoint.
+        
+        Parameters
+        ---------
+        model_path : str
+            The path to the model checkpoint file.
+        """
         checkpoint = load_checkpoint(model_path, map_location=self.device)
         algo = str(checkpoint.get("algorithm", "ppo")).lower().strip()
         assert algo == "ppo", f"Checkpoint algorithm '{algo}' does not match PPO."
         assert "model" in checkpoint, "Checkpoint does not contain recurrent 'model' weights."
+        
         for key in ("obs_size", "action_dim"):
             saved = checkpoint.get(key)
             if saved is not None and int(saved) != getattr(self, key):
                 raise ValueError(f"Checkpoint {key}={saved} != current {getattr(self, key)}")
+        
         cell = str(checkpoint.get("recurrent_cell", self.config.recurrent_cell)).lower().strip()
         cell = {"mlp": "none", "feedforward": "none", "ff": "none"}.get(cell, cell)
         assert cell in {"none", "lstm", "gru"}, f"Unsupported recurrent_cell in checkpoint: {cell}"
+        
         if cell != self.config.recurrent_cell:
             raise ValueError(
                 f"Checkpoint recurrent_cell='{cell}' does not match configured '{self.config.recurrent_cell}'. "
                 f"Use --arch {cell} or provide a {self.config.recurrent_cell} checkpoint."
             )
+        
         print(f"[PPO] Loaded architecture: {cell.upper()}", flush=True)
+        
         self.model.load_state_dict(checkpoint["model"])
         if "actor_log_std" in checkpoint:
             self.actor_log_std.data.copy_(checkpoint["actor_log_std"].to(self.device))
 
 
-def _save_checkpoint(agent, episode, reward, is_goal, prefix, run_id):
-    """Save PPO agent checkpoint with model weights, config, and training metadata."""
+def _save_checkpoint(agent, episode, reward, is_goal, prefix, run_id) -> None:
+    """
+    Save PPO agent checkpoint with model weights, config, and training metadata.
+    
+    Parameters
+    ---------
+    agent : PPOAgent
+        The agent to save.
+    episode : int
+        The current episode number.
+    reward : float
+        The current episode reward.
+    is_goal : bool
+        Whether the current episode reached the goal.
+    prefix : str
+        The prefix for the checkpoint file.
+    run_id : str
+        The run ID for the checkpoint file.
+    """
     header = _make_checkpoint_header(episode, reward, is_goal, "ppo", asdict(agent.config))
     header["obs_size"] = agent.obs_size
     header["action_dim"] = agent.action_dim
@@ -574,14 +786,44 @@ def _save_checkpoint(agent, episode, reward, is_goal, prefix, run_id):
 
 
 def _env_bool(name: str, default: bool) -> bool:
+    """
+    Get a boolean environment variable, defaulting to the given value if not set.
+    
+    Parameters
+    ---------
+    name : str
+        The name of the environment variable.
+    default : bool
+        The default value to return if the environment variable is not set.
+
+    Returns
+    -------
+    bool
+        The value of the environment variable, or the default value if the environment variable is not set.
+    """
     value = os.getenv(name)
     if value is None:
         return default
+    
     return value.lower().strip() in {"1", "true", "yes", "on"}
 
 
 def _apply_env_overrides(config: Config) -> tuple[Config, Optional[str], Optional[str]]:
-    """Apply environment variables supplied by controllers/run.py or SLURM jobs."""
+    """
+    Apply environment variables supplied by controllers/run.py or SLURM jobs.
+    
+    Parameters
+    ---------
+    config : Config
+        The default configuration to override.
+
+    Returns
+    -------
+    Config
+        The configuration with environment variables applied.
+    str, str
+        The run ID and prefix for the checkpoint file, if set.
+    """
     arch = os.getenv("PPO_ARCH") or os.getenv("PPO_RECURRENT_CELL")
     if arch:
         config.recurrent_cell = arch
@@ -612,14 +854,23 @@ def _apply_env_overrides(config: Config) -> tuple[Config, Optional[str], Optiona
     if os.getenv("PPO_MOVING_GOAL_AMPLITUDE"):
         config.moving_goal_amplitude = float(os.environ["PPO_MOVING_GOAL_AMPLITUDE"])
     config.__post_init__()
+    
     return config, os.getenv("PPO_LOAD_MODEL"), os.getenv("PPO_RUN_ID")
 
 
-def train(config=None):
-    """Main training loop: collect episodes, perform PPO updates, log metrics, and save checkpoints."""
+def train(config=None) -> None:
+    """
+    Main training loop: collect episodes, perform PPO updates, log metrics, and save checkpoints.
+    
+    Parameters
+    ----------
+    config : Config, optional
+        The configuration to use. If None, the default configuration is used.
+    """
     if config is None:
         config = Config()
     config, load_model_path, run_id_override = _apply_env_overrides(config)
+    
     _init_supervisor()
     reward_computer = PPORewardComputer(
         endpoint=config.endpoint,
@@ -635,18 +886,20 @@ def train(config=None):
         goal_success_reward=config.goal_success_reward,
         goal_hold_reward=config.goal_hold_reward,
     )
+    
     env = WebotsEnv(config, reward_computer)
     env.reset()
     run_id = run_id_override or Path(env.run_folder).name
     if run_id_override:
         env.run_folder = str(Path(env.run_folder).parent / run_id_override)
-        os.makedirs(env.run_folder, exist_ok=True)
+    
     os.makedirs(env.run_folder, exist_ok=True)
     obs_size = env.observation_size
     action_dim = env.action_dim
     agent = PPOAgent(obs_size, action_dim, config)
     if load_model_path:
         agent.load_model(load_model_path)
+    
     checkpoint_dir = run_checkpoint_dir(_CHECKPOINT_DIR, run_id)
     final_model_path = run_checkpoint_path(_CHECKPOINT_DIR, run_id, "final")
     print(f"[TRAIN][PPO] arch={config.recurrent_cell.upper()} weights_dir={checkpoint_dir} final={final_model_path}", flush=True)
@@ -687,6 +940,7 @@ def train(config=None):
             if done:
                 reason = info.get("reset_reason", "")
                 ep_end_reason = reason if reason else ("max_steps" if truncated else ep_end_reason)
+            
             ep_obs.append(obs)
             ep_act.append(action)
             ep_lp.append(float(log_prob.item()))
@@ -741,6 +995,8 @@ def train(config=None):
         agg_upd = MetricsLogger.aggregate_update_metrics(all_update_metrics)
 
         decay_frac = min(1.0, episode / max(1, config.episodes))
+
+        #LLM (Copilot): suggested scaling LSTM with 1.35 since it suffered catastrophic forgetting; verified cirrectness.
         arch_scale = {"none": 1.0, "gru": 1.0, "lstm": 1.35}.get(config.recurrent_cell, 1.0)
         base_entropy = d.PPODefaults.entropy_coef * arch_scale
         agent.config.entropy_coef = base_entropy * (1.0 - 0.30 * decay_frac)
@@ -801,6 +1057,7 @@ def train(config=None):
 
     if rollout:
         agent.update(rollout)
+    
     metrics_logger.close()
     print(f"[TRAIN][PPO] metrics saved to {metrics_logger.path}", flush=True)
     print(f"[TRAIN][PPO] updates saved to {metrics_logger.update_path}", flush=True)
@@ -813,10 +1070,30 @@ def train(config=None):
     env.robot.supervisor.simulationQuit(0)
     print("[TRAIN][PPO] done", flush=True)
 
-def evaluate(config=None, model_path=None, episodes=10, deterministic=True):
-    """Run a saved PPO policy without updating model parameters."""
+
+def evaluate(config=None, model_path=None, episodes=10, deterministic=True) -> Dict[str, float | int]:
+    """
+    Run a saved PPO policy without updating model parameters.
+    
+    Parameters
+    ----------
+    config : Config, optional
+        Configuration for the PPO agent. If None, a default Config is used.
+    model_path : str, optional
+        Path to the saved model. If None, the model path is taken from the environment variable PPO_EVAL_MODEL.
+    episodes : int, optional
+        Number of episodes to evaluate the policy. Default is 10.
+    deterministic : bool, optional
+        If True, the policy is evaluated deterministically. Default is True.
+
+    Returns
+    -------
+    Dict[str, float | int]
+        A summary dictionary containing evaluation statistics.
+    """
     if config is None:
         config = Config()
+    
     config, load_model_path, run_id_override = _apply_env_overrides(config)
     model_path = model_path or os.getenv("PPO_EVAL_MODEL") or load_model_path
     if model_path is None:

@@ -33,6 +33,7 @@ ENV_REFERENCE_DISTANCE = math.dist(ENV_ENDPOINT, ENV_START_POSITION[:2])
 enable_mapping = False
 save_mapping_plots = False
 
+
 """Runtime."""
 force_cpu = True
 
