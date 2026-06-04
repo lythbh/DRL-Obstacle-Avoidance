@@ -12,9 +12,9 @@ from controller import Supervisor # type: ignore
 
 _SLAM_IMPORT_ERROR: Optional[Exception] = None
 try:
-    from controllers.SLAM.imu_filter import IMUProcessor, IMUState
-    from controllers.SLAM.iekf_backend import IEKFBackend
-    from controllers.SLAM.slam_map import SLAMMap
+    from controllers.state_estimation.imu_filter import IMUProcessor, IMUState
+    from controllers.state_estimation.iekf_backend import IEKFBackend
+    from controllers.state_estimation.mapping import SLAMMap
     _SLAM_AVAILABLE = True
 except ImportError as _slam_err:
     _SLAM_AVAILABLE = False

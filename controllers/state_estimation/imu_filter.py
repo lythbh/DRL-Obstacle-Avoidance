@@ -1,7 +1,10 @@
-"""IMU filtering: EKF-based orientation estimation with gyroscope bias tracking."""
+"""
+IMU filtering: EKF-based orientation estimation with gyroscope bias tracking.
+
+LLM level: 4 - LLM wrote majority of code, implemented and tested by us.
+"""
 
 from __future__ import annotations
-
 import numpy as np
 from dataclasses import dataclass
 from typing import Optional
@@ -20,7 +23,7 @@ class IMUEKF:
     """
     7-state EKF: quaternion [w,x,y,z] + gyroscope bias [bx,by,bz].
 
-    Predict step integrates gyro; update step corrects using accelerometer
+    Predict step integrates gyro, update step corrects using accelerometer
     as a gravity-direction measurement.
     """
 
@@ -33,7 +36,20 @@ class IMUEKF:
         sigma_accel: float = 0.1,
         sigma_bias: float = 0.001,
     ) -> None:
-        """Initialize IMU EKF with process noise and accelerometer measurement noise."""
+        """
+        Initialize IMU EKF with process noise and accelerometer measurement noise.
+        
+        Parameters
+        ----------
+        dt: float
+            Time step between IMU measurements.
+        sigma_gyro: float
+            Gyroscope noise standard deviation (rad/s).
+        sigma_accel: float
+            Accelerometer noise standard deviation (m/s²).
+        sigma_bias: float
+            Gyroscope bias noise standard deviation (rad/s).
+        """
         self.dt = dt
         self.x = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
         self.P = np.eye(self.DIM) * 0.01
@@ -42,13 +58,24 @@ class IMUEKF:
         self.Q = np.diag([q_quat] * 4 + [q_bias] * 3)
         self.R_acc = np.eye(3) * sigma_accel ** 2
 
+
     def reset(self) -> None:
-        """Reset EKF to identity quaternion and zero bias."""
+        """
+        Reset EKF to identity quaternion and zero bias.
+        """
         self.x = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
         self.P = np.eye(self.DIM) * 0.01
 
+
     def predict(self, gyro_raw: np.ndarray) -> None:
-        """EKF predict step: integrate gyroscope and propagate covariance."""
+        """
+        EKF predict step: integrate gyroscope and propagate covariance.
+        
+        Parameters
+        ---------
+        gyro_raw: np.ndarray
+            Raw gyroscope measurement (rad/s).
+        """
         q, b = self.x[:4], self.x[4:]
         gx, gy, gz = gyro_raw - b
         Omega = 0.5 * np.array([
@@ -71,11 +98,20 @@ class IMUEKF:
         self.x[:4] /= np.linalg.norm(self.x[:4]) + 1e-10
         self.P = F @ self.P @ F.T + self.Q
 
+
     def update(self, accel_raw: np.ndarray) -> None:
-        """EKF update step: correct quaternion using accelerometer gravity measurement."""
+        """
+        EKF update step: correct quaternion using accelerometer gravity measurement.
+        
+        Parameters
+        ---------
+        accel_raw: np.ndarray
+            Raw accelerometer measurement (m/s^2).
+        """
         a_norm = np.linalg.norm(accel_raw)
         if a_norm < 0.1:
             return
+        
         a_meas = accel_raw / a_norm
         q = self.x[:4] / (np.linalg.norm(self.x[:4]) + 1e-10)
         qw, qx, qy, qz = q
@@ -97,35 +133,72 @@ class IMUEKF:
         self.x[:4] /= np.linalg.norm(self.x[:4]) + 1e-10
         self.P = (np.eye(self.DIM) - K @ H) @ self.P
 
+
     @property
     def quaternion(self) -> np.ndarray:
-        """Current quaternion estimate (copy)."""
+        """
+        Current quaternion estimate.
+        
+        Returns
+        -------
+        np.ndarray
+            Quaternion estimate (w, x, y, z).
+        """
         return self.x[:4].copy()
 
 
 class IMUProcessor:
-    """EKF-based IMU pipeline: predict from gyro, correct with accelerometer."""
+    """
+    EKF-based IMU pipeline: predict from gyro, correct with accelerometer.
+    """
 
     GRAVITY = 9.81
 
     def __init__(self, dt: float = 0.032) -> None:
-        """Initialize IMU processor with EKF of given timestep."""
+        """
+        Initialize IMU processor with EKF of given timestep.
+        
+        Parameters
+        ---------
+        dt: float
+            Timestep of IMU measurements (seconds).
+        """
         self.dt = dt
         self.ekf = IMUEKF(dt=dt)
 
+
     def reset(self) -> None:
-        """Reset internal EKF to initial state."""
+        """
+        Reset internal EKF to initial state.
+        """
         self.ekf.reset()
 
+
     def step(self, gyro: np.ndarray, accel: Optional[np.ndarray] = None) -> IMUState:
-        """Run one predict-update cycle and return IMUState with world-frame acceleration."""
+        """
+        Run one predict-update cycle and return IMUState with world-frame acceleration.
+        
+        Parameters
+        ---------
+        gyro: np.ndarray
+            Gyroscope measurement (rad/s).
+        accel: Optional[np.ndarray]
+            Accelerometer measurement (m/s^2). If None, only predict step is run.
+
+        Returns
+        -------
+        IMUState
+            IMU state estimate.
+        """
         if accel is None:
             accel = np.zeros(3, dtype=np.float32)
+
         self.ekf.predict(gyro)
         self.ekf.update(accel)
         q = self.ekf.quaternion
         a_world = self._rotate_vector(q, accel)
         a_world[2] -= self.GRAVITY
+        
         return IMUState(
             quaternion=q,
             accel_body=accel.astype(np.float32),
@@ -133,12 +206,29 @@ class IMUProcessor:
             accel_world=a_world.astype(np.float32),
         )
 
+
     @staticmethod
     def _rotate_vector(q: np.ndarray, v: np.ndarray) -> np.ndarray:
+        """
+        Rotate vector v by quaternion q.
+        
+        Parameters
+        ----------
+        q: np.ndarray
+            Quaternion (w, x, y, z).
+        v: np.ndarray
+            Vector to rotate.
+
+        Returns
+        -------
+        np.ndarray
+            Rotated vector.
+        """
         qw, qx, qy, qz = q
         R = np.array([
             [1 - 2*(qy*qy + qz*qz),  2*(qx*qy - qw*qz),     2*(qx*qz + qw*qy)],
             [2*(qx*qy + qw*qz),       1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qw*qx)],
             [2*(qx*qz - qw*qy),       2*(qy*qz + qw*qx),     1 - 2*(qx*qx + qy*qy)],
         ])
+        
         return R @ v
