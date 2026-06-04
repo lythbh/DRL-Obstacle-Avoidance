@@ -1,25 +1,21 @@
 """
-Generate paper-quality training curves: one plot per RNN type (gru, lstm, none).
-Each plot shows reward over 5000 episodes (10 stages × 500 each), one line per seed.
-Only includes runs where all 10 stages completed.
+Generate plots for paper.
 
-Also generates outcome-rate plots (goal vs collision) in the same style.
+LLM level: 3 - LLM made the structure and helped get going, we tweaked to our liking and tested it.
 """
 
 from __future__ import annotations
-
 import re
 from pathlib import Path
 from collections import defaultdict
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
-PLOTS_DIR   = Path(__file__).resolve().parents[1] / "plots"
-OUT_DIR     = Path(__file__).resolve().parent
-N_STAGES    = 10
+PLOTS_DIR = Path(__file__).resolve().parents[1] / "plots"
+OUT_DIR = Path(__file__).resolve().parent
+N_STAGES = 10
 EPS_PER_STAGE = 500
 
 STAGE_LABELS = {
@@ -43,29 +39,56 @@ SEED_COLORS = [
 SMOOTH_WINDOW = 20  # rolling mean half-width for readability
 
 
-def parse_folders(plots_dir: Path):
-    """Return dict: (model, run_key) -> {stage_num: Path}."""
+def parse_folders(plots_dir: Path) -> dict[tuple[str, str, str], dict[int, Path]]:
+    """
+    Parses folders in plots_dir and returns a dict of runs.
+
+    Parameters
+    ----------
+    plots_dir: Path
+        Path to plots directory.
+
+    Returns
+    -------
+    dict
+        Dict of runs.
+    """
     pattern = re.compile(
-        r"^(\d{8}_\d{6})_"      # timestamp
+        r"^(\d{8}_\d{6})_"       # timestamp
         r"(gru|lstm|none)_"      # model
         r"(seed\d+)_"            # seed
         r"stage(\d{2})_"         # stage
     )
-    runs: dict = defaultdict(dict)  # (model, timestamp, seed) -> {stage: path}
+    runs: dict = defaultdict(dict)
     for folder in sorted(plots_dir.iterdir()):
         if not folder.is_dir():
             continue
+        
         m = pattern.match(folder.name)
         if not m:
             continue
+        
         timestamp, model, seed, stage = m.group(1), m.group(2), m.group(3), int(m.group(4))
         key = (model, timestamp, seed)
         runs[key][stage] = folder
+    
     return runs
 
 
-def load_complete_runs(plots_dir: Path):
-    """Return dict: model -> list of (seed_label, DataFrame with 5000 rows)."""
+def load_complete_runs(plots_dir: Path) -> dict[str, list[tuple[str, pd.DataFrame]]]:
+    """
+    Loads all runs with all stages. Stages are concatenated into a single dataframe.
+
+    Parameters
+    ---------
+    plots_dir: Path
+        Path to plots directory.
+
+    Returns
+    -------
+    dict
+        Dict of runs.
+    """
     raw = parse_folders(plots_dir)
     complete: dict[str, list] = defaultdict(list)
 
@@ -87,7 +110,6 @@ def load_complete_runs(plots_dir: Path):
             combined = pd.concat(frames, ignore_index=True)
             complete[model].append((seed, combined))
 
-    # Sort each model's runs by seed label for consistent ordering
     for model in complete:
         complete[model].sort(key=lambda x: x[0])
 
@@ -95,20 +117,62 @@ def load_complete_runs(plots_dir: Path):
 
 
 def smooth(series: pd.Series, window: int) -> pd.Series:
+    """
+    Smooth a pandas series using a rolling window.
+
+    Parameters
+    ---------
+    series: pd.Series
+        Series to smooth.
+    window: int
+        Window size.
+
+    Returns
+    -------
+    pd.Series
+        Smoothed series.
+    """
     return series.rolling(window=window, center=True, min_periods=1).mean()
 
 
 def _band(runs: list, column: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (x, mean, std) across seeds after smoothing."""
+    """
+    Smooth and average a column across runs for use in a band plot.
+
+    Parameters
+    ---------
+    runs: list
+        List of runs.
+    column: str
+        Column to smooth and average.
+
+    Returns
+    -------
+    tuple
+        x, mean, std.
+    """
     smoothed = np.stack([
-        smooth(df[column].astype(float), SMOOTH_WINDOW).values
+        smooth(df[column].astype(float), SMOOTH_WINDOW).to_numpy(dtype=float)
         for _, df in runs
     ])
     x = runs[0][1]["global_episode"].values
+
     return x, smoothed.mean(axis=0), smoothed.std(axis=0)
 
 
 def make_plot(model: str, runs: list, out_dir: Path) -> None:
+    """
+    Make a training curve plot for a model.
+
+    Parameters
+    ---------
+    model: str
+        Model name.
+    runs: list
+        List of runs.
+    out_dir: Path
+        Output directory.
+    """
     fig, ax = plt.subplots(figsize=(12, 5))
 
     x, mean, std = _band(runs, "reward")
@@ -131,13 +195,21 @@ def make_plot(model: str, runs: list, out_dir: Path) -> None:
     print(f"Saved {out_path}")
 
 
-def _draw_stage_markers(ax: plt.Axes) -> None:
-    """Draw vertical stage-boundary lines and stage-name labels."""
+def _draw_stage_markers(ax) -> None:
+    """
+    Draw vertical stage-boundary lines and stage-name labels.
+    
+    Parameters
+    ---------
+    ax: matplotlib.axes.Axes
+        Axes to draw on.
+    """
     for stage_num in range(2, N_STAGES + 1):
         ax.axvline(
             x=(stage_num - 1) * EPS_PER_STAGE,
             color="black", linewidth=0.8, linestyle="--", alpha=0.4,
         )
+
     for stage_num in range(1, N_STAGES + 1):
         x_mid = (stage_num - 1) * EPS_PER_STAGE + EPS_PER_STAGE / 2
         ax.text(
@@ -150,7 +222,18 @@ def _draw_stage_markers(ax: plt.Axes) -> None:
 
 
 def make_outcome_plot(model: str, runs: list, out_dir: Path) -> None:
-    """Plot rolling goal-hit rate: mean across seeds with ±1 std band."""
+    """
+    Plot rolling goal-hit rate: mean across seeds with ±1 std band.
+    
+    Parameters
+    ----------
+    model: str
+        Model name.
+    runs: list
+        List of runs.
+    out_dir: Path
+        Output directory.
+    """
     fig, ax = plt.subplots(figsize=(12, 5))
 
     x, mean, std = _band(runs, "success")
@@ -176,12 +259,16 @@ def make_outcome_plot(model: str, runs: list, out_dir: Path) -> None:
 
 
 def main():
+    """
+    Main entry point that plots the results.
+    """
     complete = load_complete_runs(PLOTS_DIR)
     for model in ("gru", "lstm", "none"):
         runs = complete.get(model, [])
         if not runs:
             print(f"No complete runs found for model={model}, skipping.")
             continue
+        
         print(f"{model.upper()}: {len(runs)} seed(s) — {[s for s, _ in runs]}")
         make_plot(model, runs, OUT_DIR)
         make_outcome_plot(model, runs, OUT_DIR)

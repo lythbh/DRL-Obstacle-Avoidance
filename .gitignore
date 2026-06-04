@@ -21,7 +21,6 @@ dist/
 
 #Saved model checkpoints per controller
 # controllers/PPO/checkpoints/
-controllers/SAC/checkpoints/
 
 #Serialised model weight formats
 *.h5
@@ -33,8 +32,6 @@ controllers/SAC/checkpoints/
 #Training and evaluation output directories
 # controllers/PPO/slam_runs
 # controllers/PPO/slam_runs/
-# controllers/SAC/slam_runs
-# controllers/SAC/slam_runs/
 plots/
 # data/
 # datasets/
