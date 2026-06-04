@@ -49,7 +49,8 @@ def run_inference(config=None):
         import numpy as np
         import torch
 
-        from controllers.PPO.PPO import Config as PPOConfig, PPOAgent
+        from controllers.PPO.PPO_config import Config as PPOConfig
+        from controllers.PPO.PPO_agent import PPOAgent
         from controllers.SAC.SAC import Config as SACConfig, SACAgent
         from controllers.Webots.webots_env import WebotsEnv, _init_supervisor
     except ImportError as e:

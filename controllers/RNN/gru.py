@@ -1,8 +1,11 @@
-"""GRU actor-critic used by shared RL controllers."""
+"""
+GRU actor-critic.
+
+LLM level: 0 - Written independently
+"""
 
 from typing import Optional
 from torch import nn
-
 import torch
 
 from .base import RecurrentActorCriticBase

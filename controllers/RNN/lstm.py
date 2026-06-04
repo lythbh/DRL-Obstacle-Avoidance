@@ -1,7 +1,10 @@
-"""LSTM actor-critic used by shared RL controllers."""
+"""
+LSTM actor-critic used by shared RL controllers.
+
+LLM level: 0 - Written independently
+"""
 
 from typing import Optional, Tuple
-
 import torch
 from torch import nn
 
