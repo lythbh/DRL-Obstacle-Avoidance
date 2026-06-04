@@ -47,6 +47,7 @@ class Config:
     lstm_hidden_size: int = d.PPODefaults.lstm_hidden_size
     lstm_layers: int = d.PPODefaults.lstm_layers
     recurrent_cell: str = d.PPODefaults.recurrent_cell
+    eval_model_path: Optional[str] = d.PPODefaults.eval_model_path
     sequence_length: int = d.RecurrentDefaults.sequence_length
     burn_in: int = d.RecurrentDefaults.burn_in
     sequence_stride: int = d.RecurrentDefaults.sequence_stride
@@ -498,6 +499,8 @@ def _apply_env_overrides(config: Config) -> tuple[Config, Optional[str], Optiona
         config.force_cpu = _env_bool("PPO_FORCE_CPU", config.force_cpu)
     if os.getenv("PPO_SEED"):
         set_all_seeds(int(os.environ["PPO_SEED"]))
+    if os.getenv("PPO_EVAL_MODEL_PATH"):
+        config.eval_model_path = os.environ["PPO_EVAL_MODEL_PATH"]
     if os.getenv("PPO_MOVING_OBSTACLE_INDICES"):
         raw = os.environ["PPO_MOVING_OBSTACLE_INDICES"].strip()
         if raw.lower() == "all":
@@ -722,9 +725,18 @@ def evaluate(config=None, model_path=None, episodes=10, deterministic=True):
     if config is None:
         config = Config()
     config, load_model_path, run_id_override = _apply_env_overrides(config)
-    model_path = model_path or os.getenv("PPO_EVAL_MODEL") or load_model_path
+    env_eval_model = os.getenv("PPO_EVAL_MODEL")
+    env_load_model = os.getenv("PPO_LOAD_MODEL")
+    initial_model_path = model_path
+    model_path = model_path or env_eval_model or config.eval_model_path or load_model_path
+    print(
+        f"[EVAL][PPO] model_path selection: initial={initial_model_path!r} "
+        f"PPO_EVAL_MODEL={env_eval_model!r} EVAL_MODEL_PATH={config.eval_model_path!r} PPO_LOAD_MODEL={load_model_path!r} "
+        f"=> selected={model_path!r}",
+        flush=True,
+    )
     if model_path is None:
-        raise ValueError("evaluate() requires model_path or PPO_LOAD_MODEL/PPO_EVAL_MODEL.")
+        raise ValueError("evaluate() requires model_path, PPO_EVAL_MODEL, EVAL_MODEL_PATH, or PPO_LOAD_MODEL/PPO_EVAL_MODEL.")
 
     _init_supervisor()
     reward_computer = PPORewardComputer(
@@ -760,6 +772,10 @@ def evaluate(config=None, model_path=None, episodes=10, deterministic=True):
         flush=True,
     )
 
+    metrics_logger = MetricsLogger(env.run_folder, algorithm="ppo")
+    metrics_logger.log_hyperparams(asdict(config), recurrent_cell=config.recurrent_cell,
+                                   obs_size=env.observation_size, action_dim=env.action_dim)
+
     try:
         for episode in range(episodes):
             obs, _ = env.reset()
@@ -770,13 +786,17 @@ def evaluate(config=None, model_path=None, episodes=10, deterministic=True):
             ep_success = False
             ep_end_reason = "max_steps"
             ep_speeds = []
+            ep_obs = []
+            ep_act = []
             recurrent_state = agent.get_initial_state(batch_size=1)
             prev_done = True
 
             while not done:
+                ep_obs.append(obs)
                 action, _, _, recurrent_state = agent.select_action(
                     obs, recurrent_state, done=prev_done, deterministic=deterministic,
                 )
+                ep_act.append(action)
                 obs, reward, terminated, truncated, info = env.step(action)
                 done = terminated or truncated
                 prev_done = done
@@ -796,6 +816,31 @@ def evaluate(config=None, model_path=None, episodes=10, deterministic=True):
             collisions.append(1.0 if ep_end_reason == "collision" else 0.0)
             timeouts.append(1.0 if ep_end_reason == "max_steps" else 0.0)
             avg_spd = float(np.mean(ep_speeds)) * config.max_speed if ep_speeds else 0.0
+
+            act_stats = MetricsLogger.compute_action_stats(ep_act)
+            obs_stats = MetricsLogger.compute_obs_stats(ep_obs)
+            elapsed = time.perf_counter() - start_time
+
+            metrics_logger.log_episode(
+                episode=episode + 1,
+                global_step=total_steps,
+                reward=round(ep_reward, 4),
+                avg10=round(ep_reward, 4),
+                length=ep_step,
+                success=int(ep_success),
+                goal_touched=int(ep_goal),
+                collision=int(ep_end_reason == "collision"),
+                timeout=int(ep_end_reason == "max_steps"),
+                min_dist=round(env.min_episode_distance, 4),
+                avg_speed_ms=round(avg_spd, 3),
+                end_reason=ep_end_reason,
+                elapsed_s=round(elapsed, 1),
+                recurrent_cell=config.recurrent_cell,
+                replay_buffer_size=0,
+                **act_stats,
+                **obs_stats,
+            )
+
             print(
                 f"[EVAL][PPO] ep={episode + 1:03d}/{episodes} r={ep_reward:8.2f} "
                 f"steps={ep_step:4d} success={int(ep_success)} touch={int(ep_goal)} "
@@ -804,6 +849,7 @@ def evaluate(config=None, model_path=None, episodes=10, deterministic=True):
                 flush=True,
             )
     finally:
+        metrics_logger.close()
         env.robot.stop()
         env.robot.supervisor.simulationQuit(0)
 
@@ -828,5 +874,5 @@ def evaluate(config=None, model_path=None, episodes=10, deterministic=True):
     return summary
 
 if __name__ == "__main__":
-    train()
-    # evaluate()
+    # train()
+    evaluate()

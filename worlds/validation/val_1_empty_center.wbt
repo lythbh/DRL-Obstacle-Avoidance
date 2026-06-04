@@ -3,77 +3,78 @@
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/drinks/protos/WaterBottle.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/chairs/protos/WoodenChair.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/drinks/protos/BeerBottle.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/obstacles/protos/OilBarrel.proto"
 
 WorldInfo {
 }
-
 Viewpoint {
-  orientation -0.01226883505553565 0.999689345373289 0.02169535511359242 1.0298143119969385
-  position -11.582393906931934 -0.4294819623663883 16.03315727551396
+  orientation -0.0022709476935604744 0.9999801999053443 0.00586878129093526 0.7395613166396967
+  position -6.659346476060497 -0.04102765187948823 5.7385638533786425
 }
-
 TexturedBackground {
 }
-
 TexturedBackgroundLight {
 }
-
 RectangleArena {
   rotation 0 0 1 3.14159
   floorSize 5 5
 }
-
-# Obstacle 1: Oil Barrel near center-left
-
-# Validation 1 — Stage 1: empty arena, goal centred at y=0
-
 DEF GOAL_MARKER Solid {
-  translation 2.0 0.0000 0.001
+  translation 2 0 0.001
   children [
     Shape {
       appearance PBRAppearance {
-        baseColor 0.0 0.9 0.2
-        roughness 0.8
-        emissiveColor 0.0 0.5 0.1
+        baseColor 0 0.9 0.2
         transparency 0.2
+        roughness 0.8
+        emissiveColor 0 0.5 0.1
       }
-      geometry Cylinder { height 0.002 radius 0.30 }
+      geometry Cylinder {
+        height 0.002
+        radius 0.3
+      }
     }
   ]
   name "goal_marker"
 }
-
 DEF BARRIER_TOP Solid {
-  translation 1.5 1.5500 0.25
+  translation 1.5 1.55 0.25
   children [
     Shape {
-      appearance PBRAppearance { baseColor 0.5 0.5 0.5 roughness 0.8 }
-      geometry Box { size 0.2 2.4 0.5 }
+      appearance PBRAppearance {
+        baseColor 0.5 0.5 0.5
+        roughness 0.8
+      }
+      geometry Box {
+        size 0.2 2.4 0.5
+      }
     }
   ]
-  boundingObject Box { size 0.2 2.4 0.5 }
   name "barrier_top"
+  boundingObject Box {
+    size 0.2 2.4 0.5
+  }
 }
-
 DEF BARRIER_BOTTOM Solid {
-  translation 1.5 -1.5500 0.25
+  translation 1.5 -1.55 0.25
   children [
     Shape {
-      appearance PBRAppearance { baseColor 0.5 0.5 0.5 roughness 0.8 }
-      geometry Box { size 0.2 2.4 0.5 }
+      appearance PBRAppearance {
+        baseColor 0.5 0.5 0.5
+        roughness 0.8
+      }
+      geometry Box {
+        size 0.2 2.4 0.5
+      }
     }
   ]
-  boundingObject Box { size 0.2 2.4 0.5 }
   name "barrier_bottom"
+  boundingObject Box {
+    size 0.2 2.4 0.5
+  }
 }
-
 DEF ALTINO Robot {
-  translation -2.27893 -0.01536 0.017746
-  rotation -0.0004672650704620882 0.008802191327342489 -0.9999611507909648 -0.10100530717958645
+  translation 0.4672273274276515 1.7075640581334697 0.019518511919523876
+  rotation 0.0002525697463142574 -0.0014907864627969848 0.9999988568814695 0.33549255035144243
   children [
     GPS {
       translation 0.039 0 0
@@ -90,14 +91,14 @@ DEF ALTINO Robot {
       children [
         DEF LEFT_STEER_HINGE2 Hinge2Joint {
           jointParameters HingeJointParameters {
-            position -0.03169947924334489
+            position 3.469212984811079e-09
             axis 0 0 -1
             suspensionSpringConstant 100000
             suspensionDampingConstant 4000
             suspensionAxis 0 0 1
           }
           jointParameters2 JointParameters {
-            position 10632.220146832571
+            position 10781.583115507432
             axis 0 -1 0
             dampingConstant 5
           }
@@ -133,7 +134,7 @@ DEF ALTINO Robot {
             endPoint Slot {
               type "vehicle wheel"
               endPoint Solid {
-                rotation 0.015843419528625377 -0.9995175433153356 0.02671454028270616 1.0710305876545652
+                rotation 1.7346064924055398e-09 1 -9.455304411056e-09 0.36287161273838225
                 children [
                   DEF WHEEL_SLOT Group {
                   }
@@ -236,6 +237,8 @@ DEF ALTINO Robot {
                 }
                 physics Physics {
                 }
+                linearVelocity -1.5946595274672015e-07 1.2913146289947517e-07 4.039355965265441e-10
+                angularVelocity -2.460020189480674e-07 -1.659046978214934e-07 3.1104887264555484e-07
               }
             }
           }
@@ -247,14 +250,14 @@ DEF ALTINO Robot {
       children [
         DEF RIGHT_STEER_HINGE2 Hinge2Joint {
           jointParameters HingeJointParameters {
-            position -0.031699465930826835
+            position 3.4694336182184565e-09
             axis 0 0 -1
             suspensionSpringConstant 100000
             suspensionDampingConstant 4000
             suspensionAxis 0 0 1
           }
           jointParameters2 JointParameters {
-            position 10656.137551388894
+            position 10805.500513072531
             axis 0 1 0
             dampingConstant 5
           }
@@ -290,7 +293,7 @@ DEF ALTINO Robot {
             endPoint Slot {
               type "vehicle wheel"
               endPoint Solid {
-                rotation 0.015483331436272039 -0.9768009912187732 0.2135885998869242 0.14815449712535672
+                rotation -1.7347168091092283e-09 -1 -1.7218945376771694e-09 1.578215276357492
                 children [
                   DEF WHEEL_SLOT Group {
                   }
@@ -393,6 +396,8 @@ DEF ALTINO Robot {
                 }
                 physics Physics {
                 }
+                linearVelocity 8.070498896280909e-08 1.1434303998371199e-07 6.699572695300982e-09
+                angularVelocity -2.506805312812267e-07 -1.5814388294688933e-07 3.110484139698792e-07
               }
             }
           }
@@ -405,7 +410,7 @@ DEF ALTINO Robot {
       children [
         DEF LEFT_REAR_WHEEL_HINGE HingeJoint {
           jointParameters HingeJointParameters {
-            position 10629.198779856622
+            position 10778.590293917392
             axis 0 -1 0
             dampingConstant 5
             suspensionSpringConstant 100000
@@ -432,7 +437,7 @@ DEF ALTINO Robot {
             endPoint Slot {
               type "vehicle wheel"
               endPoint Solid {
-                rotation 0 1 0 1.9507598912378963
+                rotation 0 1 0 3.3556932027783484
                 children [
                   DEF WHEEL_SLOT Group {
                   }
@@ -535,6 +540,8 @@ DEF ALTINO Robot {
                 }
                 physics Physics {
                 }
+                linearVelocity 3.940863365739466e-07 1.2006445923364057e-07 -7.667096616562127e-09
+                angularVelocity -3.1760856428767875e-08 -6.92082604390604e-08 2.544533654805037e-07
               }
             }
           }
@@ -546,7 +553,7 @@ DEF ALTINO Robot {
       children [
         DEF RIGHT_REAR_WHEEL_HINGE HingeJoint {
           jointParameters HingeJointParameters {
-            position 10653.813307600962
+            position 10803.204779879212
             axis 0 1 0
             dampingConstant 5
             suspensionSpringConstant 100000
@@ -573,7 +580,7 @@ DEF ALTINO Robot {
             endPoint Slot {
               type "vehicle wheel"
               endPoint Solid {
-                rotation 0 -1 0 2.4689733756169576
+                rotation 0 -1 0 3.8739484696768844
                 children [
                   DEF WHEEL_SLOT Group {
                   }
@@ -676,6 +683,8 @@ DEF ALTINO Robot {
                 }
                 physics Physics {
                 }
+                linearVelocity -3.252313316852105e-07 -3.524757157690509e-07 5.238854648715562e-10
+                angularVelocity -2.4729243486524115e-08 -1.0208959367089233e-07 2.5446239301428814e-07
               }
             }
           }
@@ -990,4 +999,6 @@ DEF ALTINO Robot {
   radarCrossSection 100
   controller "PPO"
   supervisor TRUE
+  linearVelocity -3.8045495145411225e-09 3.0232280994746397e-09 -2.1447590370371472e-10
+  angularVelocity -6.373819660194667e-08 -9.784141195098998e-08 2.601756878087409e-07
 }

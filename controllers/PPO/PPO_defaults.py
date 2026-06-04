@@ -63,7 +63,7 @@ class RecurrentDefaults:
 
 class PPODefaults:
     """PPO-specific training hyperparameters."""
-    episodes = 500
+    episodes = 1
     update_every = 4
     epochs = 4
     batch_size = 128
@@ -77,4 +77,5 @@ class PPODefaults:
     latent_size = 128
     lstm_hidden_size = 128
     lstm_layers = 1
-    recurrent_cell = "gru"
+    recurrent_cell = "none"
+    eval_model_path = "controllers/PPO/checkpoints/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed05_stage01_train_13_moving_goal/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed00_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed00_stage01_train_13_moving_goal.pth"
