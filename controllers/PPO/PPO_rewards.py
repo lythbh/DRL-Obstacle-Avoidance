@@ -1,10 +1,15 @@
-﻿"""PPO-specific reward computation for obstacle avoidance task."""
+﻿"""
+PPO-specific reward computation for obstacle avoidance task.
+
+LLM level: 3 - LLM generated the skeleton, we added the reward logic.
+"""
 
 from typing import Optional, Tuple
-
 import numpy as np
-
 from controllers.PPO.PPO_defaults import (
+    ENV_ENDPOINT,
+    ENV_GOAL_THRESHOLD,
+    ENV_REFERENCE_DISTANCE,
     REW_COLLISION_PENALTY,
     REW_DISTANCE_SCALE,
     REW_GOAL_HOLD,
@@ -23,12 +28,48 @@ from controllers.PPO.PPO_defaults import (
 
 
 class PPORewardComputer:
-    """Computes rewards for the obstacle avoidance task (PPO variant)."""
+    """
+    Computes rewards for the obstacle avoidance task.
+
+    Attributes
+    ----------
+    endpoint : np.ndarray
+        The goal position in the environment.
+    reference_distance : float
+        The reference distance for distance-based rewards.
+    collision_reward : float
+        The penalty for colliding with an obstacle.
+    progress_scale : float
+        The scaling factor for progress rewards.
+    distance_reward_scale : float
+        The scaling factor for distance rewards.
+    heading_reward_scale : float
+        The scaling factor for heading rewards.
+    safety_reward_scale : float
+        The scaling factor for safety rewards.
+    motion_reward_scale : float
+        The scaling factor for motion rewards.
+    slow_speed_threshold : float
+        The speed threshold below which a slow speed penalty is applied.
+    slow_speed_penalty : float
+        The penalty for moving too slowly.
+    high_speed_threshold : float
+        The speed threshold above which a high speed bonus is applied.
+    high_speed_bonus : float
+        The bonus for moving at high speed.
+    new_best_distance_bonus : float
+        The bonus for achieving a new best distance.
+    step_penalty : float
+        The penalty for each step taken.
+    goal_success_reward : float
+        The reward for successfully reaching the goal
+    """
+
 
     def __init__(
         self,
-        endpoint: Tuple[float, float] = (2.0, 0.0),
-        reference_distance: float = 4.0,
+        endpoint: Tuple[float, float] = ENV_ENDPOINT,
+        reference_distance: float = ENV_REFERENCE_DISTANCE,
         collision_penalty: float = REW_COLLISION_PENALTY,
         progress_reward_scale: float = REW_PROGRESS_SCALE,
         distance_reward_scale: float = REW_DISTANCE_SCALE,
@@ -41,11 +82,10 @@ class PPORewardComputer:
         high_speed_bonus: float = REW_HIGH_SPEED_BONUS,
         new_best_distance_bonus: float = REW_NEW_BEST_DISTANCE_BONUS,
         step_penalty: float = REW_STEP_PENALTY,
-        goal_threshold: float = 0.3,
         goal_success_reward: float = REW_GOAL_SUCCESS,
         goal_hold_reward: float = REW_GOAL_HOLD,
+        goal_threshold: float = ENV_GOAL_THRESHOLD,
     ) -> None:
-        """Initialize reward computer with environment and tuning parameters."""
         self.endpoint = np.array(endpoint, dtype=np.float32)
         self.reference_distance = float(reference_distance)
         self.collision_reward = float(collision_penalty)
@@ -68,15 +108,37 @@ class PPORewardComputer:
         self,
         collision: bool,
         current_pos: np.ndarray,
-        current_step: int,
         prev_distance: Optional[float],
         goal_error: float,
         min_lidar_norm: float,
         speed_norm: float,
         reached_new_best_distance: bool,
-        accel: np.ndarray,
     ) -> Tuple[float, Optional[float]]:
-        """Compute reward from collision, progress, heading, safety, speed, and goal bonus components."""
+        """
+        Compute reward from collision, progress, heading, safety, speed, and goal bonus components.
+        
+        Parameters
+        ----------
+        collision : bool
+            Whether the robot has collided with an obstacle.
+        current_pos : np.ndarray
+            Current position of the robot.
+        prev_distance : Optional[float]
+            Previous distance to the goal.
+        goal_error : float
+            Angle between the robot's heading and the goal direction.
+        min_lidar_norm : float
+            Minimum normalized LiDAR reading.
+        speed_norm : float
+            Normalized speed of the robot.
+        reached_new_best_distance : bool
+            Whether the robot has reached a new best distance to the goal.
+
+        Returns
+        -------
+        Tuple[float, Optional[float]]
+            The computed reward and the new distance to the goal.
+        """
         if collision:
             return self.collision_reward, None
 

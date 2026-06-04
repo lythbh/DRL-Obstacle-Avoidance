@@ -1,6 +1,13 @@
-﻿"""Consolidated defaults for environment, SLAM, rewards, and training."""
+﻿"""
+Consolidated defaults for environment, SLAM, rewards, and training.
 
-"""Environment observation / physics."""
+LLM level: 0 - Written independently
+"""
+
+import math
+
+
+"""Environmental and sensors"""
 ENV_LIDAR_SECTOR_DIM = 16
 ENV_POSE_GOAL_DIM = 5
 ENV_IMU_FEATURE_DIM = 10
@@ -19,14 +26,17 @@ ENV_START_ROTATION = (0.0, 0.0, 1.0, 0.0)
 ENV_START_POSITION_NOISE = 0.08
 ENV_START_YAW_NOISE = 0.8
 ENV_RESET_SETTLE_STEPS = 10
+ENV_REFERENCE_DISTANCE = math.dist(ENV_ENDPOINT, ENV_START_POSITION[:2])
 
-"""SLAM."""
+
+"""SLAM"""
 SLAM_ENABLE = False
 SLAM_SAVE_PLOTS = False
 SLAM_FORCE_CPU = True
 SLAM_PROFILE_INTERVAL = 100
 
-"""Reward."""
+
+"""Reward"""
 REW_COLLISION_PENALTY = -50.0
 REW_PROGRESS_SCALE = 2.0
 REW_DISTANCE_SCALE = 0.05
@@ -46,13 +56,15 @@ REW_GOAL_OVERSHOOT_PENALTY = -12.0
 REW_SCALE = 0.01
 REW_PROXIMITY_RADIUS = 1.5
 
+
 """Moving obstacles."""
-MOVING_OBSTACLE_INDICES: list = []          # 0-indexed; empty = none
-MOVING_OBSTACLE_SPEED: float = 0.3          # angular frequency (rad/s)
-MOVING_OBSTACLE_AMPLITUDE: float = 0.4      # peak y-displacement (m)
+MOVING_OBSTACLE_INDICES: list = []
+MOVING_OBSTACLE_SPEED: float = 0.3
+MOVING_OBSTACLE_AMPLITUDE: float = 0.4
 MOVING_GOAL: bool = False
 MOVING_GOAL_SPEED: float = 0.2
 MOVING_GOAL_AMPLITUDE: float = 0.5
+
 
 """Training."""
 class RecurrentDefaults:

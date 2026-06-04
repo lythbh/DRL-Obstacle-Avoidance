@@ -1,7 +1,7 @@
 """
 Reproducible seed helpers shared across all controllers.
 
-LLM-level: 0 - Written independently
+LLM level: 0 - Written independently
 """
 
 import random
