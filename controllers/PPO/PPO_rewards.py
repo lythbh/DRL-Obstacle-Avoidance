@@ -104,6 +104,7 @@ class PPORewardComputer:
         self.goal_success_reward = float(goal_success_reward)
         self.goal_hold_reward = float(goal_hold_reward)
 
+
     def compute(
         self,
         collision: bool,

@@ -1,5 +1,5 @@
 ﻿"""
-Consolidated defaults for environment, SLAM, rewards, and training.
+Consolidated defaults for environment, mapping, rewards, and training.
 
 LLM level: 0 - Written independently
 """
@@ -29,11 +29,12 @@ ENV_RESET_SETTLE_STEPS = 10
 ENV_REFERENCE_DISTANCE = math.dist(ENV_ENDPOINT, ENV_START_POSITION[:2])
 
 
-"""SLAM"""
-SLAM_ENABLE = False
-SLAM_SAVE_PLOTS = False
-SLAM_FORCE_CPU = True
-SLAM_PROFILE_INTERVAL = 100
+"""Mapping"""
+enable_mapping = False
+save_mapping_plots = False
+
+"""Runtime."""
+force_cpu = True
 
 
 """Reward"""
@@ -90,3 +91,5 @@ class PPODefaults:
     lstm_hidden_size = 128
     lstm_layers = 1
     recurrent_cell = "gru"
+    enable_mapping = enable_mapping
+    save_mapping_plots = save_mapping_plots

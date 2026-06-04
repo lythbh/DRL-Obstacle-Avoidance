@@ -60,7 +60,6 @@ class SLAMProcessor:
         goal: Tuple[float, float] = (0.0, 0.0),
         lidar_sector_dim: int = N_SECTORS,
         enabled: bool = True,
-        profile_interval: int = 500,
         save_episodes: bool = False,
     ) -> None:
         """Initialize SLAM processor with IMU filtering, IEKF backend, and occupancy mapping."""
@@ -214,9 +213,8 @@ class AltinoDriver:
             dt=self._dt,
             goal=config.endpoint,
             lidar_sector_dim=config.lidar_sector_dim,
-            enabled=bool(getattr(config, "enable_slam", True)),
-            profile_interval=int(getattr(config, "slam_profile_interval", 500)),
-            save_episodes=bool(getattr(config, "save_slam_plots", True)),
+            enabled=bool(config.enable_mapping),
+            save_episodes=bool(config.save_mapping_plots),
         )
 
         try:

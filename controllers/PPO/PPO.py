@@ -1,11 +1,15 @@
-﻿"""PPO training controller for ALTINO robot in Webots obstacle avoidance task."""
+﻿"""
+PPO training controller for ALTINO robot in Webots obstacle avoidance task.
+
+LLM level:
+"""
+
 import math
 import os
 import sys, time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Tuple, List, Optional
-
+from typing import Any, Tuple, List, Optional, Generator, cast
 import numpy as np
 import torch
 from torch import nn
@@ -26,14 +30,29 @@ from controllers.common.metrics_logger import MetricsLogger
 from controllers.common.seed import set_all_seeds
 
 _CONTROLLER_DIR = Path(__file__).resolve().parent
+_CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 
 
 def _sequence_loss_mask(valid_mask: torch.Tensor, burn_in: int) -> torch.Tensor:
-    """Create learning mask that excludes burn-in steps from gradient computation."""
+    """
+    Create learning mask that excludes burn-in steps from gradient computation.
+    
+    Parameters
+    ---------
+    valid_mask : torch.Tensor
+        Mask of valid steps in the sequence.
+    burn_in : int
+        Number of burn-in steps to exclude from gradient computation.
+
+    Returns
+    -------
+    torch.Tensor
+        Mask of valid steps excluding burn-in steps.
+    """
     valid_lengths = valid_mask.sum(dim=1).to(dtype=torch.long)
     start_index = torch.minimum(torch.full_like(valid_lengths, burn_in), torch.clamp(valid_lengths - 1, min=0))
+    
     return valid_mask * (torch.arange(valid_mask.shape[1], device=valid_mask.device).unsqueeze(0) >= start_index.unsqueeze(1)).to(dtype=valid_mask.dtype)
-_CHECKPOINT_DIR = _CONTROLLER_DIR / "checkpoints"
 
 
 @dataclass
@@ -50,19 +69,11 @@ class Config:
     entropy_coef: float = d.PPODefaults.entropy_coef
     hidden_size: int = d.PPODefaults.hidden_size
     latent_size: int = d.PPODefaults.latent_size
-    lstm_hidden_size: int = d.PPODefaults.lstm_hidden_size
-    lstm_layers: int = d.PPODefaults.lstm_layers
     recurrent_cell: str = d.PPODefaults.recurrent_cell
     sequence_length: int = d.RecurrentDefaults.sequence_length
     burn_in: int = d.RecurrentDefaults.burn_in
     sequence_stride: int = d.RecurrentDefaults.sequence_stride
-    lidar_sector_dim: int = d.ENV_LIDAR_SECTOR_DIM
-    pose_goal_dim: int = d.ENV_POSE_GOAL_DIM
-    imu_feature_dim: int = d.ENV_IMU_FEATURE_DIM
-    occupancy_grid_shape: Optional[Tuple[int, ...]] = d.ENV_OCCUPANCY_GRID_SHAPE
-    max_steps: int = d.ENV_MAX_STEPS
-    collision_threshold: float = d.ENV_COLLISION_THRESHOLD
-    low_score_threshold: float = d.ENV_LOW_SCORE_THRESHOLD
+    
     collision_penalty: float = d.REW_COLLISION_PENALTY
     progress_reward_scale: float = d.REW_PROGRESS_SCALE
     distance_reward_scale: float = d.REW_DISTANCE_SCALE
@@ -71,27 +82,24 @@ class Config:
     motion_reward_scale: float = d.REW_MOTION_SCALE
     new_best_distance_bonus: float = d.REW_NEW_BEST_DISTANCE_BONUS
     step_penalty: float = d.REW_STEP_PENALTY
-    endpoint: Tuple[float, float] = d.ENV_ENDPOINT
-    goal_threshold: float = d.ENV_GOAL_THRESHOLD
     goal_success_reward: float = d.REW_GOAL_SUCCESS
     goal_hold_reward: float = d.REW_GOAL_HOLD
-    goal_overshoot_penalty: float = d.REW_GOAL_OVERSHOOT_PENALTY
-    reference_distance: Optional[float] = None
-    enable_slam: bool = d.SLAM_ENABLE
-    slam_profile_interval: int = d.SLAM_PROFILE_INTERVAL
-    save_slam_plots: bool = d.SLAM_SAVE_PLOTS
-    force_cpu: bool = d.SLAM_FORCE_CPU
-    max_steering_angle: float = d.ENV_MAX_STEERING_ANGLE
-    min_speed: float = d.ENV_MIN_SPEED
+    lidar_sector_dim: int = d.ENV_LIDAR_SECTOR_DIM
+    pose_goal_dim: int = d.ENV_POSE_GOAL_DIM
+    imu_feature_dim: int = d.ENV_IMU_FEATURE_DIM
+    force_cpu: bool = d.force_cpu
+    enable_mapping: bool = d.enable_mapping
+    save_mapping_plots: bool = d.save_mapping_plots
 
-    randomize_goal: bool = False
-    goal_y_range: float = 1.5
+    max_steps: int = d.ENV_MAX_STEPS
+    endpoint: Tuple[float, float] = d.ENV_ENDPOINT
+    goal_threshold: float = d.ENV_GOAL_THRESHOLD
+    reference_distance: Optional[float] = None
     start_position: Optional[List[float]] = None
     start_rotation: Optional[List[float]] = None
-    start_position_noise: float = d.ENV_START_POSITION_NOISE
-    start_yaw_noise: float = d.ENV_START_YAW_NOISE
+    max_steering_angle: float = d.ENV_MAX_STEERING_ANGLE
     max_speed: float = d.ENV_MAX_SPEED
-    reset_settle_steps: int = d.ENV_RESET_SETTLE_STEPS
+    min_speed: float = d.ENV_MIN_SPEED
 
     moving_obstacle_indices: Optional[List[int]] = None
     moving_obstacle_speed: float = d.MOVING_OBSTACLE_SPEED
@@ -100,32 +108,53 @@ class Config:
     moving_goal_speed: float = d.MOVING_GOAL_SPEED
     moving_goal_amplitude: float = d.MOVING_GOAL_AMPLITUDE
 
+
     def __post_init__(self):
-        """Initialize mutable fields and validate recurrent cell type."""
+        """
+        Initialize mutable fields and validate recurrent cell type.
+        """
         self.recurrent_cell = self.recurrent_cell.lower().strip()
         aliases = {"mlp": "none", "feedforward": "none", "ff": "none"}
         self.recurrent_cell = aliases.get(self.recurrent_cell, self.recurrent_cell)
         assert self.recurrent_cell in {"none", "lstm", "gru"}, f"Unsupported recurrent_cell: {self.recurrent_cell}"
+        
         if self.recurrent_cell == "none":
-            self.burn_in = 0
+            self.burn_in = 0    
             self.sequence_length = max(1, self.sequence_length)
+        
         if self.start_position is None:
             self.start_position = list(d.ENV_START_POSITION)
+        
         if self.start_rotation is None:
             self.start_rotation = list(d.ENV_START_ROTATION)
+        
         if self.reference_distance is None:
             start_xy = np.array(self.start_position[:2], dtype=np.float32)
             endpoint_xy = np.array(self.endpoint, dtype=np.float32)
             self.reference_distance = float(np.linalg.norm(start_xy - endpoint_xy))
+        
         if self.moving_obstacle_indices is None:
             self.moving_obstacle_indices = []
 
 
 class FeedForwardActorCritic(nn.Module):
-    """Feed-forward actor-critic with PPO's structured observation branches."""
+    """
+    Feed-forward actor-critic with PPO's structured observation branches.
+    """
 
     def __init__(self, obs_size: int, action_dim: int, config: Config) -> None:
-        """Initialize branch encoders, fusion network, and policy/value heads."""
+        """
+        Initialize branch encoders, fusion network, and policy/value heads.
+        
+        Parameters
+        ----------
+        obs_size: int
+            Observation space dimension.
+        action_dim: int
+            Action space dimension.
+        config: Config
+            Configuration object.
+        """
         super().__init__()
         self.obs_size = obs_size
         self.action_dim = action_dim
@@ -134,10 +163,21 @@ class FeedForwardActorCritic(nn.Module):
         self.imu_dim = config.imu_feature_dim
         self.structured_obs_dim = self.obstacle_dim + self.pose_goal_dim + self.imu_dim
         self.grid_feature_dim = max(obs_size - self.structured_obs_dim, 0)
-
         branch_latent_dim = max(config.latent_size // 2, 32)
 
-        def _branch(in_dim):
+
+        def _branch(in_dim) -> torch.nn.Sequential:
+            """
+            Encode one structured observation branch into a shared latent size.
+
+            Each branch consists of two linear layers with ReLU activation between them.
+            This lets the network learn a nonlinear embedding for each sensor feature group.
+
+            Returns
+            -------
+            torch.nn.Sequential
+                A small feed-forward encoder for one observation branch.
+            """
             return nn.Sequential(
                 nn.Linear(in_dim, config.hidden_size), nn.ReLU(),
                 nn.Linear(config.hidden_size, branch_latent_dim), nn.ReLU(),
@@ -147,32 +187,56 @@ class FeedForwardActorCritic(nn.Module):
         self.pose_goal_encoder = _branch(self.pose_goal_dim)
         self.imu_encoder = _branch(self.imu_dim)
         grid_latent_dim = config.latent_size if self.grid_feature_dim > 0 else 0
-        self.grid_encoder = (
-            nn.Sequential(
+        
+        self.grid_encoder = None
+        if self.grid_feature_dim > 0:
+            self.grid_encoder = nn.Sequential(
                 nn.Linear(self.grid_feature_dim, config.hidden_size), nn.ReLU(),
                 nn.Linear(config.hidden_size, grid_latent_dim), nn.ReLU(),
             )
-            if self.grid_feature_dim > 0 else None
-        )
+        
         self.encoder = nn.Sequential(
             nn.Linear(3 * branch_latent_dim + grid_latent_dim, config.hidden_size), nn.ReLU(),
             nn.Linear(config.hidden_size, config.latent_size), nn.ReLU(),
         )
+        
         self.policy_head = nn.Linear(config.latent_size, action_dim)
         self.value_head = nn.Linear(config.latent_size, 1)
 
-    def get_initial_state(self, batch_size: int, device: Optional[torch.device] = None):
-        """Return None as feed-forward has no recurrent state."""
+
+    def get_initial_state(self, batch_size: int) -> None:
+        """
+        Return None as feed-forward has no recurrent state.
+        """
         return None
 
-    def forward(self, observation, recurrent_state=None, done_mask=None):
-        """Forward pass: encode observations through branches, output policy & value."""
+
+    def forward(self, observation) -> tuple[torch.Tensor, torch.Tensor, None]:
+        """
+        Forward pass through the recurrent actor-critic network.
+
+        Encodes structured observation branches (obstacle, pose/goal, IMU, optional grid),
+        runs the recurrent core (GRU/LSTM) with done-mask-aware hidden state resets,
+        and produces policy (action mean) and value outputs.
+
+        Parameters
+        ----------
+        observation : torch.Tensor
+            Observation tensor of shape (batch_size, seq_len, obs_size) or (obs_size,).
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor, None]
+            Policy logits, state values, and recurrent state (None for feed-forward).
+        """
         obs = torch.as_tensor(observation, dtype=torch.float32, device=next(self.parameters()).device)
         single_step = obs.ndim == 1
+        
         if obs.ndim == 1:
             obs = obs.view(1, 1, -1)
         elif obs.ndim == 2:
             obs = obs.view(1, obs.shape[0], -1)
+        
         batch_size, seq_len = obs.shape[:2]
         flat = obs.reshape(batch_size * seq_len, -1)
 
@@ -184,19 +248,38 @@ class FeedForwardActorCritic(nn.Module):
             self.pose_goal_encoder(flat[:, obstacle_end:pose_goal_end]),
             self.imu_encoder(flat[:, pose_goal_end:imu_end]),
         ]
+        
         if self.grid_encoder is not None:
             encoded.append(self.grid_encoder(flat[:, imu_end:]))
 
         latent = self.encoder(torch.cat(encoded, dim=-1))
         policy_output = self.policy_head(latent).reshape(batch_size, seq_len, self.action_dim)
         state_value = self.value_head(latent).reshape(batch_size, seq_len)
+        
         if single_step or seq_len == 1:
             policy_output = policy_output[:, 0]
+        
         return policy_output, state_value, None
 
 
-def _split_sequences(episodes, seq_len, stride):
-    """Split episode trajectories into overlapping sequences for recurrent training."""
+def _split_sequences(episodes, seq_len, stride) -> Generator[dict, None, None]:
+    """
+    Split episode trajectories into overlapping sequences for recurrent training.
+
+    Parameters
+    ----------
+    episodes : list[dict]
+        List of episodes, each containing observation, action, reward, done, and returns.
+    seq_len : int
+        Length of each sequence.
+    stride : int
+        Stride between sequences.
+
+    Yields
+    ------
+    dict
+        Dictionary containing observation, action, reward, done, and returns for each sequence.
+    """
     for ep in episodes:
         total = len(ep["returns"])
         for start in range(0, total, stride):
@@ -240,8 +323,10 @@ class PPOAgent:
         return torch.device("cuda")
 
     def get_initial_state(self, batch_size: int = 1) -> Optional[RecurrentState]:
-        """Get initial hidden state for the recurrent neural network."""
-        return self.model.get_initial_state(batch_size, device=self.device)
+        """Get initial hidden state for the neural network."""
+        if self.config.recurrent_cell == "none":
+            return self.model.get_initial_state(batch_size)
+        return cast(Any, self.model).get_initial_state(batch_size, device=self.device)
 
     def _sample_action(self, policy_output, deterministic=False):
         """Sample action from normal distribution with tanh squashing and proper log probability computation."""
@@ -262,9 +347,12 @@ class PPOAgent:
         """Select an action given observation and recurrent state, returning action, log prob, value, and next state."""
         done_mask = torch.tensor([float(done)], dtype=torch.float32, device=self.device)
         with torch.no_grad():
-            policy_output, state_value, next_state = self.model(
-                obs, recurrent_state=recurrent_state, done_mask=done_mask,
-            )
+            if self.config.recurrent_cell == "none":
+                policy_output, state_value, next_state = self.model(obs)
+            else:
+                policy_output, state_value, next_state = self.model(
+                    obs, recurrent_state=recurrent_state, done_mask=done_mask,
+                )
             action, log_prob = self._sample_action(policy_output, deterministic=deterministic)
         return (
             action.squeeze(0).cpu().numpy(),
@@ -401,9 +489,12 @@ class PPOAgent:
 
     def evaluate_sequences(self, observations, actions, done_mask):
         """Evaluate log probabilities, state values, and entropy for given observations and actions (batch)."""
-        policy_output, state_values, _ = self.model(
-            observations, recurrent_state=self.get_initial_state(observations.shape[0]), done_mask=done_mask,
-        )
+        if self.config.recurrent_cell == "none":
+            policy_output, state_values, _ = self.model(observations)
+        else:
+            policy_output, state_values, _ = self.model(
+                observations, recurrent_state=self.get_initial_state(observations.shape[0]), done_mask=done_mask,
+            )
         mean = policy_output
         std = self.actor_log_std.expand_as(policy_output).exp().clamp_min(1e-3)
         dist = Normal(mean, std)
