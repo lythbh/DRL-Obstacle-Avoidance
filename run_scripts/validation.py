@@ -4,15 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import os
+import queue
 import re
-import shlex
 import shutil
 import subprocess
 import sys
-import time
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -169,7 +168,7 @@ def run_webots(run: ValidationRun, port: int, webots_cmd: str, patch_defaults: b
     env["PPO_ARCH"] = run.arch
     env["PPO_SEED"] = str(run.seed)
     env["PPO_EVAL_MODEL_PATH"] = str(run.checkpoint)
-    env["PPO_EPISODES"] = "1"
+    env["PPO_EPISODES"] = "10"
     env["PPO_RUN_ID"] = run.run_id
 
     cmd = [
@@ -194,10 +193,15 @@ def run_webots(run: ValidationRun, port: int, webots_cmd: str, patch_defaults: b
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run validation evaluation across static and moving worlds.")
     parser.add_argument("--webots-cmd", default="webots", help="Webots executable command.")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Webots port.")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Base Webots port; each worker gets port+N.")
+    parser.add_argument("--workers", type=int, default=10, help="Number of parallel Webots instances.")
     parser.add_argument("--patch-defaults", action="store_true", help="Update PPO_defaults.py eval_model_path before each run.")
     parser.add_argument("--dry-run", action="store_true", help="Print the planned runs without launching Webots.")
     args = parser.parse_args()
+
+    if args.patch_defaults and args.workers > 1:
+        print("[ERROR] --patch-defaults is not safe with --workers > 1 (shared file race condition).", file=sys.stderr)
+        return 1
 
     static_worlds = resolve_worlds(STATIC_WORLD_GLOBS)
     moving_worlds = resolve_worlds(MOVING_WORLD_GLOBS)
@@ -215,11 +219,30 @@ def main() -> int:
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 1
 
-    for run in static_runs + moving_runs:
-        rc = run_webots(run, port=args.port, webots_cmd=webots_cmd, patch_defaults=args.patch_defaults)
-        if rc != 0:
-            return rc
-        time.sleep(5)
+    port_pool: queue.Queue[int] = queue.Queue()
+    for i in range(args.workers):
+        port_pool.put(args.port + i)
+
+    def run_one(run: ValidationRun) -> int:
+        port = port_pool.get()
+        try:
+            return run_webots(run, port=port, webots_cmd=webots_cmd, patch_defaults=args.patch_defaults)
+        finally:
+            port_pool.put(port)
+
+    all_runs = static_runs + moving_runs
+    failed = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
+        futures = {executor.submit(run_one, run): run for run in all_runs}
+        for future in concurrent.futures.as_completed(futures):
+            rc = future.result()
+            if rc != 0:
+                failed += 1
+
+    if failed:
+        print(f"[VALIDATION] {failed}/{len(all_runs)} run(s) failed.", file=sys.stderr)
+        return 1
+    print(f"[VALIDATION] All {len(all_runs)} runs completed successfully.")
     return 0
 
 
