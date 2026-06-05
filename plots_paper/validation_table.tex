@@ -1,0 +1,16 @@
+\begin{table}[htbp]
+\centering
+\caption{Validation success rates (\%) for each evaluation scenario, averaged over all seeds (9 episodes per seed). Mean\,$\pm$\,std across seeds. Static worlds use the stage-10 static model; moving worlds use the final moving-curriculum model.}
+\label{tab:validation}
+\begin{tabular}{lccccccccc}
+\toprule
+ & \multicolumn{5}{c}{Static worlds} & \multicolumn{4}{c}{Moving worlds} \\
+\cmidrule(lr){2-6}\cmidrule(lr){7-10}
+Architecture & W1 & W2 & W3 & W4 & W5 & W6 & W7 & W8 & W9 \\
+\midrule
+Feedforward & 100\,\% $\pm$ 0\,\% & 100\,\% $\pm$ 0\,\% & 100\,\% $\pm$ 0\,\% & 85\,\% $\pm$ 33\,\% & 96\,\% $\pm$ 8\,\% & 17\,\% $\pm$ 37\,\% & 4\,\% $\pm$ 8\,\% & 0\,\% $\pm$ 0\,\% & 17\,\% $\pm$ 37\,\% \\
+GRU & 100\,\% $\pm$ 0\,\% & 100\,\% $\pm$ 0\,\% & 100\,\% $\pm$ 0\,\% & 100\,\% $\pm$ 0\,\% & 96\,\% $\pm$ 5\,\% & 15\,\% $\pm$ 33\,\% & 17\,\% $\pm$ 37\,\% & 2\,\% $\pm$ 4\,\% & 17\,\% $\pm$ 37\,\% \\
+LSTM & 100\,\% $\pm$ 0\,\% & 89\,\% $\pm$ 25\,\% & 100\,\% $\pm$ 0\,\% & 69\,\% $\pm$ 45\,\% & 100\,\% $\pm$ 0\,\% & 2\,\% $\pm$ 4\,\% & 2\,\% $\pm$ 4\,\% & 0\,\% $\pm$ 0\,\% & 33\,\% $\pm$ 47\,\% \\
+\bottomrule
+\end{tabular}
+\end{table}

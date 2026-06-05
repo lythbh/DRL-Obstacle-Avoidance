@@ -1,0 +1,26 @@
+
+===== Static curriculum training =====
+  Feedforward  n=6  final_SR=0.896±0.038  overall_SR=0.818±0.022  final_rew=529.8±17.9
+  GRU          n=6  final_SR=0.864±0.060  overall_SR=0.782±0.037  final_rew=520.6±27.4
+  LSTM         n=6  final_SR=0.886±0.031  overall_SR=0.768±0.047  final_rew=534.0±19.5
+
+===== Moving curriculum training =====
+  Feedforward  n=6  final_SR=0.000±0.000  overall_SR=0.080±0.080  final_rew=11.8±13.5
+  GRU          n=6  final_SR=0.000±0.000  overall_SR=0.119±0.080  final_rew=19.1±12.9
+  LSTM         n=6  final_SR=0.000±0.000  overall_SR=0.058±0.064  final_rew=-32.7±78.4
+
+===== Static validation (worlds 1-5) =====
+  Feedforward   mean_SR=0.963±0.163  n_worlds×seeds=30
+  GRU           mean_SR=0.993±0.028  n_worlds×seeds=30
+  LSTM          mean_SR=0.915±0.259  n_worlds×seeds=30
+
+===== Moving validation (worlds 6-9) =====
+  Feedforward   mean_SR=0.093±0.277  n_worlds×seeds=24
+  GRU           mean_SR=0.125±0.318  n_worlds×seeds=24
+  LSTM          mean_SR=0.093±0.275  n_worlds×seeds=24
+
+  Per-world moving validation breakdown:
+    World 6 (One moving obstacle):  Feedforward=17%±37%  GRU=15%±33%  LSTM=2%±4%
+    World 7 (All moving obstacles):  Feedforward=4%±8%  GRU=17%±37%  LSTM=2%±4%
+    World 8 (Moving goal):  Feedforward=0%±0%  GRU=2%±4%  LSTM=0%±0%
+    World 9 (Offset moving goal):  Feedforward=17%±37%  GRU=17%±37%  LSTM=33%±47%

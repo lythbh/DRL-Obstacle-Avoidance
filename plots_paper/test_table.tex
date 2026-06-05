@@ -1,0 +1,16 @@
+\begin{table}[htbp]
+\centering
+\caption{Test success rates (\%) for each scenario, averaged over six seeds (9 episodes per seed). Mean\,$\pm$\,std across seeds. Static worlds use the stage-10 static model; moving worlds use the stage-13 moving-curriculum model. Moving-world means are inflated by single-seed outliers; five of six seeds score $0\%$ on every moving world.}
+\label{tab:test}
+\begin{tabular}{lccccccccc}
+\toprule
+ & \multicolumn{5}{c}{Static test worlds} & \multicolumn{4}{c}{Moving test worlds} \\
+\cmidrule(lr){2-6}\cmidrule(lr){7-10}
+Architecture & W1 & W2 & W3 & W4 & W5 & W6 & W7 & W8 & W9 \\
+\midrule
+Feedforward & $100\%\pm0\%$ & $100\%\pm0\%$ & $100\%\pm0\%$ & $85\%\pm33\%$ & $96\%\pm8\%$ & $17\%\pm37\%$ & $4\%\pm8\%$ & $0\%\pm0\%$ & $17\%\pm37\%$ \\
+GRU         & $100\%\pm0\%$ & $100\%\pm0\%$ & $100\%\pm0\%$ & $100\%\pm0\%$ & $96\%\pm5\%$ & $15\%\pm33\%$ & $17\%\pm37\%$ & $2\%\pm4\%$ & $17\%\pm37\%$ \\
+LSTM        & $100\%\pm0\%$ & $89\%\pm25\%$ & $100\%\pm0\%$ & $69\%\pm45\%$ & $100\%\pm0\%$ & $2\%\pm4\%$ & $2\%\pm4\%$ & $0\%\pm0\%$ & $33\%\pm47\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
