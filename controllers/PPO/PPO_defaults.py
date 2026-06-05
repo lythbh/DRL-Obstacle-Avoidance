@@ -78,4 +78,4 @@ class PPODefaults:
     lstm_hidden_size = 128
     lstm_layers = 1
     recurrent_cell = "none"
-    eval_model_path = "controllers/PPO/checkpoints/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed05_stage01_train_13_moving_goal/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed00_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed00_stage01_train_13_moving_goal.pth"
+    eval_model_path = "/Users/lyth/Documents/Robotikk/Master/2. Semester/FYS5429 Avansert maskinlæring og dataanalyse for fysiske fag/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed00_stage10_train_10_full/final_20260525_141956_none_seed00_stage10_train_10_full.pth"

@@ -725,6 +725,8 @@ def evaluate(config=None, model_path=None, episodes=10, deterministic=True):
     if config is None:
         config = Config()
     config, load_model_path, run_id_override = _apply_env_overrides(config)
+    if os.getenv("PPO_EPISODES"):
+        episodes = int(os.environ["PPO_EPISODES"])
     env_eval_model = os.getenv("PPO_EVAL_MODEL")
     env_load_model = os.getenv("PPO_LOAD_MODEL")
     initial_model_path = model_path
@@ -873,6 +875,12 @@ def evaluate(config=None, model_path=None, episodes=10, deterministic=True):
     )
     return summary
 
-if __name__ == "__main__":
-    # train()
-    evaluate()
+# if __name__ == "__main__":
+#     try:
+#         # train()
+#         evaluate()
+#     except Exception as e:
+#         import traceback
+#         print(f"[PPO] FATAL ERROR in evaluate(): {e}", flush=True)
+#         traceback.print_exc(file=sys.stdout, limit=10)
+#         sys.exit(1)

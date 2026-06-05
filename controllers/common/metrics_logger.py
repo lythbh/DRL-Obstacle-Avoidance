@@ -133,6 +133,9 @@ class MetricsLogger:
     ]
 
     def __init__(self, run_folder: str, algorithm: str) -> None:
+        # Ensure run_folder exists
+        os.makedirs(run_folder, exist_ok=True)
+        
         self._algo = algorithm.lower().strip()
         self._ep_path = os.path.join(run_folder, f"{self._algo}_episodes.csv")
         self._up_path = os.path.join(run_folder, f"{self._algo}_updates.csv")
