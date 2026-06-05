@@ -1,0 +1,365 @@
+[VALIDATION] static arch=gru seed=00 world=val_1_empty_center.wbt run_id=static/gru_seed00_val_1_empty_center
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1052.44 steps=2185 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1067.65 steps=2255 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1053.49 steps=2187 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1050.93 steps=2207 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1074.41 steps=2259 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1057.03 steps=2226 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1049.68 steps=2181 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1063.43 steps=2236 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1030.99 steps=2122 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=00 world=val_2_empty_offset.wbt run_id=static/gru_seed00_val_2_empty_offset
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1059.66 steps=2223 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1073.11 steps=2272 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1058.31 steps=2218 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1057.94 steps=2258 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1084.63 steps=2304 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1062.72 steps=2242 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1056.94 steps=2214 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1072.48 steps=2292 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1039.50 steps=2166 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=00 world=val_3_sparse_a.wbt run_id=static/gru_seed00_val_3_sparse_a
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1055.58 steps=2188 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1069.55 steps=2257 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1056.67 steps=2191 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1055.36 steps=2214 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1078.29 steps=2263 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1058.10 steps=2226 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1051.78 steps=2182 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1068.56 steps=2244 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1034.79 steps=2127 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=00 world=val_4_sparse_b.wbt run_id=static/gru_seed00_val_4_sparse_b
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1058.21 steps=2203 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1073.91 steps=2277 success=1 touch=1 min_d= 0.30 avg_spd=2.58m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1059.01 steps=2205 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1056.77 steps=2225 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1080.47 steps=2277 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1063.16 steps=2248 success=1 touch=1 min_d= 0.30 avg_spd=2.58m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1055.20 steps=2199 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1069.55 steps=2254 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1036.75 steps=2140 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=00 world=val_5_dense.wbt run_id=static/gru_seed00_val_5_dense
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r=  657.82 steps=1122 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=002/10 r=  668.11 steps=1177 success=1 touch=1 min_d= 0.30 avg_spd=2.54m/s end=goal
+[EVAL][PPO] ep=003/10 r=  660.00 steps=1131 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=004/10 r=  658.31 steps=1136 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=005/10 r=  669.35 steps=1158 success=1 touch=1 min_d= 0.30 avg_spd=2.58m/s end=goal
+[EVAL][PPO] ep=006/10 r=  663.21 steps=1165 success=1 touch=1 min_d= 0.30 avg_spd=2.53m/s end=goal
+[EVAL][PPO] ep=007/10 r=  658.12 steps=1128 success=1 touch=1 min_d= 0.30 avg_spd=2.58m/s end=goal
+[EVAL][PPO] ep=008/10 r=  663.92 steps=1146 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=009/10 r=  648.19 steps=1094 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=01 world=val_1_empty_center.wbt run_id=static/gru_seed01_val_1_empty_center
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1062.80 steps=2304 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1056.20 steps=2263 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1053.26 steps=2255 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1067.58 steps=2325 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1043.96 steps=2226 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1071.13 steps=2313 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1039.49 steps=2215 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1044.95 steps=2249 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1077.27 steps=2338 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=01 world=val_2_empty_offset.wbt run_id=static/gru_seed01_val_2_empty_offset
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1069.78 steps=2338 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1063.81 steps=2290 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1055.50 steps=2263 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1071.03 steps=2352 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1046.71 steps=2237 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1074.60 steps=2322 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1042.16 steps=2224 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1048.94 steps=2275 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1081.23 steps=2346 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=01 world=val_3_sparse_a.wbt run_id=static/gru_seed01_val_3_sparse_a
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1066.24 steps=2314 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1058.94 steps=2271 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1056.71 steps=2265 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1068.67 steps=2328 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1047.06 steps=2235 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1074.55 steps=2323 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1043.03 steps=2225 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1045.36 steps=2250 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1080.71 steps=2348 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=01 world=val_4_sparse_b.wbt run_id=static/gru_seed01_val_4_sparse_b
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1063.52 steps=2303 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1057.08 steps=2263 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1054.36 steps=2256 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1068.42 steps=2325 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1044.78 steps=2226 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1071.97 steps=2313 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1040.62 steps=2216 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1045.74 steps=2249 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1078.43 steps=2339 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=01 world=val_5_dense.wbt run_id=static/gru_seed01_val_5_dense
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed01_stage10_train_10_full/final_20260525_141956_gru_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r=  659.06 steps=1162 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=002/10 r=  657.31 steps=1148 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=003/10 r=  656.78 steps=1150 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=004/10 r=  663.42 steps=1182 success=1 touch=1 min_d= 0.30 avg_spd=2.58m/s end=goal
+[EVAL][PPO] ep=005/10 r=  651.95 steps=1134 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=006/10 r=  665.27 steps=1176 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=007/10 r=  649.74 steps=1129 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=008/10 r=  652.37 steps=1147 success=1 touch=1 min_d= 0.30 avg_spd=2.58m/s end=goal
+[EVAL][PPO] ep=009/10 r=  668.40 steps=1189 success=1 touch=1 min_d= 0.30 avg_spd=2.57m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=02 world=val_1_empty_center.wbt run_id=static/gru_seed02_val_1_empty_center
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1055.23 steps=2231 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1063.18 steps=2255 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1057.68 steps=2235 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1069.58 steps=2282 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1040.06 steps=2184 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1038.58 steps=2180 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1074.20 steps=2307 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1068.19 steps=2274 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1065.04 steps=2259 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=02 world=val_2_empty_offset.wbt run_id=static/gru_seed02_val_2_empty_offset
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1065.47 steps=2267 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1072.50 steps=2289 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1064.34 steps=2257 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1078.56 steps=2319 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1047.08 steps=2207 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1049.10 steps=2214 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1082.84 steps=2347 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1077.42 steps=2310 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1076.02 steps=2297 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=02 world=val_3_sparse_a.wbt run_id=static/gru_seed02_val_3_sparse_a
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1059.43 steps=2235 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1066.95 steps=2258 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1060.23 steps=2235 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1073.84 steps=2286 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1042.12 steps=2183 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1041.83 steps=2181 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1079.02 steps=2312 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1072.69 steps=2279 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1069.72 steps=2264 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=02 world=val_4_sparse_b.wbt run_id=static/gru_seed02_val_4_sparse_b
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1069.54 steps=2266 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1077.35 steps=2290 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1072.69 steps=2273 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1083.30 steps=2315 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1055.55 steps=2224 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1053.00 steps=2215 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1088.10 steps=2340 success=1 touch=1 min_d= 0.30 avg_spd=2.58m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1082.44 steps=2309 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1079.15 steps=2293 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=02 world=val_5_dense.wbt run_id=static/gru_seed02_val_5_dense
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed02_stage10_train_10_full/final_20260525_141956_gru_seed02_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r=  664.75 steps=1166 success=1 touch=1 min_d= 0.30 avg_spd=2.56m/s end=goal
+[EVAL][PPO] ep=002/10 r=  667.82 steps=1173 success=1 touch=1 min_d= 0.30 avg_spd=2.57m/s end=goal
+[EVAL][PPO] ep=003/10 r=  664.05 steps=1157 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=004/10 r=  673.23 steps=1199 success=1 touch=1 min_d= 0.30 avg_spd=2.54m/s end=goal
+[EVAL][PPO] ep=005/10 r=  654.13 steps=1125 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=006/10 r=  658.74 steps=1153 success=1 touch=1 min_d= 0.30 avg_spd=2.55m/s end=goal
+[EVAL][PPO] ep=007/10 r=   81.14 steps= 403 success=0 touch=0 min_d= 2.86 avg_spd=2.45m/s end=collision
+[EVAL][PPO] ep=008/10 r=  671.73 steps=1189 success=1 touch=1 min_d= 0.30 avg_spd=2.55m/s end=goal
+[EVAL][PPO] ep=009/10 r=  672.54 steps=1195 success=1 touch=1 min_d= 0.30 avg_spd=2.55m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=03 world=val_1_empty_center.wbt run_id=static/gru_seed03_val_1_empty_center
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1061.09 steps=2224 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1067.32 steps=2258 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1047.08 steps=2167 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1048.41 steps=2171 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1045.50 steps=2162 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1056.58 steps=2198 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1046.60 steps=2179 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1046.25 steps=2165 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1071.60 steps=2261 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=03 world=val_2_empty_offset.wbt run_id=static/gru_seed03_val_2_empty_offset
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1067.21 steps=2243 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1075.71 steps=2309 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1056.94 steps=2209 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1055.24 steps=2201 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1053.70 steps=2198 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1065.65 steps=2241 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1055.29 steps=2225 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1054.07 steps=2203 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1079.50 steps=2285 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=03 world=val_3_sparse_a.wbt run_id=static/gru_seed03_val_3_sparse_a
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1063.68 steps=2231 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1073.23 steps=2273 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1053.08 steps=2183 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1053.47 steps=2185 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1051.47 steps=2178 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1061.07 steps=2210 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1051.14 steps=2191 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1049.43 steps=2174 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1075.81 steps=2273 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=03 world=val_4_sparse_b.wbt run_id=static/gru_seed03_val_4_sparse_b
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1069.55 steps=2254 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1077.42 steps=2293 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1055.97 steps=2198 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1056.01 steps=2197 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1054.46 steps=2193 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1064.98 steps=2227 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1055.28 steps=2209 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1053.48 steps=2190 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1078.70 steps=2286 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=03 world=val_5_dense.wbt run_id=static/gru_seed03_val_5_dense
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed03_stage10_train_10_full/final_20260527_131325_gru_seed03_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r=  664.90 steps=1159 success=1 touch=1 min_d= 0.30 avg_spd=2.56m/s end=goal
+[EVAL][PPO] ep=002/10 r=  665.33 steps=1153 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=003/10 r=  655.16 steps=1109 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=004/10 r=  656.43 steps=1116 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=005/10 r=  654.39 steps=1107 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=006/10 r=  660.56 steps=1128 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=007/10 r=  655.24 steps=1117 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=008/10 r=  656.22 steps=1118 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=009/10 r=  668.92 steps=1167 success=1 touch=1 min_d= 0.30 avg_spd=2.56m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=04 world=val_1_empty_center.wbt run_id=static/gru_seed04_val_1_empty_center
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed04_stage10_train_10_full/final_20260527_131325_gru_seed04_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed04_stage10_train_10_full/final_20260527_131325_gru_seed04_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260527_131325_gru_seed04_stage10_train_10_full/final_20260527_131325_gru_seed04_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1042.92 steps=2186 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1033.21 steps=2152 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1051.92 steps=2213 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1039.22 steps=2180 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1040.72 steps=2169 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1056.70 steps=2220 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1041.81 steps=2195 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1057.55 steps=2218 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1053.30 steps=2209 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=04 world=val_2_empty_offset.wbt run_id=static/gru_seed04_val_2_empty_offset
+ERROR: Webots has not been started regularly. Some features may not work. Please start Webots from its launcher.

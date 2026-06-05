@@ -1,0 +1,144 @@
+[VALIDATION] static arch=lstm seed=01 world=val_1_empty_center.wbt run_id=static/lstm_seed01_val_1_empty_center
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: LSTM
+[PPO] Loaded architecture: LSTM
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=LSTM
+[EVAL][PPO] ep=001/10 r= 1056.80 steps=2204 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1051.00 steps=2164 success=1 touch=1 min_d= 0.30 avg_spd=2.69m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1041.89 steps=2140 success=1 touch=1 min_d= 0.30 avg_spd=2.68m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1061.67 steps=2227 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1033.16 steps=2112 success=1 touch=1 min_d= 0.30 avg_spd=2.69m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1058.79 steps=2195 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1028.35 steps=2101 success=1 touch=1 min_d= 0.30 avg_spd=2.68m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1038.94 steps=2151 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1064.78 steps=2220 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=lstm seed=01 world=val_2_empty_offset.wbt run_id=static/lstm_seed01_val_2_empty_offset
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: LSTM
+[PPO] Loaded architecture: LSTM
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=LSTM
+[EVAL][PPO] ep=001/10 r= 1067.55 steps=2250 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1061.87 steps=2198 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1048.84 steps=2158 success=1 touch=1 min_d= 0.30 avg_spd=2.68m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1067.71 steps=2261 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1040.78 steps=2134 success=1 touch=1 min_d= 0.30 avg_spd=2.69m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1066.90 steps=2214 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1035.94 steps=2121 success=1 touch=1 min_d= 0.30 avg_spd=2.68m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1045.78 steps=2184 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1073.09 steps=2237 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=lstm seed=01 world=val_3_sparse_a.wbt run_id=static/lstm_seed01_val_3_sparse_a
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: LSTM
+[PPO] Loaded architecture: LSTM
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=LSTM
+[EVAL][PPO] ep=001/10 r= 1059.68 steps=2213 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1053.67 steps=2172 success=1 touch=1 min_d= 0.30 avg_spd=2.68m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1043.55 steps=2145 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1063.94 steps=2234 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1035.15 steps=2118 success=1 touch=1 min_d= 0.30 avg_spd=2.69m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1060.80 steps=2201 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1030.00 steps=2106 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1041.25 steps=2158 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1066.43 steps=2225 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=lstm seed=01 world=val_4_sparse_b.wbt run_id=static/lstm_seed01_val_4_sparse_b
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: LSTM
+[PPO] Loaded architecture: LSTM
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=LSTM
+[EVAL][PPO] ep=001/10 r= 1062.76 steps=2222 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1057.67 steps=2184 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1049.16 steps=2162 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1067.93 steps=2246 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1040.49 steps=2134 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1065.73 steps=2216 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1035.31 steps=2122 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1045.55 steps=2171 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1071.68 steps=2241 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=lstm seed=01 world=val_5_dense.wbt run_id=static/lstm_seed01_val_5_dense
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: LSTM
+[PPO] Loaded architecture: LSTM
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_lstm_seed01_stage10_train_10_full/final_20260525_141956_lstm_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=LSTM
+[EVAL][PPO] ep=001/10 r=  662.84 steps=1137 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=002/10 r=  662.92 steps=1135 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=003/10 r=  661.88 steps=1141 success=1 touch=1 min_d= 0.30 avg_spd=2.57m/s end=goal
+[EVAL][PPO] ep=004/10 r=  667.86 steps=1165 success=1 touch=1 min_d= 0.30 avg_spd=2.56m/s end=goal
+[EVAL][PPO] ep=005/10 r=  656.19 steps=1120 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=006/10 r=  669.08 steps=1162 success=1 touch=1 min_d= 0.30 avg_spd=2.57m/s end=goal
+[EVAL][PPO] ep=007/10 r=  653.79 steps=1114 success=1 touch=1 min_d= 0.30 avg_spd=2.58m/s end=goal
+[EVAL][PPO] ep=008/10 r=  657.84 steps=1134 success=1 touch=1 min_d= 0.30 avg_spd=2.56m/s end=goal
+[EVAL][PPO] ep=009/10 r=  672.86 steps=1179 success=1 touch=1 min_d= 0.30 avg_spd=2.55m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] moving arch=lstm seed=01 world=val_6_one_moving.wbt run_id=moving/lstm_seed01_val_6_one_moving
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal/final_moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal/final_moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal.pth'
+[PPO] Using architecture: LSTM
+[PPO] Loaded architecture: LSTM
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal/final_moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal.pth episodes=10 deterministic=True cell=LSTM
+[EVAL][PPO] ep=001/10 r=  678.56 steps=1287 success=1 touch=1 min_d= 0.30 avg_spd=2.46m/s end=goal
+[EVAL][PPO] ep=002/10 r=  244.38 steps=1084 success=0 touch=0 min_d= 1.23 avg_spd=2.49m/s end=collision
+[EVAL][PPO] ep=003/10 r=  236.69 steps=1062 success=0 touch=0 min_d= 1.23 avg_spd=2.50m/s end=collision
+[EVAL][PPO] ep=004/10 r=  251.48 steps=1116 success=0 touch=0 min_d= 1.23 avg_spd=2.44m/s end=collision
+[EVAL][PPO] ep=005/10 r=  233.20 steps=1050 success=0 touch=0 min_d= 1.23 avg_spd=2.50m/s end=collision
+[EVAL][PPO] ep=006/10 r=  242.28 steps=1083 success=0 touch=0 min_d= 1.23 avg_spd=2.50m/s end=collision
+[EVAL][PPO] ep=007/10 r=  225.11 steps=1029 success=0 touch=0 min_d= 1.23 avg_spd=2.52m/s end=collision
+[EVAL][PPO] ep=008/10 r=  239.22 steps=1075 success=0 touch=0 min_d= 1.23 avg_spd=2.44m/s end=collision
+[EVAL][PPO] ep=009/10 r=  244.78 steps=1094 success=0 touch=0 min_d= 1.23 avg_spd=2.50m/s end=collision
+INFO: PPO: Terminating.
+[VALIDATION] moving arch=lstm seed=01 world=val_7_all_moving.wbt run_id=moving/lstm_seed01_val_7_all_moving
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal/final_moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal/final_moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal.pth'
+[PPO] Using architecture: LSTM
+[PPO] Loaded architecture: LSTM
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal/final_moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal.pth episodes=10 deterministic=True cell=LSTM
+[EVAL][PPO] ep=001/10 r=  676.49 steps=1286 success=1 touch=1 min_d= 0.30 avg_spd=2.48m/s end=goal
+[EVAL][PPO] ep=002/10 r=  306.96 steps=1055 success=0 touch=0 min_d= 0.86 avg_spd=2.51m/s end=collision
+[EVAL][PPO] ep=003/10 r=  295.28 steps=1020 success=0 touch=0 min_d= 0.86 avg_spd=2.54m/s end=collision
+[EVAL][PPO] ep=004/10 r=  313.88 steps=1085 success=0 touch=0 min_d= 0.86 avg_spd=2.46m/s end=collision
+[EVAL][PPO] ep=005/10 r=  296.01 steps=1021 success=0 touch=0 min_d= 0.86 avg_spd=2.53m/s end=collision
+[EVAL][PPO] ep=006/10 r=  299.78 steps=1038 success=0 touch=0 min_d= 0.86 avg_spd=2.56m/s end=collision
+[EVAL][PPO] ep=007/10 r=  288.24 steps=1000 success=0 touch=0 min_d= 0.86 avg_spd=2.54m/s end=collision
+[EVAL][PPO] ep=008/10 r=  302.18 steps=1044 success=0 touch=0 min_d= 0.86 avg_spd=2.47m/s end=collision
+[EVAL][PPO] ep=009/10 r=  302.34 steps=1049 success=0 touch=0 min_d= 0.86 avg_spd=2.55m/s end=collision
+INFO: PPO: Terminating.
+[VALIDATION] moving arch=lstm seed=01 world=val_8_moving_goal.wbt run_id=moving/lstm_seed01_val_8_moving_goal
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal/final_moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal/final_moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal.pth'
+[PPO] Using architecture: LSTM
+[PPO] Loaded architecture: LSTM
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal/final_moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal.pth episodes=10 deterministic=True cell=LSTM
+[EVAL][PPO] ep=001/10 r=  248.77 steps=1113 success=0 touch=0 min_d= 1.22 avg_spd=2.45m/s end=collision
+[EVAL][PPO] ep=002/10 r=  239.40 steps=1073 success=0 touch=0 min_d= 1.24 avg_spd=2.51m/s end=collision
+[EVAL][PPO] ep=003/10 r=  227.27 steps=1040 success=0 touch=0 min_d= 1.24 avg_spd=2.54m/s end=collision
+[EVAL][PPO] ep=004/10 r=  246.41 steps=1103 success=0 touch=0 min_d= 1.24 avg_spd=2.46m/s end=collision
+[EVAL][PPO] ep=005/10 r=  228.14 steps=1038 success=0 touch=0 min_d= 1.24 avg_spd=2.53m/s end=collision
+[EVAL][PPO] ep=006/10 r=  231.81 steps=1059 success=0 touch=0 min_d= 1.25 avg_spd=2.55m/s end=collision
+[EVAL][PPO] ep=007/10 r=  221.37 steps=1020 success=0 touch=0 min_d= 1.23 avg_spd=2.54m/s end=collision
+[EVAL][PPO] ep=008/10 r=  235.96 steps=1067 success=0 touch=0 min_d= 1.23 avg_spd=2.46m/s end=collision
+[EVAL][PPO] ep=009/10 r=  233.52 steps=1069 success=0 touch=0 min_d= 1.25 avg_spd=2.54m/s end=collision
+INFO: PPO: Terminating.
+[VALIDATION] moving arch=lstm seed=01 world=val_9_offset_goal.wbt run_id=moving/lstm_seed01_val_9_offset_goal
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal/final_moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal/final_moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal.pth'
+[PPO] Using architecture: LSTM
+[PPO] Loaded architecture: LSTM
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal/final_moving_20260602_230908_step05_moving_goal_lstm_seed01_stage01_train_13_moving_goal.pth episodes=10 deterministic=True cell=LSTM
+[EVAL][PPO] ep=001/10 r=  672.85 steps=1292 success=1 touch=1 min_d= 0.30 avg_spd=2.53m/s end=goal
+[EVAL][PPO] ep=002/10 r=  670.57 steps=1269 success=1 touch=1 min_d= 0.30 avg_spd=2.56m/s end=goal
+[EVAL][PPO] ep=003/10 r=  659.09 steps=1234 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=004/10 r=  673.45 steps=1298 success=1 touch=1 min_d= 0.30 avg_spd=2.52m/s end=goal
+[EVAL][PPO] ep=005/10 r=  659.36 steps=1233 success=1 touch=1 min_d= 0.30 avg_spd=2.58m/s end=goal
+[EVAL][PPO] ep=006/10 r=  663.83 steps=1252 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=007/10 r=  651.63 steps=1210 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=008/10 r=  662.32 steps=1256 success=1 touch=1 min_d= 0.30 avg_spd=2.52m/s end=goal
+[EVAL][PPO] ep=009/10 r=  665.08 steps=1259 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+INFO: PPO: Terminating.

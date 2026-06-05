@@ -1,0 +1,153 @@
+[VALIDATION] static arch=gru seed=00 world=val_1_empty_center.wbt run_id=static/gru_seed00_val_1_empty_center
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1052.44 steps=2185 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1067.65 steps=2255 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1053.49 steps=2187 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1050.93 steps=2207 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1074.41 steps=2259 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1057.03 steps=2226 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1049.68 steps=2181 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1063.43 steps=2236 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1030.99 steps=2122 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=00 world=val_2_empty_offset.wbt run_id=static/gru_seed00_val_2_empty_offset
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1059.66 steps=2223 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1073.11 steps=2272 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1058.31 steps=2218 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1057.94 steps=2258 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1084.63 steps=2304 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1062.72 steps=2242 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1056.94 steps=2214 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1072.48 steps=2292 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1039.50 steps=2166 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=00 world=val_3_sparse_a.wbt run_id=static/gru_seed00_val_3_sparse_a
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1055.58 steps=2188 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1069.55 steps=2257 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1056.67 steps=2191 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1055.36 steps=2214 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1078.29 steps=2263 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1058.10 steps=2226 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1051.78 steps=2182 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1068.56 steps=2244 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1034.79 steps=2127 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=00 world=val_4_sparse_b.wbt run_id=static/gru_seed00_val_4_sparse_b
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r= 1058.21 steps=2203 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1073.91 steps=2277 success=1 touch=1 min_d= 0.30 avg_spd=2.58m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1059.01 steps=2205 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1056.77 steps=2225 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1080.47 steps=2277 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1063.16 steps=2248 success=1 touch=1 min_d= 0.30 avg_spd=2.58m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1055.20 steps=2199 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1069.55 steps=2254 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1036.75 steps=2140 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=gru seed=00 world=val_5_dense.wbt run_id=static/gru_seed00_val_5_dense
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_gru_seed00_stage10_train_10_full/final_20260525_141956_gru_seed00_stage10_train_10_full.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r=  657.82 steps=1122 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=002/10 r=  668.11 steps=1177 success=1 touch=1 min_d= 0.30 avg_spd=2.54m/s end=goal
+[EVAL][PPO] ep=003/10 r=  660.00 steps=1131 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=004/10 r=  658.31 steps=1136 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=005/10 r=  669.35 steps=1158 success=1 touch=1 min_d= 0.30 avg_spd=2.58m/s end=goal
+[EVAL][PPO] ep=006/10 r=  663.21 steps=1165 success=1 touch=1 min_d= 0.30 avg_spd=2.53m/s end=goal
+[EVAL][PPO] ep=007/10 r=  658.12 steps=1128 success=1 touch=1 min_d= 0.30 avg_spd=2.58m/s end=goal
+[EVAL][PPO] ep=008/10 r=  663.92 steps=1146 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=009/10 r=  648.19 steps=1094 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] moving arch=gru seed=00 world=val_6_one_moving.wbt run_id=moving/gru_seed00_val_6_one_moving
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal/final_moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal/final_moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal/final_moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r=  202.23 steps= 811 success=0 touch=0 min_d= 1.83 avg_spd=2.32m/s end=collision
+[EVAL][PPO] ep=002/10 r=  281.98 steps=1236 success=0 touch=0 min_d= 1.13 avg_spd=2.29m/s end=collision
+[EVAL][PPO] ep=003/10 r=  288.91 steps=1243 success=0 touch=0 min_d= 1.13 avg_spd=2.27m/s end=collision
+[EVAL][PPO] ep=004/10 r=  215.07 steps= 855 success=0 touch=0 min_d= 1.83 avg_spd=2.21m/s end=collision
+[EVAL][PPO] ep=005/10 r=  202.85 steps= 824 success=0 touch=0 min_d= 1.83 avg_spd=2.37m/s end=collision
+[EVAL][PPO] ep=006/10 r=  274.83 steps=1211 success=0 touch=0 min_d= 1.13 avg_spd=2.29m/s end=collision
+[EVAL][PPO] ep=007/10 r=  193.23 steps= 785 success=0 touch=0 min_d= 1.84 avg_spd=2.34m/s end=collision
+[EVAL][PPO] ep=008/10 r=  219.87 steps= 872 success=0 touch=0 min_d= 1.83 avg_spd=2.24m/s end=collision
+[EVAL][PPO] ep=009/10 r=  201.08 steps= 801 success=0 touch=0 min_d= 1.83 avg_spd=2.28m/s end=collision
+INFO: PPO: Terminating.
+[VALIDATION] moving arch=gru seed=00 world=val_7_all_moving.wbt run_id=moving/gru_seed00_val_7_all_moving
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal/final_moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal/final_moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal/final_moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r=  275.53 steps=1149 success=0 touch=0 min_d= 1.13 avg_spd=2.36m/s end=collision
+[EVAL][PPO] ep=002/10 r=  253.19 steps=1467 success=0 touch=0 min_d= 0.88 avg_spd=2.44m/s end=collision
+[EVAL][PPO] ep=003/10 r=  262.19 steps=1491 success=0 touch=0 min_d= 0.88 avg_spd=2.41m/s end=collision
+[EVAL][PPO] ep=004/10 r=  287.14 steps=1189 success=0 touch=0 min_d= 1.13 avg_spd=2.29m/s end=collision
+[EVAL][PPO] ep=005/10 r=  275.91 steps=1160 success=0 touch=0 min_d= 1.14 avg_spd=2.40m/s end=collision
+[EVAL][PPO] ep=006/10 r=  248.22 steps=1455 success=0 touch=0 min_d= 0.88 avg_spd=2.43m/s end=collision
+[EVAL][PPO] ep=007/10 r=  266.27 steps=1121 success=0 touch=0 min_d= 1.14 avg_spd=2.38m/s end=collision
+[EVAL][PPO] ep=008/10 r=  292.63 steps=1208 success=0 touch=0 min_d= 1.13 avg_spd=2.30m/s end=collision
+[EVAL][PPO] ep=009/10 r=  273.21 steps=1136 success=0 touch=0 min_d= 1.13 avg_spd=2.33m/s end=collision
+INFO: PPO: Terminating.
+[VALIDATION] moving arch=gru seed=00 world=val_8_moving_goal.wbt run_id=moving/gru_seed00_val_8_moving_goal
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal/final_moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal/final_moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal/final_moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r=  205.79 steps=1093 success=0 touch=0 min_d= 1.38 avg_spd=2.50m/s end=collision
+[EVAL][PPO] ep=002/10 r=  209.56 steps=1103 success=0 touch=0 min_d= 1.39 avg_spd=2.48m/s end=collision
+[EVAL][PPO] ep=003/10 r=  212.78 steps=1107 success=0 touch=0 min_d= 1.39 avg_spd=2.48m/s end=collision
+[EVAL][PPO] ep=004/10 r=  217.24 steps=1137 success=0 touch=0 min_d= 1.38 avg_spd=2.42m/s end=collision
+[EVAL][PPO] ep=005/10 r=  208.67 steps=1111 success=0 touch=0 min_d= 1.38 avg_spd=2.53m/s end=collision
+[EVAL][PPO] ep=006/10 r=  203.89 steps=1088 success=0 touch=0 min_d= 1.39 avg_spd=2.48m/s end=collision
+[EVAL][PPO] ep=007/10 r=  197.87 steps=1070 success=0 touch=0 min_d= 1.38 avg_spd=2.53m/s end=collision
+[EVAL][PPO] ep=008/10 r=  223.28 steps=1154 success=0 touch=0 min_d= 1.38 avg_spd=2.44m/s end=collision
+[EVAL][PPO] ep=009/10 r=  202.93 steps=1085 success=0 touch=0 min_d= 1.38 avg_spd=2.48m/s end=collision
+INFO: PPO: Terminating.
+[VALIDATION] moving arch=gru seed=00 world=val_9_offset_goal.wbt run_id=moving/gru_seed00_val_9_offset_goal
+WARNING: Could not listen to extern controllers and robot windows on port 1234. Port 1234 is already in use. Using port 1235 instead. This could be caused by another running instance of Webots. You should use the '--port' option to start several instances of Webots.
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal/final_moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal/final_moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal.pth'
+[PPO] Using architecture: GRU
+[PPO] Loaded architecture: GRU
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal/final_moving_20260603_162611_step05_moving_goal_gru_seed00_stage01_train_13_moving_goal.pth episodes=10 deterministic=True cell=GRU
+[EVAL][PPO] ep=001/10 r=  250.46 steps=1159 success=0 touch=0 min_d= 1.17 avg_spd=2.48m/s end=collision
+[EVAL][PPO] ep=002/10 r=  242.63 steps=1142 success=0 touch=0 min_d= 1.18 avg_spd=2.52m/s end=collision
+[EVAL][PPO] ep=003/10 r=  253.80 steps=1168 success=0 touch=0 min_d= 1.18 avg_spd=2.47m/s end=collision
+[EVAL][PPO] ep=004/10 r=  257.80 steps=1201 success=0 touch=0 min_d= 1.17 avg_spd=2.41m/s end=collision
+[EVAL][PPO] ep=005/10 r=  251.49 steps=1170 success=0 touch=0 min_d= 1.17 avg_spd=2.52m/s end=collision
+[EVAL][PPO] ep=006/10 r=  237.11 steps=1122 success=0 touch=0 min_d= 1.17 avg_spd=2.53m/s end=collision
+[EVAL][PPO] ep=007/10 r=  241.19 steps=1132 success=0 touch=0 min_d= 1.17 avg_spd=2.51m/s end=collision
+[EVAL][PPO] ep=008/10 r=  265.15 steps=1220 success=0 touch=0 min_d= 1.17 avg_spd=2.42m/s end=collision
+[EVAL][PPO] ep=009/10 r=  248.38 steps=1153 success=0 touch=0 min_d= 1.17 avg_spd=2.45m/s end=collision
+INFO: PPO: Terminating.

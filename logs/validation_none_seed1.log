@@ -1,0 +1,144 @@
+[VALIDATION] static arch=none seed=01 world=val_1_empty_center.wbt run_id=static/none_seed01_val_1_empty_center
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: NONE
+[PPO] Loaded architecture: NONE
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=NONE
+[EVAL][PPO] ep=001/10 r= 1060.00 steps=2223 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1053.76 steps=2182 success=1 touch=1 min_d= 0.30 avg_spd=2.68m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1048.99 steps=2169 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1064.39 steps=2243 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1040.07 steps=2141 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1066.23 steps=2225 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1035.51 steps=2130 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1041.63 steps=2167 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1072.38 steps=2250 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=none seed=01 world=val_2_empty_offset.wbt run_id=static/none_seed01_val_2_empty_offset
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: NONE
+[PPO] Loaded architecture: NONE
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=NONE
+[EVAL][PPO] ep=001/10 r= 1068.76 steps=2267 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1062.65 steps=2216 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1054.77 steps=2189 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1069.27 steps=2277 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1045.84 steps=2163 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1072.74 steps=2245 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1041.68 steps=2151 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1047.27 steps=2200 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1079.44 steps=2269 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=none seed=01 world=val_3_sparse_a.wbt run_id=static/none_seed01_val_3_sparse_a
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: NONE
+[PPO] Loaded architecture: NONE
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=NONE
+[EVAL][PPO] ep=001/10 r= 1064.75 steps=2236 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1057.33 steps=2191 success=1 touch=1 min_d= 0.30 avg_spd=2.67m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1052.22 steps=2177 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1067.87 steps=2252 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1043.29 steps=2149 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1069.45 steps=2233 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1038.40 steps=2137 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1044.92 steps=2176 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1075.22 steps=2257 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=none seed=01 world=val_4_sparse_b.wbt run_id=static/none_seed01_val_4_sparse_b
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: NONE
+[PPO] Loaded architecture: NONE
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=NONE
+[EVAL][PPO] ep=001/10 r= 1067.24 steps=2246 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=002/10 r= 1060.80 steps=2205 success=1 touch=1 min_d= 0.30 avg_spd=2.66m/s end=goal
+[EVAL][PPO] ep=003/10 r= 1056.50 steps=2194 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=004/10 r= 1071.70 steps=2267 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=005/10 r= 1047.30 steps=2165 success=1 touch=1 min_d= 0.30 avg_spd=2.65m/s end=goal
+[EVAL][PPO] ep=006/10 r= 1073.49 steps=2249 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=007/10 r= 1042.68 steps=2154 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=008/10 r= 1048.78 steps=2191 success=1 touch=1 min_d= 0.30 avg_spd=2.62m/s end=goal
+[EVAL][PPO] ep=009/10 r= 1079.20 steps=2273 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] static arch=none seed=01 world=val_5_dense.wbt run_id=static/none_seed01_val_5_dense
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth'
+[PPO] Using architecture: NONE
+[PPO] Loaded architecture: NONE
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/20260525_141956_none_seed01_stage10_train_10_full/final_20260525_141956_none_seed01_stage10_train_10_full.pth episodes=10 deterministic=True cell=NONE
+[EVAL][PPO] ep=001/10 r=  660.35 steps=1134 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=002/10 r=  658.19 steps=1119 success=1 touch=1 min_d= 0.30 avg_spd=2.64m/s end=goal
+[EVAL][PPO] ep=003/10 r=  657.36 steps=1120 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=004/10 r=  663.64 steps=1151 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+[EVAL][PPO] ep=005/10 r=  652.54 steps=1104 success=1 touch=1 min_d= 0.30 avg_spd=2.63m/s end=goal
+[EVAL][PPO] ep=006/10 r=  665.72 steps=1146 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=007/10 r=  650.68 steps=1100 success=1 touch=1 min_d= 0.30 avg_spd=2.61m/s end=goal
+[EVAL][PPO] ep=008/10 r=  652.43 steps=1115 success=1 touch=1 min_d= 0.30 avg_spd=2.60m/s end=goal
+[EVAL][PPO] ep=009/10 r=  668.70 steps=1159 success=1 touch=1 min_d= 0.30 avg_spd=2.59m/s end=goal
+INFO: PPO: Terminating.
+[VALIDATION] moving arch=none seed=01 world=val_6_one_moving.wbt run_id=moving/none_seed01_val_6_one_moving
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal.pth'
+[PPO] Using architecture: NONE
+[PPO] Loaded architecture: NONE
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal.pth episodes=10 deterministic=True cell=NONE
+[EVAL][PPO] ep=001/10 r=  317.41 steps=1294 success=0 touch=0 min_d= 0.83 avg_spd=2.34m/s end=collision
+[EVAL][PPO] ep=002/10 r=  311.80 steps=1262 success=0 touch=0 min_d= 0.85 avg_spd=2.38m/s end=collision
+[EVAL][PPO] ep=003/10 r=  300.72 steps=1230 success=0 touch=0 min_d= 0.85 avg_spd=2.41m/s end=collision
+[EVAL][PPO] ep=004/10 r=  318.62 steps=1291 success=0 touch=0 min_d= 0.85 avg_spd=2.34m/s end=collision
+[EVAL][PPO] ep=005/10 r=  301.36 steps=1229 success=0 touch=0 min_d= 0.85 avg_spd=2.39m/s end=collision
+[EVAL][PPO] ep=006/10 r=  305.38 steps=1256 success=0 touch=0 min_d= 0.85 avg_spd=2.42m/s end=collision
+[EVAL][PPO] ep=007/10 r=  292.70 steps=1205 success=0 touch=0 min_d= 0.85 avg_spd=2.41m/s end=collision
+[EVAL][PPO] ep=008/10 r=  309.64 steps=1255 success=0 touch=0 min_d= 0.84 avg_spd=2.33m/s end=collision
+[EVAL][PPO] ep=009/10 r=  304.54 steps=1259 success=0 touch=0 min_d= 0.85 avg_spd=2.42m/s end=collision
+INFO: PPO: Terminating.
+[VALIDATION] moving arch=none seed=01 world=val_7_all_moving.wbt run_id=moving/none_seed01_val_7_all_moving
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal.pth'
+[PPO] Using architecture: NONE
+[PPO] Loaded architecture: NONE
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal.pth episodes=10 deterministic=True cell=NONE
+[EVAL][PPO] ep=001/10 r=  314.22 steps=1146 success=0 touch=0 min_d= 0.89 avg_spd=2.40m/s end=collision
+[EVAL][PPO] ep=002/10 r=  276.51 steps=1367 success=0 touch=0 min_d= 0.87 avg_spd=2.45m/s end=collision
+[EVAL][PPO] ep=003/10 r=  263.64 steps=1326 success=0 touch=0 min_d= 0.87 avg_spd=2.49m/s end=collision
+[EVAL][PPO] ep=004/10 r=  319.51 steps=1163 success=0 touch=0 min_d= 0.89 avg_spd=2.37m/s end=collision
+[EVAL][PPO] ep=005/10 r=  265.44 steps=1333 success=0 touch=0 min_d= 0.87 avg_spd=2.46m/s end=collision
+[EVAL][PPO] ep=006/10 r=  266.62 steps=1340 success=0 touch=0 min_d= 0.87 avg_spd=2.50m/s end=collision
+[EVAL][PPO] ep=007/10 r=  292.72 steps=1072 success=0 touch=0 min_d= 0.89 avg_spd=2.46m/s end=collision
+[EVAL][PPO] ep=008/10 r=  307.44 steps=1112 success=0 touch=0 min_d= 0.89 avg_spd=2.38m/s end=collision
+[EVAL][PPO] ep=009/10 r=  266.51 steps=1342 success=0 touch=0 min_d= 0.87 avg_spd=2.51m/s end=collision
+INFO: PPO: Terminating.
+[VALIDATION] moving arch=none seed=01 world=val_8_moving_goal.wbt run_id=moving/none_seed01_val_8_moving_goal
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal.pth'
+[PPO] Using architecture: NONE
+[PPO] Loaded architecture: NONE
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal.pth episodes=10 deterministic=True cell=NONE
+[EVAL][PPO] ep=001/10 r=  297.99 steps=1248 success=0 touch=0 min_d= 0.87 avg_spd=2.41m/s end=collision
+[EVAL][PPO] ep=002/10 r=  295.99 steps=1227 success=0 touch=0 min_d= 0.87 avg_spd=2.45m/s end=collision
+[EVAL][PPO] ep=003/10 r=  283.89 steps=1190 success=0 touch=0 min_d= 0.88 avg_spd=2.48m/s end=collision
+[EVAL][PPO] ep=004/10 r=  302.24 steps=1256 success=0 touch=0 min_d= 0.87 avg_spd=2.40m/s end=collision
+[EVAL][PPO] ep=005/10 r=  284.36 steps=1190 success=0 touch=0 min_d= 0.87 avg_spd=2.46m/s end=collision
+[EVAL][PPO] ep=006/10 r=  289.12 steps=1215 success=0 touch=0 min_d= 0.87 avg_spd=2.48m/s end=collision
+[EVAL][PPO] ep=007/10 r=  276.22 steps=1168 success=0 touch=0 min_d= 0.87 avg_spd=2.48m/s end=collision
+[EVAL][PPO] ep=008/10 r=  289.49 steps=1209 success=0 touch=0 min_d= 0.88 avg_spd=2.41m/s end=collision
+[EVAL][PPO] ep=009/10 r=  289.97 steps=1222 success=0 touch=0 min_d= 0.88 avg_spd=2.48m/s end=collision
+INFO: PPO: Terminating.
+[VALIDATION] moving arch=none seed=01 world=val_9_offset_goal.wbt run_id=moving/none_seed01_val_9_offset_goal
+INFO: PPO: Starting controller: python3 -u PPO.py
+[EVAL][PPO] model_path selection: initial=None PPO_EVAL_MODEL=None EVAL_MODEL_PATH='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal.pth' PPO_LOAD_MODEL=None => selected='/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal.pth'
+[PPO] Using architecture: NONE
+[PPO] Loaded architecture: NONE
+[EVAL][PPO] model=/uio/hume/student-u79/esbrovol/fys5429/DRL-Obstacle-Avoidance/controllers/PPO/checkpoints/moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal/final_moving_20260603_110455_step05_moving_goal_none_seed01_stage01_train_13_moving_goal.pth episodes=10 deterministic=True cell=NONE
+[EVAL][PPO] ep=001/10 r=  310.44 steps=1212 success=0 touch=0 min_d= 0.88 avg_spd=2.42m/s end=collision
+[EVAL][PPO] ep=002/10 r=  308.98 steps=1189 success=0 touch=0 min_d= 0.89 avg_spd=2.46m/s end=collision
+[EVAL][PPO] ep=003/10 r=  296.62 steps=1151 success=0 touch=0 min_d= 0.89 avg_spd=2.49m/s end=collision
+[EVAL][PPO] ep=004/10 r=  311.21 steps=1215 success=0 touch=0 min_d= 0.89 avg_spd=2.41m/s end=collision
+[EVAL][PPO] ep=005/10 r=  297.87 steps=1150 success=0 touch=0 min_d= 0.89 avg_spd=2.48m/s end=collision
+[EVAL][PPO] ep=006/10 r=  300.08 steps=1172 success=0 touch=0 min_d= 0.89 avg_spd=2.51m/s end=collision
+[EVAL][PPO] ep=007/10 r=  289.49 steps=1126 success=0 touch=0 min_d= 0.89 avg_spd=2.50m/s end=collision
+[EVAL][PPO] ep=008/10 r=  300.68 steps=1170 success=0 touch=0 min_d= 0.88 avg_spd=2.41m/s end=collision
+[EVAL][PPO] ep=009/10 r=  300.20 steps=1178 success=0 touch=0 min_d= 0.89 avg_spd=2.52m/s end=collision
+INFO: PPO: Terminating.
