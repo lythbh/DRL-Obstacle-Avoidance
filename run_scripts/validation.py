@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
 import os
-import queue
 import re
 import shutil
 import subprocess
@@ -193,23 +191,28 @@ def run_webots(run: ValidationRun, port: int, webots_cmd: str, patch_defaults: b
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run validation evaluation across static and moving worlds.")
     parser.add_argument("--webots-cmd", default="webots", help="Webots executable command.")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Base Webots port; each worker gets port+N.")
-    parser.add_argument("--workers", type=int, default=10, help="Number of parallel Webots instances.")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Webots port for this instance.")
+    parser.add_argument("--arch", default=None, help="Filter to a single architecture (gru, lstm, none).")
+    parser.add_argument("--seed", type=int, default=None, help="Filter to a single seed index.")
     parser.add_argument("--patch-defaults", action="store_true", help="Update PPO_defaults.py eval_model_path before each run.")
     parser.add_argument("--dry-run", action="store_true", help="Print the planned runs without launching Webots.")
     args = parser.parse_args()
 
-    if args.patch_defaults and args.workers > 1:
-        print("[ERROR] --patch-defaults is not safe with --workers > 1 (shared file race condition).", file=sys.stderr)
-        return 1
-
     static_worlds = resolve_worlds(STATIC_WORLD_GLOBS)
     moving_worlds = resolve_worlds(MOVING_WORLD_GLOBS)
-    static_runs = make_evaluation_runs(static_worlds, STATIC_MODELS, "static")
-    moving_runs = make_evaluation_runs(moving_worlds, MOVING_MODELS, "moving")
+
+    static_models = {args.arch: STATIC_MODELS[args.arch]} if args.arch else STATIC_MODELS
+    moving_models = {args.arch: MOVING_MODELS[args.arch]} if args.arch else MOVING_MODELS
+
+    static_runs = make_evaluation_runs(static_worlds, static_models, "static")
+    moving_runs = make_evaluation_runs(moving_worlds, moving_models, "moving")
+    all_runs = static_runs + moving_runs
+
+    if args.seed is not None:
+        all_runs = [r for r in all_runs if r.seed == args.seed]
 
     if args.dry_run:
-        for run in static_runs + moving_runs:
+        for run in all_runs:
             print(f"DRY-RUN: arch={run.arch} seed={run.seed:02d} world={run.world.name} checkpoint={run.checkpoint} run_id={run.run_id}")
         return 0
 
@@ -219,30 +222,10 @@ def main() -> int:
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 1
 
-    port_pool: queue.Queue[int] = queue.Queue()
-    for i in range(args.workers):
-        port_pool.put(args.port + i)
-
-    def run_one(run: ValidationRun) -> int:
-        port = port_pool.get()
-        try:
-            return run_webots(run, port=port, webots_cmd=webots_cmd, patch_defaults=args.patch_defaults)
-        finally:
-            port_pool.put(port)
-
-    all_runs = static_runs + moving_runs
-    failed = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = {executor.submit(run_one, run): run for run in all_runs}
-        for future in concurrent.futures.as_completed(futures):
-            rc = future.result()
-            if rc != 0:
-                failed += 1
-
-    if failed:
-        print(f"[VALIDATION] {failed}/{len(all_runs)} run(s) failed.", file=sys.stderr)
-        return 1
-    print(f"[VALIDATION] All {len(all_runs)} runs completed successfully.")
+    for run in all_runs:
+        rc = run_webots(run, port=args.port, webots_cmd=webots_cmd, patch_defaults=args.patch_defaults)
+        if rc != 0:
+            return rc
     return 0
 
 

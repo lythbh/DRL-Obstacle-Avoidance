@@ -56,19 +56,55 @@ export PPO_FORCE_CPU=${PPO_FORCE_CPU:-0}
 
 python -c "import torch; print('CUDA available:', torch.cuda.is_available())" || echo "torch not found"
 
+ARCHS=(gru lstm none)
+SEED_BATCHES=("0 1 2" "3 4 5")
+
 cleanup() {
     kill $XVFB_PID 2>/dev/null || true
+    kill "${ALL_PIDS[@]}" 2>/dev/null || true
     rm -rf $TMPDIR_BASE
 }
 trap cleanup EXIT
 
-LOG="$REPO_DIR/logs/validation.log"
-echo "Starting validation → $LOG"
+# Run seeds in batches of 3 per arch (3 archs × 3 seeds = 9 parallel per batch)
+ALL_PIDS=()
+FAILED=0
+BATCH_NUM=0
 
-WEBOTS_TMPDIR="$TMPDIR_BASE/validation" python validation.py \
-    --webots-cmd "$WEBOTS_HOME/webots" \
-    --port $PORT \
-    "$@" \
-    > "$LOG" 2>&1
+for SEEDS in "${SEED_BATCHES[@]}"; do
+    BATCH_NUM=$((BATCH_NUM + 1))
+    PIDS=()
+    RUN_INDEX=0
+    echo "--- Batch $BATCH_NUM: seeds $SEEDS ---"
+    for ARCH in "${ARCHS[@]}"; do
+        for SEED in $SEEDS; do
+            LOG="$REPO_DIR/logs/validation_${ARCH}_seed${SEED}.log"
+            WEBOTS_TMPDIR="$TMPDIR_BASE/${ARCH}_seed${SEED}"
+            mkdir -p "$WEBOTS_TMPDIR"
+            PROC_PORT=$((PORT + RUN_INDEX * 2))
+            echo "  Starting arch=$ARCH seed=$SEED port=$PROC_PORT → $LOG"
+            WEBOTS_TMPDIR="$WEBOTS_TMPDIR" python validation.py \
+                --webots-cmd "$WEBOTS_HOME/webots" \
+                --port "$PROC_PORT" \
+                --arch "$ARCH" \
+                --seed "$SEED" \
+                "$@" \
+                > "$LOG" 2>&1 &
+            PIDS+=($!)
+            ALL_PIDS+=($!)
+            RUN_INDEX=$((RUN_INDEX + 1))
+        done
+    done
 
-echo "Validation finished. Log: $LOG"
+    echo "  Waiting for ${#PIDS[@]} processes..."
+    for PID in "${PIDS[@]}"; do
+        wait "$PID" || FAILED=$((FAILED + 1))
+    done
+    echo "  Batch $BATCH_NUM done."
+done
+
+if [ "$FAILED" -gt 0 ]; then
+    echo "$FAILED run(s) failed — check logs/validation_<arch>_seed<N>.log for details."
+    exit 1
+fi
+echo "All validation runs finished successfully. Logs in logs/validation_<arch>_seed<N>.log"
